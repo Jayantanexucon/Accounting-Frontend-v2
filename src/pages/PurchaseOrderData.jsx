@@ -1,0 +1,791 @@
+import React, { useState, useEffect, useMemo } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
+import { getClientsApi } from "../apis/clientApi";
+import {
+  getPurchaseOrdersApi,
+  advancedSearchPurchaseOrdersApi,
+} from "../apis/purchaseOrderApi";
+import dayjs from "dayjs";
+import PurchaseOrderAdvancedSearch from "../components/PurchaseOrderAdvancedSearch";
+import AuditLogSidebar from "../components/AuditLogSidebar";
+import ClientDetailsModal from "../components/ClientDetailsModal";
+import { motion, AnimatePresence } from "framer-motion";
+
+import {
+  Search,
+  RefreshCw,
+  Plus,
+  Loader2,
+  User,
+  Banknote,
+  AlertCircle,
+  CheckCircle,
+  Filter,
+  Clock,
+  ShoppingCart,
+  Upload,
+  MapPin,
+  FileText,
+  Eye,
+  History,
+  X,
+  ChevronUp,
+  ChevronDown,
+  TrendingUp,
+  Calendar,
+  Hash,
+  Globe,
+} from "lucide-react";
+
+// ─────────────────────────────────────────────
+// Advanced Search Panel (inline, no external dep)
+// ─────────────────────────────────────────────
+const AdvancedSearchPanel = ({ isOpen, filters, onChange, onApply, onClear, isLoading }) => {
+  const [local, setLocal] = useState(filters || {});
+
+  useEffect(() => {
+    setLocal(filters || {});
+  }, [filters]);
+
+  const set = (key, val) => setLocal((p) => ({ ...p, [key]: val }));
+
+  const handleApply = () => onApply(local);
+  const handleClear = () => {
+    setLocal({});
+    onClear();
+  };
+
+  const inputCls =
+    "w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all placeholder-slate-400 text-slate-700";
+  const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1";
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.18 }}
+          className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-4"
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 bg-gradient-to-r from-slate-800 to-slate-700">
+              <div className="flex items-center gap-2">
+                <Filter size={15} className="text-blue-400" />
+                <span className="text-sm font-bold text-white tracking-wide">Advanced Filters</span>
+              </div>
+              <button onClick={onClear} className="text-slate-400 hover:text-white transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+              <div>
+                <label className={labelCls}>PO Number</label>
+                <input className={inputCls} placeholder="e.g. PO-001" value={local.poNumber || ""} onChange={(e) => set("poNumber", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Client Name</label>
+                <input className={inputCls} placeholder="Client name" value={local.clientName || ""} onChange={(e) => set("clientName", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Status</label>
+                <select className={inputCls} value={local.status || ""} onChange={(e) => set("status", e.target.value)}>
+                  <option value="">All Statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="open">Open</option>
+                  <option value="closed">Closed</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Currency</label>
+                <select className={inputCls} value={local.currency || ""} onChange={(e) => set("currency", e.target.value)}>
+                  <option value="">All Currencies</option>
+                  <option value="INR">INR</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                  <option value="GBP">GBP</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Date From</label>
+                <input type="date" className={inputCls} value={local.dateFrom || ""} onChange={(e) => set("dateFrom", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Date To</label>
+                <input type="date" className={inputCls} value={local.dateTo || ""} onChange={(e) => set("dateTo", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Min Amount</label>
+                <input type="number" className={inputCls} placeholder="0" value={local.minAmount || ""} onChange={(e) => set("minAmount", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Max Amount</label>
+                <input type="number" className={inputCls} placeholder="∞" value={local.maxAmount || ""} onChange={(e) => set("maxAmount", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Payment Terms</label>
+                <select className={inputCls} value={local.paymentTerms || ""} onChange={(e) => set("paymentTerms", e.target.value)}>
+                  <option value="">Any</option>
+                  <option value="net-15">Net 15</option>
+                  <option value="net-30">Net 30</option>
+                  <option value="net-45">Net 45</option>
+                  <option value="net-60">Net 60</option>
+                  <option value="immediate">Immediate</option>
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Country</label>
+                <input className={inputCls} placeholder="e.g. India" value={local.country || ""} onChange={(e) => set("country", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Tax / GST No.</label>
+                <input className={inputCls} placeholder="GST / PAN" value={local.taxNumber || ""} onChange={(e) => set("taxNumber", e.target.value)} />
+              </div>
+              <div>
+                <label className={labelCls}>Reference</label>
+                <input className={inputCls} placeholder="PO reference" value={local.reference || ""} onChange={(e) => set("reference", e.target.value)} />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button onClick={handleClear} className="text-xs font-bold text-slate-500 hover:text-red-500 transition-colors flex items-center gap-1.5">
+                <X size={13} /> Clear All
+              </button>
+              <button
+                onClick={handleApply}
+                disabled={isLoading}
+                className="px-5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-bold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all shadow-lg shadow-blue-500/20 flex items-center gap-2 disabled:opacity-60"
+              >
+                {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Filter size={13} />}
+                Apply Filters
+              </button>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
+
+const ActivityBadge = ({ lastCreated }) => {
+  if (!lastCreated) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-400">No POs</span>;
+  const days = dayjs().diff(lastCreated, "day");
+  if (days <= 30) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">● Active</span>;
+  if (days <= 90) return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">● Moderate</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500">● Inactive</span>;
+};
+
+const getOpenAmount = (po) =>
+  Math.max(
+    0,
+    Number(
+      po?.remainingInvoicableAmount ??
+        ((po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0)),
+    ),
+  );
+
+const TH = ({ label, sortKey, currentSort, onSort, icon: Icon }) => {
+  const active = currentSort.key === sortKey;
+  return (
+    <th
+      onClick={() => onSort(sortKey)}
+      className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-widest cursor-pointer select-none hover:text-slate-700 group whitespace-nowrap"
+    >
+      <span className="flex items-center gap-1.5">
+        {Icon && <Icon size={11} className={active ? "text-blue-500" : "text-slate-400"} />}
+        <span className={active ? "text-blue-600" : ""}>{label}</span>
+        <span className="ml-0.5 text-slate-300 group-hover:text-slate-400">
+          {active ? (currentSort.dir === "asc" ? <ChevronUp size={11} /> : <ChevronDown size={11} />) : <ChevronDown size={11} className="opacity-40" />}
+        </span>
+      </span>
+    </th>
+  );
+};
+
+const PurchaseOrderData = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+  const companyId = selectedCompany?._id;
+
+  const [clients, setClients] = useState([]);
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeFilters, setActiveFilters] = useState({});
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [loadingAdvanced, setLoadingAdvanced] = useState(false);
+  const [openLogs, setOpenLogs] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [sort, setSort] = useState({ key: "clientName", dir: "asc" });
+  const [page, setPage]         = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const openClientDetails = (clientId) => { setSelectedClientId(clientId); setModalOpen(true); };
+
+  const getFirstTaxId = (client) => {
+    const taxFields = [client.gstNumber, client.panNumber, client.vatNumber, client.einNumber, client.ssnNumber, client.companyNumber, client.nationalIdNumber, client.taxIdentificationNumber];
+    return taxFields.find(Boolean) || "N/A";
+  };
+  useEffect(() => {
+  const timer = setTimeout(() => {
+    setDebouncedSearchQuery(searchQuery);
+  }, 300); // 300 ms delay
+
+  return () => clearTimeout(timer);
+}, [searchQuery]);
+  const fetchAllData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const clientRes = await getClientsApi(user.company._id);
+      const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
+      setClients(clientsList.filter((c) => c.isActive !== false));
+
+      let poData;
+      if (Object.keys(activeFilters).length > 0) {
+        const res = await advancedSearchPurchaseOrdersApi({ ...activeFilters, limit: 1000 });
+        poData = res.data || [];
+      } else {
+        const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+        poData = res.data || [];
+      }
+      setPurchaseOrders(poData);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to fetch data");
+    } finally {
+      setLoading(false);
+      setLoadingAdvanced(false);
+    }
+  };
+
+  useEffect(() => { if (user?.company?._id) fetchAllData(); }, [user, activeFilters]);
+
+  const resolveClientId = (po, clientsList) => {
+    if (!po.client) return null;
+    let clientId = po.client._id;
+    let clientObj = clientId ? clientsList.find((c) => c._id === clientId) : null;
+    if (!clientObj && po.client.name) {
+      clientObj = clientsList.find((c) => c.clientName?.toLowerCase() === po.client.name.toLowerCase());
+      if (clientObj) clientId = clientObj._id;
+    }
+    return clientId || null;
+  };
+
+  const clientIdsWithPOs = useMemo(() => {
+    const ids = new Set();
+    purchaseOrders.forEach((po) => { const id = resolveClientId(po, clients); if (id) ids.add(id); });
+    return ids;
+  }, [clients, purchaseOrders]);
+
+  const clientStats = useMemo(() => {
+    const stats = {};
+    purchaseOrders.forEach((po) => {
+      const clientId = resolveClientId(po, clients);
+      if (!clientId) return;
+      if (!stats[clientId]) {
+        stats[clientId] = {
+          totalPOs: 0,
+          thisMonth: 0,
+          totalValue: 0,
+          openAmount: 0,
+          openPOs: 0,
+          latestPO: null,
+          lastCreated: null,
+        };
+      }
+      stats[clientId].totalPOs += 1;
+      stats[clientId].totalValue += po.totalAmount || 0;
+      stats[clientId].openAmount += getOpenAmount(po);
+      if (getOpenAmount(po) > 0) {
+        stats[clientId].openPOs += 1;
+      }
+      const createdAt = dayjs(po.createdAt);
+      if (createdAt.isSame(dayjs(), "month")) stats[clientId].thisMonth += 1;
+      if (!stats[clientId].lastCreated || createdAt.isAfter(stats[clientId].lastCreated)) {
+        stats[clientId].lastCreated = createdAt;
+        stats[clientId].latestPO = po.poNumber;
+      }
+    });
+    return stats;
+  }, [clients, purchaseOrders]);
+
+  const totalPOs = purchaseOrders.length;
+  const totalValue = purchaseOrders.reduce((s, po) => s + (po.totalAmount || 0), 0);
+  const pendingPOs = purchaseOrders.filter((po) => !["CLOSED", "FULLY_INVOICED"].includes(po.status)).length;
+  const completedPOs = purchaseOrders.filter((po) => po.status === "CLOSED").length;
+
+  const handleAdvancedSearch = (filters) => { setLoadingAdvanced(true); setActiveFilters(filters); setSearchQuery(""); setPage(1); };
+const handleClearSearch = () => {
+  setActiveFilters({});
+  setSearchQuery("");
+  setDebouncedSearchQuery("");
+  setPage(1);
+};
+  const handleSort = (key) => { setSort((p) => ({ key, dir: p.key === key && p.dir === "asc" ? "desc" : "asc" })); setPage(1); };
+  const activeFilterCount = Object.keys(activeFilters).filter((k) => activeFilters[k]).length;
+
+  const tableRows = useMemo(() => {
+    const hasFilter = searchQuery || activeFilterCount > 0;
+    let list = hasFilter ? clients.filter((c) => clientIdsWithPOs.has(c._id)) : clients;
+
+    if (debouncedSearchQuery) {
+    const q = debouncedSearchQuery.toLowerCase();
+    list = list.filter(
+      (c) =>
+        c.clientName?.toLowerCase().includes(q) ||
+        c.clientCode?.toLowerCase().includes(q) ||
+        getFirstTaxId(c).toLowerCase().includes(q) ||
+        c.clientCountry?.toLowerCase().includes(q)
+    );
+  }
+
+    list = [...list].sort((a, b) => {
+      let va, vb;
+      const sa = clientStats[a._id] || {};
+      const sb = clientStats[b._id] || {};
+      switch (sort.key) {
+        case "clientName": va = a.clientName || ""; vb = b.clientName || ""; break;
+        case "totalPOs": va = sa.totalPOs || 0; vb = sb.totalPOs || 0; break;
+        case "totalValue": va = sa.totalValue || 0; vb = sb.totalValue || 0; break;
+        case "thisMonth": va = sa.thisMonth || 0; vb = sb.thisMonth || 0; break;
+        case "lastCreated": va = sa.lastCreated ? sa.lastCreated.valueOf() : 0; vb = sb.lastCreated ? sb.lastCreated.valueOf() : 0; break;
+        case "openAmount": va = sa.openAmount || 0; vb = sb.openAmount || 0; break;
+        case "country": va = a.clientCountry || ""; vb = b.clientCountry || ""; break;
+        default: va = ""; vb = "";
+      }
+      if (typeof va === "string") return sort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      return sort.dir === "asc" ? va - vb : vb - va;
+    });
+
+    return list;
+  }, [clients, clientIdsWithPOs, clientStats, debouncedSearchQuery, activeFilters, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / rowsPerPage));
+  const safeP      = Math.min(page, totalPages);
+  const pagedRows  = tableRows.slice((safeP - 1) * rowsPerPage, safeP * rowsPerPage);
+
+  if (loading && !loadingAdvanced) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+          <p className="text-sm text-slate-500 font-medium">Loading purchase orders…</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans pb-16">
+
+      {/* ── Header ── */}
+      <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-4 gap-4">
+            <div className="min-w-0">
+              <h1 className="text-xl font-extrabold text-slate-900 tracking-tight truncate">Purchase Orders</h1>
+              <p className="text-[11px] text-slate-400 font-medium mt-0.5 hidden sm:block">
+                Client-level overview · {clients.length} clients · {totalPOs} POs
+              </p>
+            </div>
+
+            {/* Search */}
+            <div className="relative flex-1 max-w-sm hidden md:block">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search client, code, GST, country…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-9 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* Buttons */}
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => setShowAdvancedSearch((v) => !v)}
+                className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg border transition-all
+                  ${showAdvancedSearch || activeFilterCount > 0
+                    ? "bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-500/20"
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
+              >
+                <Filter size={13} />
+                <span className="hidden sm:inline">Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-red-500 text-white text-[9px] font-black flex items-center justify-center shadow">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+              <button onClick={() => setOpenLogs(true)} className="p-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all" title="Audit Trail">
+                <History size={15} />
+              </button>
+              <button onClick={fetchAllData} className="p-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all" title="Refresh">
+                <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+              </button>
+              <Link to="/purchase-order/bulk-po-upload" className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-xs font-bold">
+                <Upload size={13} className="text-emerald-500" />
+                Bulk
+              </Link>
+              <Link to="/purchase-order" className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 transition-all">
+                <Plus size={14} />
+                New PO
+              </Link>
+            </div>
+          </div>
+
+          {/* Mobile search */}
+          <div className="pb-3 md:hidden">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+              <input type="text" placeholder="Search client, GST…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Advanced Search Panel ── */}
+      <div className="bg-white border-b border-slate-100">
+        <AdvancedSearchPanel
+          isOpen={showAdvancedSearch}
+          filters={activeFilters}
+          onChange={setActiveFilters}
+          onApply={handleAdvancedSearch}
+          onClear={() => { setShowAdvancedSearch(false); handleClearSearch(); }}
+          isLoading={loadingAdvanced}
+        />
+      </div>
+
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+        {/* ── Stat Cards ── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {[
+            {
+              label: "Total POs", value: totalPOs, icon: ShoppingCart,
+              bg: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)",
+              blob1: "#93c5fd", blob2: "#bfdbfe", shadow: "shadow-blue-500/25",
+              streak: true, ring: false,
+            },
+            {
+              label: "Pending", value: pendingPOs, icon: Clock,
+              bg: "linear-gradient(135deg,#92400e 0%,#d97706 55%,#fbbf24 100%)",
+              blob1: "#fde68a", blob2: "#fef3c7", shadow: "shadow-amber-500/25",
+              streak: false, ring: true,
+            },
+            {
+              label: "Total Value", value: "₹" + totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 }), icon: TrendingUp,
+              bg: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
+              blob1: "#6ee7b7", blob2: "#a7f3d0", shadow: "shadow-emerald-500/25",
+              streak: true, ring: false,
+            },
+            {
+              label: "Completed", value: completedPOs, icon: CheckCircle,
+              bg: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)",
+              blob1: "#c4b5fd", blob2: "#ddd6fe", shadow: "shadow-violet-500/25",
+              streak: false, ring: true,
+            },
+          ].map((card, idx) => (
+            <motion.div
+              key={idx}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.07, type: "spring", stiffness: 200, damping: 20 }}
+              className={`relative overflow-hidden rounded-2xl p-5 shadow-xl ${card.shadow} group cursor-default`}
+              style={{ background: card.bg }}
+            >
+              {/* large oval blob top-right */}
+              <div className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
+                style={{ background: `radial-gradient(ellipse,${card.blob1},transparent)` }} />
+              {/* small oval blob bottom-left */}
+              <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-20 blur-xl"
+                style={{ background: `radial-gradient(ellipse,${card.blob2},transparent)` }} />
+              {/* diagonal streak */}
+              {card.streak && <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />}
+              {/* concentric rings */}
+              {card.ring && <>
+                <div className="absolute top-2 right-2 w-14 h-14 rounded-full border-2 border-white/15" />
+                <div className="absolute top-5 right-5 w-7 h-7 rounded-full border border-white/10" />
+              </>}
+              <div className="relative z-10 flex items-start justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-white/60">{card.label}</p>
+                  <p className="text-3xl font-black text-white leading-none">{card.value}</p>
+                </div>
+                <div className="p-2.5 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                  <card.icon size={20} className="text-white" />
+                </div>
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+            </motion.div>
+          ))}
+        </div>
+
+        {/* ── Active Filter Pills ── */}
+        {activeFilterCount > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active filters:</span>
+            {Object.entries(activeFilters).filter(([, v]) => v).map(([k, v]) => (
+              <span key={k} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full border border-blue-100">
+                {k}: {v}
+                <button onClick={() => { const f = { ...activeFilters }; delete f[k]; setActiveFilters(f); }} className="ml-0.5 hover:text-blue-900">
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+            <button onClick={handleClearSearch} className="text-[10px] font-bold text-red-500 hover:text-red-700 flex items-center gap-1">
+              <X size={10} /> Clear all
+            </button>
+          </div>
+        )}
+
+        {/* ── Table ── */}
+        {error ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+            <AlertCircle className="mx-auto mb-2 h-8 w-8 text-red-400" />
+            <p className="text-sm text-red-600 mb-3">{error}</p>
+            <button onClick={fetchAllData} className="rounded-lg bg-red-100 px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-200">Try Again</button>
+          </div>
+        ) : (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/50">
+              <p className="text-xs font-bold text-slate-700">
+                Clients
+                <span className="ml-2 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full text-[10px] font-black">{tableRows.length}</span>
+              </p>
+              {(searchQuery || activeFilterCount > 0) && (
+                <button onClick={handleClearSearch} className="text-[10px] font-bold text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
+                  <X size={10} /> Clear filters
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-slate-100 bg-slate-50/80">
+                    <TH label="Client" sortKey="clientName" currentSort={sort} onSort={handleSort} icon={User} />
+                    <TH label="Tax / GST" sortKey="taxId" currentSort={sort} onSort={handleSort} icon={Hash} />
+                    <TH label="Country" sortKey="country" currentSort={sort} onSort={handleSort} icon={Globe} />
+                    <TH label="Total POs" sortKey="totalPOs" currentSort={sort} onSort={handleSort} icon={ShoppingCart} />
+                    <TH label="This Month" sortKey="thisMonth" currentSort={sort} onSort={handleSort} icon={Calendar} />
+                    <TH label="Total Value" sortKey="totalValue" currentSort={sort} onSort={handleSort} icon={Banknote} />
+                    <TH label="Latest PO" sortKey="latestPO" currentSort={sort} onSort={handleSort} icon={FileText} />
+                    <TH label="Last Created" sortKey="lastCreated" currentSort={sort} onSort={handleSort} icon={Clock} />
+                    <TH label="Open Amount" sortKey="openAmount" currentSort={sort} onSort={handleSort} icon={AlertCircle} />
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-widest">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {tableRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={10} className="py-16 text-center">
+                        <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
+                        <p className="text-sm font-semibold text-slate-400">No clients found</p>
+                        <p className="text-xs text-slate-300 mt-1">Try adjusting your filters or search query</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    pagedRows.map((client, idx) => {
+                      const stats = clientStats[client._id] || {
+                        totalPOs: 0,
+                        thisMonth: 0,
+                        totalValue: 0,
+                        openAmount: 0,
+                        openPOs: 0,
+                        latestPO: null,
+                        lastCreated: null,
+                      };
+                      const hasPOs = clientIdsWithPOs.has(client._id);
+                      return (
+                        <motion.tr
+                          key={client._id}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: idx * 0.02 }}
+                          onClick={() => navigate(`/purchaseorder-data/client/${client._id}`)}
+                          className="hover:bg-blue-50/40 cursor-pointer transition-colors group"
+                        >
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-[11px] shrink-0 shadow-sm shadow-blue-500/20">
+                                {(client.clientName || "?")[0].toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-bold text-slate-800 truncate max-w-[140px] group-hover:text-blue-600 transition-colors">
+                                  {client.clientName || "Unnamed"}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-medium">#{client.clientCode || "—"}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{getFirstTaxId(client)}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-1 text-slate-500">
+                              <MapPin size={11} className="shrink-0" />
+                              <span className="truncate max-w-[90px]">{client.clientCountry || "—"}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`font-black text-sm ${hasPOs ? "text-slate-800" : "text-slate-300"}`}>{stats.totalPOs || 0}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`font-bold text-sm ${stats.thisMonth > 0 ? "text-blue-600" : "text-slate-300"}`}>{stats.thisMonth || 0}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`font-bold ${stats.totalValue > 0 ? "text-emerald-700" : "text-slate-300"}`}>
+                              {stats.totalValue > 0 ? "₹" + stats.totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 }) : "—"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="text-blue-600 font-bold truncate max-w-[100px] block">{stats.latestPO || "—"}</span>
+                          </td>
+                          <td className="px-4 py-3.5 text-slate-500 whitespace-nowrap">
+                            {stats.lastCreated ? dayjs(stats.lastCreated).format("DD MMM YYYY") : "—"}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="min-w-[110px]">
+                              <p className={`font-bold ${stats.openAmount > 0 ? "text-red-600" : "text-emerald-600"}`}>
+                                ₹{stats.openAmount.toLocaleString("en-IN", {
+                                  maximumFractionDigits: 0,
+                                })}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-medium">
+                                {stats.openPOs || 0} open PO{stats.openPOs === 1 ? "" : "s"}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              <button onClick={() => openClientDetails(client._id)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all" title="View Client">
+                                <Eye size={14} />
+                              </button>
+                              <button onClick={() => navigate(`/purchaseorder-data/client/${client._id}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all" title="View POs">
+                                <FileText size={14} />
+                              </button>
+                              <Link to={`/purchase-order?clientId=${client._id}`} className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-sm shadow-blue-500/20" title="New PO">
+                                <Plus size={14} />
+                              </Link>
+                            </div>
+                          </td>
+                        </motion.tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {tableRows.length > 0 && (
+              <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                {/* Left: count */}
+                <p className="text-[10px] text-slate-400 shrink-0">
+                  Showing{" "}
+                  <span className="font-bold text-slate-600">{(safeP - 1) * rowsPerPage + 1}</span>
+                  {" "}–{" "}
+                  <span className="font-bold text-slate-600">{Math.min(safeP * rowsPerPage, tableRows.length)}</span>
+                  {" "}of{" "}
+                  <span className="font-bold text-slate-600">{tableRows.length}</span> clients
+                </p>
+
+                {/* Centre: page buttons */}
+                <div className="flex items-center gap-1">
+                  {/* Prev */}
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={safeP === 1}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronUp size={13} className="rotate-[-90deg]" />
+                  </button>
+
+                  {/* Page numbers */}
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - safeP) <= 1)
+                    .reduce((acc, p, i, arr) => {
+                      if (i > 0 && p - arr[i - 1] > 1) acc.push("…");
+                      acc.push(p);
+                      return acc;
+                    }, [])
+                    .map((p, i) =>
+                      p === "…" ? (
+                        <span key={`ellipsis-${i}`} className="px-1.5 text-[11px] text-slate-400">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => setPage(p)}
+                          className={`min-w-[30px] h-[30px] rounded-lg text-[11px] font-bold transition-all border ${
+                            safeP === p
+                              ? "text-white border-blue-600 shadow-sm shadow-blue-500/20"
+                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                          }`}
+                          style={safeP === p ? { background: "linear-gradient(135deg,#1e3a8a,#2563eb)" } : {}}
+                        >
+                          {p}
+                        </button>
+                      )
+                    )}
+
+                  {/* Next */}
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safeP === totalPages}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                  >
+                    <ChevronDown size={13} className="rotate-[-90deg]" />
+                  </button>
+                </div>
+
+                {/* Right: rows per page */}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rows</span>
+                  <select
+                    value={rowsPerPage}
+                    onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(1); }}
+                    className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-[11px] font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all"
+                  >
+                    {[5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <AuditLogSidebar
+        isOpen={openLogs}
+        onClose={() => setOpenLogs(false)}
+        companyId={user?.company?._id}
+        modules={["PURCHASE_ORDER"]}
+        title="Purchase Order Audit Trail"
+        subtitle="Tracking purchase order creation, updates, approvals, and status changes"
+      />
+      <ClientDetailsModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        clientId={selectedClientId}
+      />
+    </div>
+  );
+};
+
+export default PurchaseOrderData;

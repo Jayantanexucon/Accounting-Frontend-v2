@@ -1,0 +1,39 @@
+[
+  {
+    "id": 1,
+    "name": "Cash",
+    "code": "101",
+    "type": "Asset",
+    "openingBalance": 50000,
+    "transactions": [
+      {
+        "date": "2024-11-01",
+        "particular": "Opening Balance",
+        "debit": 50000,
+        "credit": 0,
+        "balance": 50000
+      },
+      {
+        "date": "2024-11-05",
+        "particular": "Sales Receipt",
+        "debit": 15000,
+        "credit": 0,
+        "balance": 65000
+      },
+      {
+        "date": "2024-11-08",
+        "particular": "Office Supplies",
+        "debit": 0,
+        "credit": 3500,
+        "balance": 61500
+      },
+      {
+        "date": "2024-11-12",
+        "particular": "Service Revenue",
+        "debit": 8000,
+        "credit": 0,
+        "balance": 69500
+      }
+    ]
+  }
+]
