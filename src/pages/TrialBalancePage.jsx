@@ -12,6 +12,13 @@ import LedgerDetailSidebar from "../components/LedgerDetailSidebar";
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 
+const formatLocalDateInput = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 export default function TrialBalancePage() {
   // const [accountData, setAccountData] = useState([]);
   // const [loading, setLoading] = useState(false);
@@ -102,74 +109,63 @@ export default function TrialBalancePage() {
     { value: "3", label: "March (FY End)" },
   ];
 
-  // Get financial year info for selected year
-  const getFYInfo = () => {
-    return {
-      startYear: selectedYear - 1,
-      endYear: selectedYear,
-      label: `FY ${selectedYear - 1}-${String(selectedYear).slice(2)}`,
-      displayLabel: `Financial Year ${selectedYear - 1}-${selectedYear}`,
-    };
-  };
+  const fyInfo = useMemo(() => ({
+    startYear: selectedYear - 1,
+    endYear: selectedYear,
+    label: `FY ${selectedYear - 1}-${String(selectedYear).slice(2)}`,
+    displayLabel: `Financial Year ${selectedYear - 1}-${selectedYear}`,
+  }), [selectedYear]);
 
   // Helper function to get financial year label
   const getFinancialYearLabel = () => {
-    const fy = getFYInfo();
     if (periodType === "yearly") {
-      return fy.label;
+      return fyInfo.label;
     } else if (periodType === "quarterly") {
       const quarterLabel = quarters.find((q) => q.value === selectedQuarter)?.label;
-      return `${quarterLabel}, ${fy.label}`;
+      return `${quarterLabel}, ${fyInfo.label}`;
     } else {
       const monthLabel = months.find((m) => m.value === selectedMonth)?.label;
-      return `${monthLabel}, ${fy.label}`;
+      return `${monthLabel}, ${fyInfo.label}`;
     }
   };
 
   // Helper function to get period display label
   const getPeriodLabel = () => {
-    const fy = getFYInfo();
-
     if (periodType === "yearly") {
-      return `As of March 31, ${fy.endYear}`;
+      return `As of March 31, ${fyInfo.endYear}`;
     } else if (periodType === "quarterly") {
       const quarterEndDates = {
-        Q1: `June 30, ${fy.startYear}`,
-        Q2: `September 30, ${fy.startYear}`,
-        Q3: `December 31, ${fy.startYear}`,
-        Q4: `March 31, ${fy.endYear}`,
+        Q1: `June 30, ${fyInfo.startYear}`,
+        Q2: `September 30, ${fyInfo.startYear}`,
+        Q3: `December 31, ${fyInfo.startYear}`,
+        Q4: `March 31, ${fyInfo.endYear}`,
       };
       return `As of ${quarterEndDates[selectedQuarter]}`;
     } else {
       const monthLabel = months.find((m) => m.value === selectedMonth)?.label;
       const monthNum = parseInt(selectedMonth);
       // Determine which year the month belongs to in the financial year
-      const yearForMonth = monthNum >= 4 ? fy.startYear : fy.endYear;
+      const yearForMonth = monthNum >= 4 ? fyInfo.startYear : fyInfo.endYear;
       return `As of ${monthLabel.split(" (")[0]} ${yearForMonth}`;
     }
   };
-  // Function to get academic year date range for filtering
-  const getAcademicYearDateRange = useCallback(() => {
-    const fy = getFYInfo();
-
+  const academicYearDateRange = useMemo(() => {
     // For financial year: April 1 of startYear to March 31 of endYear
-    const fromDate = new Date(fy.startYear, 3, 1); // April 1 (month is 0-based, so 3 = April)
-    const toDate = new Date(fy.endYear, 2, 31); // March 31 (month is 0-based, so 2 = March)
+    const fromDate = new Date(fyInfo.startYear, 3, 1); // April 1 (month is 0-based, so 3 = April)
+    const toDate = new Date(fyInfo.endYear, 2, 31); // March 31 (month is 0-based, so 2 = March)
 
     return {
       from: fromDate,
       to: toDate,
     };
-  }, [selectedYear]);
+  }, [fyInfo]);
 
   // Create advanced filters for academic year
   const academicYearFilters = useMemo(() => {
-    const dateRange = getAcademicYearDateRange();
-
     return {
       dateRange: {
-        from: dateRange.from.toISOString().split("T")[0], // YYYY-MM-DD format
-        to: dateRange.to.toISOString().split("T")[0],
+        from: formatLocalDateInput(academicYearDateRange.from),
+        to: formatLocalDateInput(academicYearDateRange.to),
       },
       amountRange: { min: "", max: "" },
       amountType: "both",
@@ -177,7 +173,7 @@ export default function TrialBalancePage() {
       journalIds: [],
       partyName: "",
     };
-  }, [getAcademicYearDateRange]);
+  }, [academicYearDateRange]);
 
   // Fetch all accounts for selected period
   // useEffect(() => {
@@ -370,7 +366,7 @@ export default function TrialBalancePage() {
     rows.push(["TRIAL BALANCE STATEMENT"]);
     rows.push([`Company: ${user?.company?.name || ""}`]);
     rows.push([getPeriodLabel()]);
-    rows.push([`Financial Year: ${getFYInfo().displayLabel}`]);
+    rows.push([`Financial Year: ${fyInfo.displayLabel}`]);
     rows.push([`Generated On: ${new Date().toLocaleDateString()}`]);
     rows.push([]);
 
@@ -390,7 +386,7 @@ export default function TrialBalancePage() {
 
     XLSX.utils.book_append_sheet(wb, ws, "Trial Balance");
 
-    XLSX.writeFile(wb, `Trial_Balance_${getFYInfo().label}.xlsx`);
+    XLSX.writeFile(wb, `Trial_Balance_${fyInfo.label}.xlsx`);
 
     toast.success("Trial Balance exported successfully");
     setShowDownloadMenu(false);
@@ -408,7 +404,7 @@ export default function TrialBalancePage() {
     rows.push(["TRIAL BALANCE STATEMENT"]);
     rows.push([`Company: ${user?.company?.name || ""}`]);
     rows.push([getPeriodLabel()]);
-    rows.push([`Financial Year`, getFYInfo().displayLabel]);
+    rows.push([`Financial Year`, fyInfo.displayLabel]);
     rows.push([]);
 
     rows.push(["Account Code", "Account Name", "Group", "Debit", "Credit"]);
@@ -426,7 +422,7 @@ export default function TrialBalancePage() {
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.download = `Trial_Balance_${getFYInfo().label}.csv`;
+    link.download = `Trial_Balance_${fyInfo.label}.csv`;
     link.click();
 
     toast.success("Trial Balance CSV downloaded");
@@ -745,7 +741,7 @@ export default function TrialBalancePage() {
                     <div className="flex items-center gap-3">
                       <div className="text-right">
                         <p className="text-[10px] text-slate-400">Difference</p>
-                        <p className={`text-sm font-black ${isBalanced ? "text-emerald-600" : "text-amber-600"}`}>₹{formatCurrency(Math.abs(totals.debit - totals.credit))}</p>
+                        <p className={`text-sm font-black ${isBalanced ? "text-emerald-600" : "text-amber-600"}`}>{formatCurrency(Math.abs(totals.debit - totals.credit))}</p>
                       </div>
                       <span className={`px-3 py-1.5 rounded-xl text-[10px] font-black text-white ${isBalanced ? "" : ""}`}
                         style={{ background: isBalanced ? "linear-gradient(135deg,#059669,#34d399)" : "linear-gradient(135deg,#d97706,#fbbf24)" }}>

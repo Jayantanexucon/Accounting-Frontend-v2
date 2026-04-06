@@ -45,6 +45,11 @@ export const updateCompanyApi = async (companyId, payload) => {
   return data;
 };
 
+export const getAllCompaniesApi = async () => {
+  const { data } = await API.get("/user/getAllCompanies");
+  return data;
+};
+
 export const getCompanyByIdApi = async (companyId) => {
   const { data } = await API.get(`user/getcompany/${companyId}`);
   return data;

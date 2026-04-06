@@ -126,6 +126,7 @@ const DayBooks = () => {
       result = result.filter((journal) => {
         if (journal.narration?.toLowerCase().includes(query)) return true;
         if (journal.referenceNumber?.toLowerCase().includes(query)) return true;
+        if (journal.externalDocNo?.toLowerCase().includes(query)) return true;
         if (journal.voucherType?.toLowerCase().includes(query)) return true;
         if (journal.number?.toLowerCase().includes(query)) return true;
         if (journal.lines?.some((line) => line.account?.name?.toLowerCase().includes(query))) return true;
@@ -166,7 +167,8 @@ const DayBooks = () => {
 
     if (filters.referenceNumber) {
       result = result.filter((journal) =>
-        journal.referenceNumber?.toLowerCase().includes(filters.referenceNumber.toLowerCase())
+        journal.referenceNumber?.toLowerCase().includes(filters.referenceNumber.toLowerCase()) ||
+        journal.externalDocNo?.toLowerCase().includes(filters.referenceNumber.toLowerCase())
       );
     }
 
@@ -850,7 +852,7 @@ const DayBooks = () => {
             type="text"
             value={searchQuery}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search by narration, reference, account, voucher type..."
+            placeholder="Search by narration, document ref, journal ref, account, voucher type..."
             className="w-full pl-10 pr-4 py-2.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all font-medium placeholder-slate-400"
           />
           {searchQuery && (

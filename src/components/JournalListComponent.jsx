@@ -106,16 +106,10 @@ const handleDeleteClick = async (journal, e) => {
       onEditJournal(journal);
       onClose();
     } else {
-      // Normal user needs approval
-      const canEdit = ApprovalManager.canUserEditJournal(user?.company?._id, journal._id, user?._id);
       const hasPendingRequest = ApprovalManager.hasUserRequestedEdit(user?.company?._id, journal._id, user?._id);
       const isJournalLocked = ApprovalManager.isJournalLockedForEdit(user?.company?._id, journal._id);
 
-      if (canEdit) {
-        // User has approval, can edit
-        onEditJournal(journal);
-        onClose();
-      } else if (hasPendingRequest) {
+      if (hasPendingRequest) {
         // User already has a pending request
         toast.info("Your edit request is pending admin approval.");
       } else if (isJournalLocked) {
@@ -124,15 +118,8 @@ const handleDeleteClick = async (journal, e) => {
         const otherUser = pendingRequests[0]?.requestedBy?.name || "another user";
         toast.warning(`This journal has a pending edit request from ${otherUser}. Please wait.`);
       } else {
-        // Request approval
-        await ApprovalManager.addEditApproval(user?.company?._id, journal);
-        toast.success("Edit approval requested! Wait for admin approval.");
-        await refreshApprovals();
-        
-        // Refresh to show updated status
-        const controller = new AbortController();
-        fetchJournals(controller.signal);
-        return () => controller.abort();
+        onEditJournal(journal);
+        onClose();
       }
     }
   };
@@ -148,18 +135,10 @@ const handleDeleteClick = async (journal, e) => {
       };
     }
 
-    const canEdit = ApprovalManager.canUserEditJournal(user?.company?._id, journal._id, user?._id);
     const hasPendingRequest = ApprovalManager.hasUserRequestedEdit(user?.company?._id, journal._id, user?._id);
     const isJournalLocked = ApprovalManager.isJournalLockedForEdit(user?.company?._id, journal._id);
 
-    if (canEdit) {
-      return {
-        text: "Edit ✓",
-        enabled: true,
-        className: "bg-green-100 text-green-700 hover:bg-green-200",
-        tooltip: "Edit journal (Approved)"
-      };
-    } else if (hasPendingRequest) {
+    if (hasPendingRequest) {
       return {
         text: "Pending...",
         enabled: false,
@@ -177,10 +156,10 @@ const handleDeleteClick = async (journal, e) => {
       };
     } else {
       return {
-        text: "Request Edit",
+        text: "Edit & Request",
         enabled: true,
-        className: "bg-orange-100 text-orange-700 hover:bg-orange-200",
-        tooltip: "Request edit approval from admin"
+        className: "bg-blue-100 text-blue-700 hover:bg-blue-200",
+        tooltip: "Edit journal and submit it for admin approval"
       };
     }
   };

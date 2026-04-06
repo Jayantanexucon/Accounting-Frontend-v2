@@ -37,7 +37,7 @@ const TABLE_COLS = [
   { key: "name",           label: "Account Name" },
   { key: "groupName",      label: "Group"        },
   { key: "balanceType",    label: "Balance Type" },
-  { key: "openingBalance", label: "Opening Bal." },
+  { key: "closingBalance", label: "Current Bal." },
 ];
 
 /* ══════════════════════════════════════════════════════════
@@ -56,7 +56,7 @@ export default function LedgerPage() {
   const [selectedAccount, setSelectedAccount]   = useState(null);
   const [accountTransactions, setAccountTransactions] = useState({});
   const [openLogs, setOpenLogs]                 = useState(false);
-  const [openModel, setOpenModal]               = useState({ addLedger: false, advancedSearch: false });
+  const [openModel, setOpenModal]               = useState({ addLedger: false, editLedger: false, advancedSearch: false });
   const [advancedFilters, setAdvancedFilters]   = useState({
     dateRange: { from: null, to: null },
     amountRange: { min: "", max: "" },
@@ -205,6 +205,11 @@ export default function LedgerPage() {
     });
     if (selectedAccount?._id === updated._id) setSelectedAccount(updated);
   }, [selectedAccount]);
+
+  const openLedgerEditModal = useCallback((account) => {
+    setSelectedAccount(account);
+    setOpenModal((prev) => ({ ...prev, editLedger: true }));
+  }, []);
 
   /* ── filter helpers ────────────────────────────────── */
   const handleAdvancedFilterChange = useCallback((f) => {
@@ -532,11 +537,11 @@ export default function LedgerPage() {
                             </span>
                           </td>
 
-                          {/* Opening Balance */}
+                          {/* Current Balance */}
                           <td className="px-5 py-3.5 whitespace-nowrap">
                             <span className="font-mono text-[11px] font-bold text-slate-700">
-                              {account.openingBalance != null
-                                ? `₹${Number(account.openingBalance).toLocaleString("en-IN")}`
+                              {account.closingBalance != null
+                                ? `₹${Number(account.closingBalance).toLocaleString("en-IN")} ${account.closingType === "credit" ? "Cr" : "Dr"}`
                                 : "—"}
                             </span>
                           </td>
@@ -688,6 +693,7 @@ export default function LedgerPage() {
             onClose={() => setSelectedAccount(null)}
             onUpdate={handleAccountUpdate}
             advancedFilters={advancedFilters}
+            onEditRequested={openLedgerEditModal}
           />
         )}
       </AnimatePresence>
@@ -700,6 +706,17 @@ export default function LedgerPage() {
           title="Add Ledger"
           subtitle="Ledger accounts can be added here or created manually from journal entries"
           updateAccount={handleAccountUpdate}
+        />
+      )}
+
+      {openModel.editLedger && selectedAccount && (
+        <ManageLedgerModal
+          open={openModel.editLedger}
+          onClose={() => toggleModal("editLedger")}
+          title="Edit Ledger"
+          subtitle="Update ledger information and group assignment"
+          updateAccount={handleAccountUpdate}
+          ledgerToEdit={selectedAccount}
         />
       )}
 

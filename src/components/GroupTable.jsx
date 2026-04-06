@@ -51,8 +51,3 @@ export default function GroupTable({ groups, onEdit, onDelete }) {
     </div>
   );
 }
-
-
-
-
-

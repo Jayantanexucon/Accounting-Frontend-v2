@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import GroupForm from "../components/GroupForm";
 import {
   Plus,
@@ -12,6 +12,7 @@ import {
   X,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { API } from "../apis/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -52,9 +53,9 @@ const SortIcon = ({ field, sort }) =>
 
 export default function GroupPage() {
   const { user } = useAuth();
+  const companyId = user?.company?._id;
 
   const [groups, setGroups] = useState([]);
-  const [filteredGroups, setFilteredGroups] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
@@ -63,6 +64,7 @@ export default function GroupPage() {
   const [openLogs, setOpenLogs] = useState(false);
   const [sort, setSort] = useState({ key: "name", dir: "asc" });
   const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [expandedGroupId, setExpandedGroupId] = useState(null);
 
   useEffect(() => {
     if (successMsg) {
@@ -77,16 +79,15 @@ export default function GroupPage() {
     }
   }, [errorMsg]);
 
-  const loadGroups = async () => {
-    if (!user?.company?._id) return;
+  const loadGroups = useCallback(async () => {
+    if (!companyId) return;
     try {
-      const res = await API.get(`/group/${user.company._id}`);
+      const res = await API.get(`/group/${companyId}`);
       setGroups(res.data.data);
-      setFilteredGroups(res.data.data);
     } catch (err) {
       setErrorMsg(err?.response?.data?.message || "Failed to load groups");
     }
-  };
+  }, [companyId]);
 
   const handleCreate = async (data) => {
     try {
@@ -128,20 +129,24 @@ export default function GroupPage() {
     }
   };
 
-  useEffect(() => {
+  const filteredGroups = useMemo(() => {
     const q = searchTerm.toLowerCase();
-    setFilteredGroups(
-      groups.filter(
-        (g) =>
-          g.name?.toLowerCase().includes(q) ||
-          g.balanceType?.toLowerCase().includes(q)
-      )
+    return groups.filter(
+      (g) =>
+        g.name?.toLowerCase().includes(q) ||
+        g.balanceType?.toLowerCase().includes(q)
     );
-  }, [searchTerm, groups]);
+  }, [groups, searchTerm]);
 
   useEffect(() => {
-    if (user?.company?._id) loadGroups();
-  }, [user]);
+    if (!companyId) return;
+
+    const run = async () => {
+      await loadGroups();
+    };
+
+    run();
+  }, [companyId, loadGroups]);
 
   const toggleSort = (key) =>
     setSort((p) => ({
@@ -157,6 +162,9 @@ export default function GroupPage() {
 
   const totalGroups = groups.length;
   const uniqueBalanceTypes = new Set(groups.map((g) => g.balanceType)).size;
+
+  const toggleExpandedGroup = (groupId) =>
+    setExpandedGroupId((prev) => (prev === groupId ? null : groupId));
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -447,81 +455,150 @@ export default function GroupPage() {
                 <tbody className="divide-y divide-slate-100">
                   {sorted.map((g, i) => {
                     const bc = getBC(g.balanceType);
+                    const isExpanded = expandedGroupId === g._id;
+
                     return (
-                      <motion.tr
-                        key={g._id}
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: i * 0.025 }}
-                        className={`transition-colors ${bc.row} group`}
-                      >
-                        {/* Name */}
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-3">
-                            <div
-                              className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-sm ${bc.dot}`}
-                            />
-                            <div>
-                              <p className="font-bold text-slate-800 group-hover:text-indigo-700 transition-colors">
-                                {g.name || "—"}
-                              </p>
-                              {g.code && (
-                                <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                                  #{g.code}
+                      <Fragment key={g._id}>
+                        <motion.tr
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: i * 0.025 }}
+                          className={`transition-colors ${bc.row} group cursor-pointer`}
+                          onClick={() => toggleExpandedGroup(g._id)}
+                        >
+                          {/* Name */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-3">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleExpandedGroup(g._id);
+                                }}
+                                className="rounded-md border border-slate-200 bg-white p-1 text-slate-500 hover:border-indigo-200 hover:text-indigo-600 transition-colors"
+                                title={isExpanded ? "Collapse group details" : "Expand group details"}
+                              >
+                                {isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                              </button>
+                              <div
+                                className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-sm ${bc.dot}`}
+                              />
+                              <div>
+                                <p className="font-bold text-slate-800 group-hover:text-indigo-700 transition-colors">
+                                  {g.name || "—"}
                                 </p>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {g.code && (
+                                    <p className="text-[10px] text-slate-400 font-mono">
+                                      #{g.code}
+                                    </p>
+                                  )}
+                                  {g.nature && (
+                                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                                      {g.nature}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Balance Type */}
+                          <td className="px-5 py-4">
+                            <span
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black border uppercase tracking-wider ${bc.pill}`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${bc.dot}`}
+                              />
+                              {g.balanceType || "—"}
+                            </span>
+                          </td>
+
+                          {/* Description */}
+                          <td className="px-5 py-4">
+                            <p className="text-slate-500 truncate max-w-[260px]">
+                              {g.noteNo || (
+                                <span className="text-slate-300 italic">
+                                  Click to view mapping details
+                                </span>
+                              )}
+                            </p>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-5 py-4">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {checkAuthorization(user, "GROUPS", "EDIT") && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditData(g);
+                                    setShowForm(true);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg hover:bg-indigo-100 transition-all"
+                                >
+                                  <Pencil size={12} /> Edit
+                                </button>
+                              )}
+                              {checkAuthorization(user, "GROUPS", "DELETE") && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setDeleteConfirm(g._id);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-red-500 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 transition-all"
+                                >
+                                  <Trash2 size={12} /> Delete
+                                </button>
                               )}
                             </div>
-                          </div>
-                        </td>
+                          </td>
+                        </motion.tr>
 
-                        {/* Balance Type */}
-                        <td className="px-5 py-4">
-                          <span
-                            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black border uppercase tracking-wider ${bc.pill}`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${bc.dot}`}
-                            />
-                            {g.balanceType || "—"}
-                          </span>
-                        </td>
-
-                        {/* Description */}
-                        <td className="px-5 py-4">
-                          <p className="text-slate-500 truncate max-w-[260px]">
-                            {g.description || (
-                              <span className="text-slate-300 italic">
-                                No description
-                              </span>
-                            )}
-                          </p>
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-5 py-4">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {checkAuthorization(user, "GROUPS", "EDIT") && (
-                              <button
-                                onClick={() => {
-                                  setEditData(g);
-                                  setShowForm(true);
-                                }}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg hover:bg-indigo-100 transition-all"
-                              >
-                                <Pencil size={12} /> Edit
-                              </button>
-                            )}
-                            {checkAuthorization(user, "GROUPS", "DELETE") && (
-                              <button
-                                onClick={() => setDeleteConfirm(g._id)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-red-500 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 transition-all"
-                              >
-                                <Trash2 size={12} /> Delete
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </motion.tr>
+                        {isExpanded && (
+                          <tr className="bg-slate-50/80">
+                            <td colSpan={4} className="px-5 pb-4 pt-0">
+                              <div className="mt-1 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                  {[
+                                    { label: "Nature", value: g.nature },
+                                    { label: "Schedule Main Head", value: g.scheduleMainHead },
+                                    { label: "Schedule Group", value: g.scheduleGroup },
+                                    { label: "Schedule Line Item", value: g.scheduleLineItem },
+                                    // { label: "Note No", value: g.noteNo },
+                                    { label: "Report Type", value: g.scheduleMapping?.reportType },
+                                    {
+                                      label: "Created On",
+                                      value: g.createdAt
+                                        ? new Date(g.createdAt).toLocaleDateString("en-IN")
+                                        : null,
+                                    },
+                                    {
+                                      label: "Updated On",
+                                      value: g.updatedAt
+                                        ? new Date(g.updatedAt).toLocaleDateString("en-IN")
+                                        : null,
+                                    },
+                                  ].map((item) => (
+                                    <div
+                                      key={`${g._id}-${item.label}`}
+                                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"
+                                    >
+                                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                        {item.label}
+                                      </p>
+                                      <p className="mt-1 text-xs font-semibold text-slate-700 break-words">
+                                        {item.value || <span className="text-slate-300 italic">Not set</span>}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

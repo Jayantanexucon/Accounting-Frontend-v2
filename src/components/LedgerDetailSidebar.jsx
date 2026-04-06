@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   X, Copy, Filter, ChevronDown, ChevronUp, User, Building,
   ArrowDownLeft, ArrowUpRight, FileText, Hash,
-  Calendar, Tag, Wallet, CheckCircle2, AlertCircle,
+  Calendar, Tag, Wallet, CheckCircle2, AlertCircle, Pencil,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "react-toastify";
@@ -82,7 +82,7 @@ const EntryRow = ({ entry, type, onOpenJournal, isMatch }) => (
           <span className={`text-[12px] font-black tabular-nums ${
             type === "debit" ? "text-blue-700" : "text-violet-700"
           }`}>
-            {formatCurrency(type === "debit" ? entry.debit : entry.credit)}
+            {formatCurrency(type === "debit" ? counter.credit : counter.debit)}
           </span>
         </td>
       </tr>
@@ -191,7 +191,7 @@ const EntryTable = ({ entries, type, onOpenJournal, matchFn, hasFilter }) => {
 /* ══════════════════════════════════════════════════════
    MODAL COMPONENT
 ══════════════════════════════════════════════════════ */
-export default function LedgerDetailModal({ account, onClose, onUpdate, advancedFilters }) {
+export default function LedgerDetailModal({ account, onClose, onUpdate, advancedFilters, onEditRequested }) {
   const { user } = useAuth();
   const [ledgerData, setLedgerData]       = useState(null);
   const [loading, setLoading]             = useState(false);
@@ -358,11 +358,20 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
                 </div>
               </div>
 
-              {/* Close */}
-              <button onClick={onClose}
-                className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100/80 transition-all shrink-0">
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                {onEditRequested && (
+                  <button
+                    onClick={() => onEditRequested(account)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-bold text-blue-700 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 transition-all"
+                  >
+                    <Pencil size={12} /> Edit Ledger
+                  </button>
+                )}
+                <button onClick={onClose}
+                  className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100/80 transition-all shrink-0">
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
             {/* ── Balance strip ─────────────────────── */}

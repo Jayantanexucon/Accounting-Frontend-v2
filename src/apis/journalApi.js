@@ -43,8 +43,15 @@ export const getJournalApprovalRequestsApi = async (companyId) => {
   return data;
 };
 
-export const requestJournalEditApprovalApi = async (companyId, journalId) => {
-  const { data } = await API.post(`/journal/${companyId}/${journalId}/request-edit`);
+export const requestJournalEditApprovalApi = async (
+  companyId,
+  journalId,
+  payload,
+) => {
+  const { data } = await API.post(
+    `/journal/${companyId}/${journalId}/request-edit`,
+    payload,
+  );
   return data;
 };
 
@@ -62,5 +69,29 @@ export const updateJournalApprovalRequestApi = async (
     `/journal/${companyId}/approval-requests/${requestId}`,
     { status },
   );
+  return data;
+};
+
+// ── Excel Bulk Upload ──────────────────────────────────────────────────────────
+
+/**
+ * Upload an Excel file and get a preview of grouped journal entries.
+ * @param {string} companyId
+ * @param {FormData} formData  — must contain a field named "file"
+ */
+export const uploadJournalExcelApi = async (companyId, formData) => {
+  const { data } = await API.post(`/journal-excel/${companyId}/upload`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+};
+
+/**
+ * Save only the valid journal entries returned by the preview step.
+ * @param {string} companyId
+ * @param {{ validEntries: Array }} payload
+ */
+export const confirmJournalExcelApi = async (companyId, payload) => {
+  const { data } = await API.post(`/journal-excel/${companyId}/confirm`, payload);
   return data;
 };
