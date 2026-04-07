@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { getallhsn } from "../apis/hsnapi";
 import { getClientsApi } from "../apis/clientApi";
@@ -6,165 +6,34 @@ import {
   createPurchaseOrderApi,
   getPurchaseOrderApi,
   updatePurchaseOrderApi,
+  getPurchaseOrdersApi,
 } from "../apis/purchaseOrderApi";
-import { getCompanyByIdApi } from "../apis/userApi";
 import {
   X,
   ChevronDown,
   Loader2,
   Check,
+  Download,
   Plus,
   Trash2,
   Building,
+  User,
   CreditCard,
+  Banknote,
   FileText,
-  Users,
-  Target,
-  Calendar,
-  Clock,
-  ArrowLeft,
-  Info,
-  AlertCircle,
-  ChevronRight,
-  Briefcase,
+  Package,
+  ShoppingBag,
+  MapPin,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { API } from "../apis/api";
+import { getCompanyByIdApi } from "../apis/userApi";
+import { ArrowLeft } from "lucide-react";
+import { getCompanyGstStateCode, getPlaceOfSupplyCode } from "../utils/gstState";
+import countryRules from "../utils/countryRules";
 
-// ─────────────────────────────────────────────────────────────────
-//  CONSTANTS
-// ─────────────────────────────────────────────────────────────────
-
-const PO_CATEGORIES = [
-  {
-    key: "staffing",
-    label: "Staffing",
-    icon: Users,
-    description:
-      "Deploy people at client site. Bill by working day, hour, or month.",
-    color: "teal",
-    billingModels: [
-      {
-        key: "daily",
-        label: "Daily Rate",
-        hint: "Rate per working day × actual days worked",
-      },
-      {
-        key: "monthly",
-        label: "Monthly Rate",
-        hint: "Fixed monthly rate, deduct unpaid leave",
-      },
-      {
-        key: "hourly",
-        label: "Hourly Rate",
-        hint: "Rate per hour × hours logged",
-      },
-    ],
-  },
-  {
-    key: "project",
-    label: "Project",
-    icon: Target,
-    description: "Deliver a defined scope. Bill on milestones or headcount.",
-    color: "blue",
-    billingModels: [
-      {
-        key: "milestone",
-        label: "Milestone Based",
-        hint: "Invoice raised when milestone is completed",
-      },
-      {
-        key: "headcount",
-        label: "Headcount Based",
-        hint: "People × days × rate, tracked per sprint/period",
-      },
-      {
-        key: "fixed",
-        label: "Fixed Price",
-        hint: "One or more line items, no time tracking needed",
-      },
-    ],
-  },
-  {
-    key: "retainer",
-    label: "Retainer / AMC",
-    icon: Calendar,
-    description: "Ongoing fixed engagement. Auto-bill on a set schedule.",
-    color: "amber",
-    billingModels: [
-      {
-        key: "fixed",
-        label: "Fixed Periodic",
-        hint: "Same amount billed every month/quarter/half-year",
-      },
-    ],
-  },
-];
-
-const PAYMENT_TERMS = [
-  { value: "advance", label: "Advance" },
-  { value: "immediate", label: "Immediate" },
-  { value: "net-15", label: "Net 15 days" },
-  { value: "net-30", label: "Net 30 days" },
-  { value: "net-45", label: "Net 45 days" },
-  { value: "net-60", label: "Net 60 days" },
-  { value: "net-90", label: "Net 90 days" },
-  { value: "on_milestone", label: "On Milestone" },
-  { value: "on_delivery", label: "On Delivery" },
-  { value: "cod", label: "Cash on Delivery" },
-];
-
-const PAYMENT_SCHEDULES = [
-  { value: "monthly", label: "Monthly" },
-  { value: "quarterly", label: "Quarterly" },
-  { value: "half-yearly", label: "Half-yearly" },
-  { value: "yearly", label: "Yearly" },
-  { value: "on_completion", label: "On Completion" },
-];
-
-const LEAVE_POLICIES = [
-  { value: "deduct_unpaid", label: "Deduct only unpaid leaves" },
-  { value: "include_paid", label: "Include paid leaves (client pays)" },
-  { value: "client_specific", label: "Client specific rules" },
-];
-
-const colorMap = {
-  teal: {
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-700",
-    ring: "ring-teal-400",
-  },
-  blue: {
-    bg: "bg-blue-50",
-    border: "border-blue-200",
-    text: "text-blue-700",
-    ring: "ring-blue-400",
-  },
-  amber: {
-    bg: "bg-amber-50",
-    border: "border-amber-200",
-    text: "text-amber-700",
-    ring: "ring-amber-400",
-  },
-};
-
-const today = () => new Date().toISOString().split("T")[0];
-
-// ─────────────────────────────────────────────────────────────────
-//  STEP LABELS
-// ─────────────────────────────────────────────────────────────────
-
-const STEPS = [
-  { id: 1, label: "PO Type", icon: Briefcase },
-  { id: 2, label: "Client", icon: Building },
-  { id: 3, label: "Details", icon: FileText },
-  { id: 4, label: "Line Items", icon: Target },
-  { id: 5, label: "Review", icon: Check },
-];
-
-// ─────────────────────────────────────────────────────────────────
-//  MAIN COMPONENT
-// ─────────────────────────────────────────────────────────────────
+const clampNumber = (value = 0, min = 0, max = Number.POSITIVE_INFINITY) =>
+  Math.min(Math.max(Number(value || 0), min), max);
 
 export default function PurchaseOrderPage() {
   const { user } = useAuth();
@@ -172,239 +41,807 @@ export default function PurchaseOrderPage() {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const editId = searchParams.get("edit");
-  const selectedCompany = JSON.parse(
-    localStorage.getItem("selectedCompany") || "{}",
-  );
-  const companyId =
-    localStorage.getItem("selectedCompanyId") ||
-    user?.company?._id ||
-    selectedCompany?._id;
+  const clientIdParam = searchParams.get("clientId");
+  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+  const companyId = localStorage.getItem("selectedCompanyId") || user?.company?._id || selectedCompany?._id;
 
-  const [step, setStep] = useState(1);
-  const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [success, setSuccess] = useState(false);
-  const [createdPOId, setCreatedPOId] = useState(null);
-
-  // Data
-  const [clients, setClients] = useState([]);
-  const [hsnList, setHsnList] = useState([]);
+  // ---------- Company state (dynamic) ----------
   const [companyInfo, setCompanyInfo] = useState(null);
-  const [clientSearch, setClientSearch] = useState("");
-  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [companyStateCode, setCompanyStateCode] = useState("");
+  const [loadingCompany, setLoadingCompany] = useState(false);
 
-  // Form state
-  const [form, setForm] = useState({
-    companyId,
-    poCategory: "project",
-    billingModel: "fixed",
-    poDate: today(),
-    deliveryDate: today(),
-    referenceDate: today(),
+  const [clients, setClients] = useState([]);
+  const [filteredClients, setFilteredClients] = useState([]);
+  const [hsnList, setHsnList] = useState([]);
+  const [loadingHsn, setLoadingHsn] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [existingPO, setExistingPO] = useState(null);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+
+  // ---------- PO State ----------
+  const [purchaseOrder, setPurchaseOrder] = useState({
+    poNumber: "Auto-generated on save",
     poreferencevalue: "",
+    poDate: new Date().toISOString().split("T")[0],
+    deliveryDate: new Date().toISOString().split("T")[0],
+    referenceDate: new Date().toISOString().split("T")[0],
+    companyId: companyId,
     currency: "INR",
+    totalAmount: 0,
     paymentTerms: "net-30",
-    paymentSchedule: "monthly",
-    staffingConfig: {
-      defaultWorkingDaysPerMonth: 22,
-      billingUnit: "day",
-      overtimeRateMultiplier: 1.5,
-      holidayRateMultiplier: 2.0,
-      countPublicHolidaysAsWorking: false,
-      leavePolicy: "deduct_unpaid",
+    poType: "general",
+    contractDetails: {
+      paymentSchedule: "monthly",
+      defaultWorkingDays: 22,
     },
-    client: {_id: "" , name: "", address: "", stateCode: "", GSTIN: "" },
-    deliverTo: { name: "", address: "", stateCode: "", GSTIN: "" },
+    client: {
+      _id: "",
+      name: "",
+      address: "",
+      stateCode: "",
+      taxNumber: "",
+      taxIdentifierType: "",
+    },
+    deliverTo: {
+      _id: "",
+      name: "",
+      address: "",
+      stateCode: "",
+      taxNumber: "",
+      taxIdentifierType: "",
+    },
     items: [
       {
         description: "",
         hsnSac: "",
-        hsnId: null,
         quantity: 1,
         rate: 0,
         taxableValue: 0,
-        gstRate: 18,
+        gstRate: 0,
         gstAmount: 0,
         total: 0,
       },
     ],
-    milestones: [],
-    resources: [],
-    totalAmount: 0,
     totalTaxableValue: 0,
     totalCGSTAmount: 0,
     totalSGSTAmount: 0,
     totalIGSTAmount: 0,
     valueInWords: "",
     withSignature: false,
+    status: "draft",
     notes: "",
   });
 
   const [sameAsClient, setSameAsClient] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
+  const [createdPOId, setCreatedPOId] = useState(null);
 
-  // ─── Derived ────
-  const selectedCategory =
-    PO_CATEGORIES.find((c) => c.key === form.poCategory) || PO_CATEGORIES[1];
-  const colors = colorMap[selectedCategory.color];
+  // Client dropdown state
+  const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [editingClient, setEditingClient] = useState(false);
 
-  // ─────────────────────────────────────────────────────────────
-  //  DATA LOADING
-  // ─────────────────────────────────────────────────────────────
+  // Deliver To dropdown state
+  const [deliverToDropdownOpen, setDeliverToDropdownOpen] = useState(false);
+  const [deliverToSearch, setDeliverToSearch] = useState("");
+  const [editingDeliverTo, setEditingDeliverTo] = useState(false);
 
-  useEffect(() => {
-    if (!companyId) return;
+  const [existingDescriptions, setExistingDescriptions] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [loadingDescriptions, setLoadingDescriptions] = useState(false);
 
-    (async () => {
-      try {
-        const [clientsRes, hsnRes] = await Promise.all([
-          getClientsApi(companyId),
-          getallhsn(companyId),
-        ]);
-        console.log(clientsRes, hsnRes);
-
-        const clientsDataRaw =
-          clientsRes?.data?.data || clientsRes?.data || clientsRes || [];
-        const hsnDataRaw = hsnRes?.data?.data || hsnRes?.data || hsnRes || [];
-
-        const normalized = clientsDataRaw.map((c) => ({
-          ...c,
-          name: c.name || c.clientName || c.contactPerson || "",
-          address:
-            c.address || c.clientAddress || c.billingAddress?.line1 || "",
-          stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
-          GSTIN: c.GSTIN || c.gstNumber || "",
-          taxNumber: c.taxNumber || c.gstNumber || "",
-        }));
-
-        setClients(normalized);
-        setHsnList(hsnDataRaw);
-      } catch (e) {
-        console.error(e);
-      }
-    })();
-  }, [companyId]);
-  const filteredClients = clients.filter((c) => {
-    if (!clientSearch?.trim()) return true;
-    const q = clientSearch.toLowerCase();
-    return (
-      (c.name || "").toLowerCase().includes(q) ||
-      (c.clientName || "").toLowerCase().includes(q)
-    );
-  });
-
-  useEffect(() => {
-    if (companyId) {
-      getCompanyByIdApi(companyId)
-        .then((res) => setCompanyInfo(res?.data?.data || res?.data))
-        .catch(console.error);
-    }
-  }, [companyId]);
-
+  // ---------- 1. Fetch existing PO if editing ----------
   useEffect(() => {
     if (editId) {
-      setIsEditing(true);
-      getPurchaseOrderApi(editId)
-        .then((res) => {
-          const d = res.data;
-          const fmt = (date) =>
+      const fetchExistingPO = async () => {
+        try {
+          const response = await getPurchaseOrderApi(editId);
+          const poData = response.data;
+          // setExistingPO(poData);
+          setIsEditing(true);
+          setCreatedPOId(editId);
+
+          const formatDate = (date) =>
             date ? new Date(date).toISOString().split("T")[0] : "";
-          setForm((prev) => ({
-            ...prev,
-            ...d,
-            poDate: fmt(d.poDate),
-            deliveryDate: fmt(d.deliveryDate),
-            referenceDate: fmt(d.referenceDate),
-          }));
-        })
-        .catch(console.error);
+
+          setPurchaseOrder({
+            poNumber: poData.poNumber,
+            companyId: user?.company?._id,
+            poreferencevalue: poData.poreferencevalue || "",
+            poDate: formatDate(poData.poDate),
+            deliveryDate: formatDate(poData.deliveryDate),
+            referenceDate: formatDate(poData.referenceDate),
+            currency: poData.currency || "INR",
+            totalAmount: poData.totalAmount || 0,
+            paymentTerms: poData.paymentTerms || "net-30",
+            poType: poData.poType || "general",
+            contractDetails: {
+              paymentSchedule:
+                poData.contractDetails?.paymentSchedule || "monthly",
+              defaultWorkingDays:
+                poData.contractDetails?.defaultWorkingDays || 22,
+            },
+            client: {
+              _id: poData.client?._id || "",
+              name: poData.client?.name || "",
+              address: poData.client?.address || "",
+              stateCode: poData.client?.stateCode || "",
+              taxNumber: poData.client?.GSTIN || poData.client?.taxNumber || "",
+              taxIdentifierType: poData.client?.taxIdentifierType || "",
+            },
+            deliverTo: {
+              _id: poData.deliverTo?._id || "",
+              name: poData.deliverTo?.name || "",
+              address: poData.deliverTo?.address || "",
+              stateCode: poData.deliverTo?.stateCode || "",
+              taxNumber:
+                poData.deliverTo?.GSTIN || poData.deliverTo?.taxNumber || "",
+              taxIdentifierType: poData.deliverTo?.taxIdentifierType || "",
+            },
+            items: poData.items || [
+              {
+                description: "",
+                hsnSac: "",
+                quantity: 1,
+                rate: 0,
+                taxableValue: 0,
+                gstRate: 0,
+                gstAmount: 0,
+                total: 0,
+              },
+            ],
+            totalTaxableValue: poData.totalTaxableValue || 0,
+            totalCGSTAmount: poData.totalCGSTAmount || 0,
+            totalSGSTAmount: poData.totalSGSTAmount || 0,
+            totalIGSTAmount: poData.totalIGSTAmount || 0,
+            valueInWords: poData.valueInWords || "",
+            withSignature: poData.withSignature || false,
+            status: poData.status || "draft",
+            notes: poData.notes || "",
+          });
+          const baselineData = {
+            poreferencevalue: poData.poreferencevalue || "",
+            poDate: formatDate(poData.poDate),
+            deliveryDate: formatDate(poData.deliveryDate),
+            referenceDate: formatDate(poData.referenceDate),
+            currency: poData.currency || "INR",
+            paymentTerms: poData.paymentTerms || "net-30",
+            poType: poData.poType || "general",
+            contractDetails: {
+              paymentSchedule:
+                poData.contractDetails?.paymentSchedule || "monthly",
+              defaultWorkingDays:
+                poData.contractDetails?.defaultWorkingDays || 22,
+            },
+            notes: poData.notes || "",
+            withSignature: poData.withSignature || false,
+            client: {
+              name: poData.client?.name || "",
+              address: poData.client?.address || "",
+              stateCode: poData.client?.stateCode || "",
+              taxNumber: poData.client?.GSTIN || poData.client?.taxNumber || "",
+              taxIdentifierType: poData.client?.taxIdentifierType || "",
+            },
+            deliverTo: {
+              name: poData.deliverTo?.name || "",
+              address: poData.deliverTo?.address || "",
+              stateCode: poData.deliverTo?.stateCode || "",
+              taxNumber:
+                poData.deliverTo?.GSTIN || poData.deliverTo?.taxNumber || "",
+              taxIdentifierType: poData.deliverTo?.taxIdentifierType || "",
+            },
+            items: poData.items?.map((item) => ({
+              description: item.description || "",
+              hsnSac: item.hsnSac || "",
+              quantity: item.quantity,
+              rate: item.rate,
+              gstRate: item.gstRate,
+            })),
+          };
+
+          setExistingPO(JSON.stringify(baselineData));
+
+          const clientStr = JSON.stringify(poData.client);
+          const deliverStr = JSON.stringify(poData.deliverTo);
+          setSameAsClient(clientStr === deliverStr);
+        } catch (error) {
+          console.error("Error fetching PO:", error);
+          setError("Failed to load purchase order for editing.");
+        }
+      };
+      fetchExistingPO();
     }
   }, [editId]);
 
-  // ─────────────────────────────────────────────────────────────
-  //  FORM HELPERS
-  // ─────────────────────────────────────────────────────────────
+  const isFormChanged = () => {
+    if (!existingPO) return false;
 
-  const set = (path, value) => {
-    setForm((prev) => {
-      const parts = path.split(".");
-      if (parts.length === 1) return { ...prev, [path]: value };
-      const updated = { ...prev };
-      let ref = updated;
-      for (let i = 0; i < parts.length - 1; i++) {
-        ref[parts[i]] = { ...ref[parts[i]] };
-        ref = ref[parts[i]];
+    const currentData = {
+      poreferencevalue: purchaseOrder.poreferencevalue || "",
+      poDate: purchaseOrder.poDate,
+      deliveryDate: purchaseOrder.deliveryDate,
+      referenceDate: purchaseOrder.referenceDate,
+      currency: purchaseOrder.currency,
+      paymentTerms: purchaseOrder.paymentTerms,
+      poType: purchaseOrder.poType || "general",
+      contractDetails: {
+        paymentSchedule:
+          purchaseOrder.contractDetails?.paymentSchedule || "monthly",
+        defaultWorkingDays:
+          Number(purchaseOrder.contractDetails?.defaultWorkingDays || 22),
+      },
+      notes: purchaseOrder.notes || "",
+      withSignature: purchaseOrder.withSignature,
+      client: {
+        name: purchaseOrder.client.name || "",
+        address: purchaseOrder.client.address || "",
+        stateCode: purchaseOrder.client.stateCode || "",
+        taxNumber: purchaseOrder.client.taxNumber || "",
+        taxIdentifierType: purchaseOrder.client.taxIdentifierType || "",
+      },
+      deliverTo: {
+        name: purchaseOrder.deliverTo.name || "",
+        address: purchaseOrder.deliverTo.address || "",
+        stateCode: purchaseOrder.deliverTo.stateCode || "",
+        taxNumber: purchaseOrder.deliverTo.taxNumber || "",
+        taxIdentifierType: purchaseOrder.deliverTo.taxIdentifierType || "",
+      },
+      items: purchaseOrder.items.map((item) => ({
+        description: item.description || "",
+        hsnSac: item.hsnSac || "",
+        quantity: item.quantity,
+        rate: item.rate,
+        gstRate: item.gstRate,
+      })),
+    };
+
+    return JSON.stringify(currentData) !== existingPO;
+  };
+
+  // ---------- 2. Fetch COMPANY info (NEW) ----------
+  useEffect(() => {
+    const fetchCompany = async () => {
+      if (!user?.company?._id) return;
+      setLoadingCompany(true);
+      try {
+        const response = await getCompanyByIdApi(companyId);
+        const companyData = response?.data || {};
+        const formatAddress = (addressObj) =>
+          [
+            addressObj?.line1,
+            addressObj?.city,
+            addressObj?.state,
+            addressObj?.country,
+            addressObj?.pincode,
+          ]
+            .filter(Boolean)
+            .join(", ");
+        setCompanyInfo({
+          companyName: companyData.tradeName || companyData.name || "",
+          address: formatAddress(companyData.registeredAddress),
+          gstin: companyData.taxDetails?.gstin || "",
+          panNumber: companyData.taxDetails?.pan || "",
+          tanNumber: companyData.taxDetails?.tan || "",
+          bankName: companyData.bankDetails?.bankName || "",
+          accountName: companyData.bankDetails?.accountHolderName || "",
+          accountNumber: companyData.bankDetails?.accountNumber || "",
+          ifscCode: companyData.bankDetails?.ifsc || "",
+          branch: companyData.branchName || "",
+        });
+        setCompanyStateCode(getCompanyGstStateCode(companyData));
+      } catch (error) {
+        console.error("Error fetching company:", error);
+        setError("Failed to load company information.");
+      } finally {
+        setLoadingCompany(false);
       }
-      ref[parts[parts.length - 1]] = value;
-      return updated;
+    };
+    fetchCompany();
+  }, [user?.company?._id]);
+
+  // ---------- 3. Fetch clients, HSN, and existing descriptions ----------
+  useEffect(() => {
+    const fetchInitialData = async () => {
+      if (!user?.company?._id) return;
+
+      try {
+        setLoadingClients(true);
+
+        const res = await getClientsApi(user.company._id);
+        const clientsList = Array.isArray(res?.data) ? res.data : [];
+
+        const activeClients = clientsList.filter((c) => c.isActive !== false);
+
+        const mappedClients = activeClients.map((client) => {
+          const fullAddress = [
+            client.clientAddress,
+            client.clientCity,
+            client.clientState,
+            client.pinCode,
+            client.clientCountry,
+          ]
+            .filter(Boolean)
+            .join(", ");
+
+          const taxNumber =
+            client.gstNumber ||
+            client.panNumber ||
+            client.vatNumber ||
+            client.einNumber ||
+            client.ssnNumber ||
+            client.companyNumber ||
+            client.nationalIdNumber ||
+            client.taxIdentificationNumber ||
+            "";
+          const stateCode =
+            client.stateCode || client.clientState || client.state || "";
+
+          return {
+            _id: client._id,
+            clientCode: client.clientCode || "",
+            clientName: client.clientName || "",
+            contactPerson: client.contactPerson || "",
+            phone: client.contactNumber || "",
+            email: client.email || "",
+            address: fullAddress,
+            stateCode: stateCode,
+            country: client.clientCountry || "India",
+            taxIdentifierType: client.taxIdentifierType || "",
+            taxNumber: taxNumber,
+            rawClient: client,
+          };
+        });
+
+        setClients(mappedClients);
+        setFilteredClients(mappedClients);
+
+        // ---------- HSN ----------
+        setLoadingHsn(true);
+        const hsnRes = await getallhsn(user.company._id);
+        setHsnList(hsnRes.data || []);
+
+        // ---------- Existing Descriptions ----------
+        setLoadingDescriptions(true);
+        const poRes = await getPurchaseOrdersApi(companyId, { limit: 100 });
+
+        const descSet = new Set();
+        poRes.data?.forEach((po) =>
+          po.items?.forEach((item) => {
+            if (item.description?.trim()) {
+              descSet.add(item.description.trim());
+            }
+          }),
+        );
+
+        setExistingDescriptions([...descSet]);
+      } catch (error) {
+        console.error("Error fetching initial data:", error);
+        setError("Failed to load initial data.");
+      } finally {
+        setLoadingClients(false);
+        setLoadingHsn(false);
+        setLoadingDescriptions(false);
+      }
+    };
+
+    fetchInitialData();
+  }, [user?.company?._id]);
+
+  // ---------- 4. Pre-select client if ?clientId=xxx is present (UPDATED) ----------
+  useEffect(() => {
+    if (clientIdParam && !isEditing && clients.length > 0) {
+      const selectedClient = clients.find((c) => c._id === clientIdParam);
+      if (selectedClient) {
+        handleSelectClient(selectedClient);
+        setSameAsClient(true);
+        // Hide the dropdown and manual editing when client is preselected
+        setEditingClient(false);
+        setClientDropdownOpen(false);
+        setEditingDeliverTo(false);
+        setDeliverToDropdownOpen(false);
+      }
+    }
+  }, [clientIdParam, clients, isEditing]);
+
+  // ---------- 5. Auto‑calculate delivery date (7 days after PO date) ----------
+  useEffect(() => {
+    if (purchaseOrder.poDate && !isEditing) {
+      const poDate = new Date(purchaseOrder.poDate);
+      const delivery = new Date(poDate);
+      delivery.setDate(poDate.getDate() + 7);
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        deliveryDate: delivery.toISOString().split("T")[0],
+      }));
+    }
+  }, [purchaseOrder.poDate, isEditing]);
+
+  // ---------- 6. Filter clients based on search ----------
+  useEffect(() => {
+    if (clientSearch) {
+      const filtered = clients.filter(
+        (c) =>
+          c.clientName?.toLowerCase().includes(clientSearch.toLowerCase()) ||
+          c.taxNumber?.toLowerCase().includes(clientSearch.toLowerCase()),
+      );
+      setFilteredClients(filtered);
+    } else {
+      setFilteredClients(clients);
+    }
+  }, [clientSearch, clients]);
+
+  // ---------- 7. Filter deliverTo clients based on search ----------
+  const [filteredDeliverToClients, setFilteredDeliverToClients] = useState([]);
+  useEffect(() => {
+    if (deliverToSearch) {
+      const filtered = clients.filter(
+        (c) =>
+          c.clientName?.toLowerCase().includes(deliverToSearch.toLowerCase()) ||
+          c.taxNumber?.toLowerCase().includes(deliverToSearch.toLowerCase()),
+      );
+      setFilteredDeliverToClients(filtered);
+    } else {
+      setFilteredDeliverToClients(clients);
+    }
+  }, [deliverToSearch, clients]);
+
+  // ---------- 8. Recalculate totals when items or state codes change ----------
+  useEffect(() => {
+    const placeOfSupplyCode = getPlaceOfSupplyCode({
+      deliverTo: purchaseOrder.deliverTo,
+      client: purchaseOrder.client,
     });
-  };
+    const sameState =
+      companyStateCode &&
+      placeOfSupplyCode &&
+      companyStateCode === placeOfSupplyCode;
 
-  const selectCategory = (categoryKey) => {
-    const cat = PO_CATEGORIES.find((c) => c.key === categoryKey);
-    set("poCategory", categoryKey);
-    set("billingModel", cat?.billingModels[0]?.key || "fixed");
-  };
+    let taxable = 0,
+      cgst = 0,
+      sgst = 0,
+      igst = 0;
+    purchaseOrder.items.forEach((item) => {
+      const itemTaxable = item.taxableValue || 0;
+      const itemGst = item.gstAmount || 0;
+      taxable += itemTaxable;
 
-  const selectClient = (client) => {
-  setForm((prev) => ({
-    ...prev,
-    client: client,                    // store the whole client object (includes _id)
-    deliverTo: sameAsClient ? client : prev.deliverTo,
-  }));
-  setClientDropdownOpen(false);
-  setClientSearch("");
-};
-
-  // ─── Item calculations ───
-
-  const recalcItem = (item) => {
-    const qty = Number(item.quantity) || 0;
-    const rate = Number(item.rate) || 0;
-    const gstRate = Number(item.gstRate) || 0;
-    const taxableValue = Math.round(qty * rate * 100) / 100;
-    const gstAmount = Math.round(taxableValue * gstRate) / 100;
-    const total = Math.round((taxableValue + gstAmount) * 100) / 100;
-    return { ...item, taxableValue, gstAmount, total, totalAmount: total };
-  };
-
-  const hasMeaningfulLineItem = (item) => {
-    if (!item) return false;
-    const description =
-      typeof item.description === "string" ? item.description.trim() : "";
-    const hsnSac = typeof item.hsnSac === "string" ? item.hsnSac.trim() : "";
-
-    return (
-      description.length > 0 ||
-      hsnSac.length > 0 ||
-      Number(item.rate || 0) > 0 ||
-      Number(item.taxableValue || 0) > 0 ||
-      Number(item.total || item.totalAmount || 0) > 0 ||
-      Number(item.gstAmount || 0) > 0
-    );
-  };
-
-  const updateItem = (index, field, value) => {
-    setForm((prev) => {
-      const items = [...prev.items];
-      items[index] = recalcItem({ ...items[index], [field]: value });
-      return { ...prev, items, ...recalcTotals(items) };
+      if (sameState) {
+        cgst += Math.round(itemGst / 2);
+        sgst += Math.round(itemGst / 2);
+      } else {
+        igst += Math.round(itemGst);
+      }
     });
+
+    const totalAmount = parseFloat((taxable + cgst + sgst + igst).toFixed(2));
+    const valueInWords = convertToWords(totalAmount);
+
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      totalTaxableValue: parseFloat(taxable.toFixed(2)),
+      totalAmount,
+      totalCGSTAmount: parseFloat(cgst.toFixed(2)),
+      totalSGSTAmount: parseFloat(sgst.toFixed(2)),
+      totalIGSTAmount: parseFloat(igst.toFixed(2)),
+      valueInWords,
+    }));
+  }, [
+    purchaseOrder.items,
+    purchaseOrder.deliverTo.stateCode,
+    purchaseOrder.client.stateCode,
+    companyStateCode,
+  ]);
+
+  // ---------- 9. Recalculate GST rates for items when state codes change ----------
+  useEffect(() => {
+    const placeOfSupplyCode = getPlaceOfSupplyCode({
+      deliverTo: purchaseOrder.deliverTo,
+      client: purchaseOrder.client,
+    });
+    if (!companyStateCode || !placeOfSupplyCode)
+      return;
+
+    const sameState = companyStateCode === placeOfSupplyCode;
+
+    const newItems = purchaseOrder.items.map((item) => {
+      if (!item.hsnSac) return item;
+
+      const selectedHsn = hsnList.find((hsn) => hsn.hsnCode === item.hsnSac);
+      if (!selectedHsn) return item;
+
+      let gstRate = 0;
+      if (sameState) {
+        gstRate = selectedHsn.cgst + selectedHsn.sgst;
+      } else {
+        gstRate = selectedHsn.igst;
+      }
+
+      if (item.gstRate !== gstRate) {
+        const quantity = parseFloat(item.quantity) || 0;
+        const rate = parseFloat(item.rate) || 0;
+        const taxableValue = parseFloat((quantity * rate).toFixed(2));
+        const gstAmount = parseFloat(
+          ((taxableValue * gstRate) / 100).toFixed(2),
+        );
+        const total = parseFloat((taxableValue + gstAmount).toFixed(2));
+
+        return {
+          ...item,
+          gstRate,
+          taxableValue,
+          gstAmount,
+          total,
+        };
+      }
+      return item;
+    });
+
+    if (JSON.stringify(newItems) !== JSON.stringify(purchaseOrder.items)) {
+      setPurchaseOrder((prev) => ({ ...prev, items: newItems }));
+    }
+  }, [
+    purchaseOrder.deliverTo.stateCode,
+    purchaseOrder.client.stateCode,
+    companyStateCode,
+    hsnList,
+  ]);
+
+  // ---------- Convert number to words ----------
+  const convertToWords = (amount) => {
+    if (!amount || isNaN(amount)) return "";
+
+    const ones = [
+      "",
+      "One",
+      "Two",
+      "Three",
+      "Four",
+      "Five",
+      "Six",
+      "Seven",
+      "Eight",
+      "Nine",
+      "Ten",
+      "Eleven",
+      "Twelve",
+      "Thirteen",
+      "Fourteen",
+      "Fifteen",
+      "Sixteen",
+      "Seventeen",
+      "Eighteen",
+      "Nineteen",
+    ];
+
+    const tens = [
+      "",
+      "",
+      "Twenty",
+      "Thirty",
+      "Forty",
+      "Fifty",
+      "Sixty",
+      "Seventy",
+      "Eighty",
+      "Ninety",
+    ];
+
+    const numToWords = (num) => {
+      if (num < 20) return ones[num];
+      if (num < 100) return tens[Math.floor(num / 10)] + " " + ones[num % 10];
+      if (num < 1000)
+        return (
+          ones[Math.floor(num / 100)] + " Hundred " + numToWords(num % 100)
+        );
+      if (num < 100000)
+        return (
+          numToWords(Math.floor(num / 1000)) +
+          " Thousand " +
+          numToWords(num % 1000)
+        );
+      if (num < 10000000)
+        return (
+          numToWords(Math.floor(num / 100000)) +
+          " Lakh " +
+          numToWords(num % 100000)
+        );
+      return (
+        numToWords(Math.floor(num / 10000000)) +
+        " Crore " +
+        numToWords(num % 10000000)
+      );
+    };
+
+    const rupees = Math.floor(amount);
+    const paise = Math.round((amount - rupees) * 100);
+
+    let result = numToWords(rupees);
+    if (paise > 0) {
+      result += " and " + numToWords(paise);
+    }
+
+    return result + " Only";
   };
 
-  const addItem = () => {
-    setForm((prev) => ({
+  // ---------- Handlers ----------
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setPurchaseOrder((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleContractDetailsChange = (e) => {
+    const { name, value } = e.target;
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      contractDetails: {
+        ...prev.contractDetails,
+        [name]:
+          name === "defaultWorkingDays"
+            ? Math.max(1, Number(value || 1))
+            : value,
+      },
+    }));
+  };
+
+  const handleClientChange = (e) => {
+    const { name, value } = e.target;
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      client: { ...prev.client, [name]: value },
+    }));
+    if (sameAsClient) {
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        deliverTo: { ...prev.deliverTo, [name]: value },
+      }));
+    }
+  };
+
+  const handleDeliverToChange = (e) => {
+    const { name, value } = e.target;
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      deliverTo: { ...prev.deliverTo, [name]: value },
+    }));
+  };
+
+  const handleSameAsClient = (checked) => {
+    setSameAsClient(checked);
+    if (checked) {
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        deliverTo: { ...prev.client },
+      }));
+      setEditingDeliverTo(false);
+      setDeliverToDropdownOpen(false);
+    } else {
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        deliverTo: {
+          _id: "",
+          name: "",
+          address: "",
+          stateCode: "",
+          taxNumber: "",
+          taxIdentifierType: "",
+        },
+      }));
+    }
+  };
+
+  const handleSelectClient = (client) => {
+    if (!client) return;
+
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      client: {
+        _id: client._id,
+        name: client.clientName,
+        address: client.address,
+        stateCode: client.stateCode,
+        taxNumber: client.taxNumber,
+        taxIdentifierType: client.taxIdentifierType,
+      },
+    }));
+
+    if (sameAsClient) {
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        deliverTo: {
+          _id: client._id,
+          name: client.clientName,
+          address: client.address,
+          stateCode: client.stateCode,
+          taxNumber: client.taxNumber,
+          taxIdentifierType: client.taxIdentifierType,
+        },
+      }));
+    }
+
+    setClientDropdownOpen(false);
+    setClientSearch("");
+    setEditingClient(false);
+  };
+
+  const handleClearClient = () => {
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      client: {
+        _id: "",
+        name: "",
+        address: "",
+        stateCode: "",
+        taxNumber: "",
+        taxIdentifierType: "",
+      },
+    }));
+    setClientSearch("");
+    setEditingClient(true);
+  };
+
+  const handleEditClient = () => {
+    setEditingClient(true);
+    setClientSearch(purchaseOrder.client.name);
+  };
+
+  // Deliver To handlers
+  const handleSelectDeliverTo = (client) => {
+    if (!client) return;
+
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      deliverTo: {
+        _id: client._id,
+        name: client.clientName,
+        address: client.address,
+        stateCode: client.stateCode,
+        taxNumber: client.taxNumber,
+        taxIdentifierType: client.taxIdentifierType,
+      },
+    }));
+
+    setDeliverToDropdownOpen(false);
+    setDeliverToSearch("");
+    setEditingDeliverTo(false);
+  };
+
+  const handleClearDeliverTo = () => {
+    setPurchaseOrder((prev) => ({
+      ...prev,
+      deliverTo: {
+        _id: "",
+        name: "",
+        address: "",
+        stateCode: "",
+        taxNumber: "",
+        taxIdentifierType: "",
+      },
+    }));
+    setDeliverToSearch("");
+    setEditingDeliverTo(true);
+  };
+
+  const handleEditDeliverTo = () => {
+    setEditingDeliverTo(true);
+    setDeliverToSearch(purchaseOrder.deliverTo.name);
+  };
+
+  const handleAddItem = () => {
+    setPurchaseOrder((prev) => ({
       ...prev,
       items: [
         ...prev.items,
         {
           description: "",
           hsnSac: "",
-          hsnId: null,
           quantity: 1,
           rate: 0,
           taxableValue: 0,
-          gstRate: 18,
+          gstRate: 0,
           gstAmount: 0,
           total: 0,
         },
@@ -412,1469 +849,1690 @@ export default function PurchaseOrderPage() {
     }));
   };
 
-  const removeItem = (index) => {
-    setForm((prev) => {
-      const items = prev.items.filter((_, i) => i !== index);
-      return { ...prev, items, ...recalcTotals(items) };
-    });
-  };
-  const getTotalGstRate = (hsn) => {
-  // If IGST is defined and non-zero, use it; otherwise sum CGST+SGST
-  if (hsn.igst && hsn.igst > 0) return Number(hsn.igst);
-  return (Number(hsn.cgst) || 0) + (Number(hsn.sgst) || 0);
-};
-  const recalcTotals = (items) => {
-    const totalTaxableValue = items.reduce(
-      (s, i) => s + (Number(i.taxableValue) || 0),
-      0,
-    );
-    const totalGST = items.reduce((s, i) => s + (Number(i.gstAmount) || 0), 0);
-    const totalAmount = items.reduce((s, i) => s + (Number(i.total) || 0), 0);
-    // Simplified: split GST evenly CGST/SGST (intra-state); for IGST set both to 0
-    const cgst = Math.round((totalGST / 2) * 100) / 100;
-    const sgst = Math.round((totalGST / 2) * 100) / 100;
-    return {
-      totalTaxableValue: Math.round(totalTaxableValue * 100) / 100,
-      totalCGSTAmount: cgst,
-      totalSGSTAmount: sgst,
-      totalIGSTAmount: 0,
-      totalAmount: Math.round(totalAmount * 100) / 100,
-      valueInWords: numberToWords(Math.round(totalAmount * 100) / 100),
-    };
+  const handleRemoveItem = (index) => {
+    if (purchaseOrder.items.length > 1) {
+      setPurchaseOrder((prev) => ({
+        ...prev,
+        items: prev.items.filter((_, i) => i !== index),
+      }));
+    }
   };
 
-  // ─── Milestone helpers ───
+  const handleItemChange = (index, field, value) => {
+    const newItems = [...purchaseOrder.items];
+    newItems[index][field] = value;
 
-  const addMilestone = () => {
-    setForm((prev) => ({
-      ...prev,
-      milestones: [
-        ...prev.milestones,
-        {
-          title: "",
-          description: "",
-          percentage: 0,
-          amount: 0,
-          dueDate: "",
-          status: "pending",
-        },
-      ],
-    }));
-  };
-
-  const updateMilestone = (index, field, value) => {
-    setForm((prev) => {
-      const milestones = [...prev.milestones];
-      milestones[index] = { ...milestones[index], [field]: value };
-      // auto-compute amount from percentage
-      if (field === "percentage") {
-        milestones[index].amount =
-          Math.round(((prev.totalAmount * Number(value)) / 100) * 100) / 100;
+    if (field === "hsnSac" && value) {
+      const selectedHsn = hsnList.find((hsn) => hsn.hsnCode === value);
+      if (selectedHsn) {
+        const placeOfSupplyCode = getPlaceOfSupplyCode({
+          deliverTo: purchaseOrder.deliverTo,
+          client: purchaseOrder.client,
+        });
+        const sameState =
+          companyStateCode &&
+          placeOfSupplyCode &&
+          companyStateCode === placeOfSupplyCode;
+        let gstRate = 0;
+        if (sameState) {
+          gstRate = selectedHsn.cgst + selectedHsn.sgst;
+        } else {
+          gstRate = selectedHsn.igst;
+        }
+        newItems[index].gstRate = gstRate;
       }
-      if (field === "amount") {
-        milestones[index].percentage =
-          prev.totalAmount > 0
-            ? Math.round((Number(value) / prev.totalAmount) * 10000) / 100
-            : 0;
-      }
-      return { ...prev, milestones };
-    });
+    }
+
+    let quantity = parseFloat(newItems[index].quantity) || 0;
+    const rate = parseFloat(newItems[index].rate) || 0;
+    const gstRate = parseFloat(newItems[index].gstRate) || 0;
+
+    let taxableValue = parseFloat((quantity * rate).toFixed(2));
+    if (field === "taxableValue") {
+      taxableValue = clampNumber(parseFloat(value) || 0, 0);
+      quantity = rate > 0 ? parseFloat((taxableValue / rate).toFixed(4)) : 0;
+      newItems[index].quantity = quantity;
+    }
+
+    const gstAmount = parseFloat(((taxableValue * gstRate) / 100).toFixed(2));
+    const total = parseFloat((taxableValue + gstAmount).toFixed(2));
+
+    newItems[index].taxableValue = taxableValue;
+    newItems[index].gstAmount = gstAmount;
+    newItems[index].total = total;
+
+    setPurchaseOrder((prev) => ({ ...prev, items: newItems }));
   };
 
-  const removeMilestone = (index) => {
-    setForm((prev) => ({
-      ...prev,
-      milestones: prev.milestones.filter((_, i) => i !== index),
-    }));
+  // ---------- Helper to get tax label ----------
+  const getTaxLabel = (type) => {
+    switch (type) {
+      case "GST":
+        return "GSTIN";
+      case "PAN":
+        return "PAN";
+      case "VAT":
+        return "VAT";
+      case "EIN":
+        return "EIN";
+      case "SSN":
+        return "SSN";
+      case "CompanyNumber":
+        return "Company No.";
+      case "NationalID":
+        return "National ID";
+      default:
+        return "Tax ID";
+    }
   };
 
-  // ─── Resource helpers ───
-
-  const addResource = () => {
-    setForm((prev) => ({
-      ...prev,
-      resources: [
-        ...prev.resources,
-        {
-          name: "",
-          role: "",
-          ratePerDay: 0,
-          ratePerHour: 0,
-          ratePerMonth: 0,
-          startDate: "",
-          endDate: "",
-        },
-      ],
-    }));
-  };
-
-  const updateResource = (index, field, value) => {
-    setForm((prev) => {
-      const resources = [...prev.resources];
-      resources[index] = { ...resources[index], [field]: value };
-      return { ...prev, resources };
-    });
-  };
-
-  const removeResource = (index) => {
-    setForm((prev) => ({
-      ...prev,
-      resources: prev.resources.filter((_, i) => i !== index),
-    }));
-  };
-
-  // ─────────────────────────────────────────────────────────────
-  //  SUBMIT
-  // ─────────────────────────────────────────────────────────────
-
-  const handleSubmit = async () => {
-  setLoading(true);
-  setError(null);
-  try {
-    const sanitizedItems = Array.isArray(form.items)
-      ? form.items.map(recalcItem).filter(hasMeaningfulLineItem)
-      : [];
-
-    const payload = { ...form, companyId, items: sanitizedItems };
-    let res;
-    // ... your existing logic ...
-    if (isEditing && editId) {
-      res = await updatePurchaseOrderApi(editId, payload);
+  // ---------- Validation & Submit ----------
+  const validateForm = () => {
+    const errors = [];
+    if (!purchaseOrder.poDate) errors.push("PO Date is required");
+    if (!purchaseOrder.deliveryDate) errors.push("Delivery Date is required");
+    if (!purchaseOrder.client.name) errors.push("Client Name is required");
+    if (!purchaseOrder.client.address)
+      errors.push("Client Address is required");
+    if (!purchaseOrder.deliverTo.name)
+      errors.push("Deliver To Name is required");
+    if (!purchaseOrder.deliverTo.address)
+      errors.push("Deliver To Address is required");
+    if (purchaseOrder.items.length === 0) {
+      errors.push("At least one item is required");
     } else {
-      res = await createPurchaseOrderApi(payload);
+      purchaseOrder.items.forEach((item, idx) => {
+        if (!item.description)
+          errors.push(`Item ${idx + 1}: Description is required`);
+        if (!item.quantity || item.quantity <= 0)
+          errors.push(`Item ${idx + 1}: Quantity must be greater than 0`);
+        if (!item.rate || item.rate < 0)
+          errors.push(`Item ${idx + 1}: Rate must be 0 or greater`);
+      });
     }
-    const createdId = res.data?.data?._id || res.data?._id;
-    const createdClientId = form.client._id;   // <-- capture the client ID
-    setCreatedPOId(createdId);
-    setSuccess(true);
-    // optionally store createdClientId in state if you want to use it later
-    // but you can also directly use it in the success screen (since it's captured)
-  } catch (e) {
-    // ... error handling ...
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // ─────────────────────────────────────────────────────────────
-  //  STEP VALIDATION
-  // ─────────────────────────────────────────────────────────────
-
-  const canProceed = () => {
-    if (step === 1) return !!form.poCategory && !!form.billingModel;
-    if (step === 2) return !!form.client?.name;
-    if (step === 3) return !!form.poDate && !!form.deliveryDate;
-    if (step === 4) {
-      if (form.billingModel === "milestone") return form.milestones.length > 0;
-      if (
-        ["staffing", "headcount"].includes(form.billingModel) ||
-        form.poCategory === "staffing"
-      ) {
-        return form.resources.length > 0;
+    if (purchaseOrder.poType === "contract") {
+      if (!purchaseOrder.contractDetails?.paymentSchedule) {
+        errors.push("Contract payment schedule is required");
       }
-      return form.items.length > 0 && form.items[0].description.trim() !== "";
+      if (Number(purchaseOrder.contractDetails?.defaultWorkingDays || 0) <= 0) {
+        errors.push("Default working days must be greater than 0");
+      }
     }
-    return true;
+    return errors;
   };
 
-  // ─────────────────────────────────────────────────────────────
-  //  SUCCESS STATE
-  // ─────────────────────────────────────────────────────────────
+  // const handleSubmit = async (e) => {
+  //   e.preventDefault();
+  //   setLoading(true);
+  //   setError(null);
+  //   const validationErrors = validateForm();
+  //   if (validationErrors.length) {
+  //     setError(validationErrors.join(". "));
+  //     setLoading(false);
+  //     return;
+  //   }
 
-  if (success) {
+  //   try {
+  //     const completePO = {
+  //       ...purchaseOrder,
+  //       client: {
+  //         name: purchaseOrder.client.name.trim(),
+  //         address: purchaseOrder.client.address.trim(),
+  //         stateCode: purchaseOrder.client.stateCode?.trim() || "",
+  //         GSTIN: purchaseOrder.client.taxNumber?.trim() || "",
+  //         taxIdentifierType: purchaseOrder.client.taxIdentifierType || "",
+  //       },
+  //       deliverTo: {
+  //         name: purchaseOrder.deliverTo.name.trim(),
+  //         address: purchaseOrder.deliverTo.address.trim(),
+  //         stateCode: purchaseOrder.deliverTo.stateCode?.trim() || "",
+  //         GSTIN: purchaseOrder.deliverTo.taxNumber?.trim() || "",
+  //         taxIdentifierType: purchaseOrder.deliverTo.taxIdentifierType || "",
+  //       },
+  //       items: purchaseOrder.items.map((item) => ({
+  //         ...item,
+  //         description: item.description.trim(),
+  //         hsnSac: item.hsnSac?.trim() || "",
+  //       })),
+  //     };
+  //     delete completePO.poNumber;
+
+  //     let response;
+  //     if (isEditing && createdPOId) {
+  //       response = await updatePurchaseOrderApi(createdPOId, completePO);
+  //       setSuccessMessage("Purchase Order updated successfully!");
+  //     } else {
+  //       response = await createPurchaseOrderApi(completePO);
+  //       setSuccessMessage("Purchase Order created successfully!");
+  //       setCreatedPOId(response.data._id);
+  //       setPurchaseOrder((prev) => ({
+  //         ...prev,
+  //         poNumber: response.data.poNumber,
+  //       }));
+  //       setIsEditing(true);
+  //     }
+  //     setTimeout(() => setSuccessMessage(null), 5000);
+  //   } catch (err) {
+  //     console.error("Error saving PO:", err);
+  //     setError(err.response?.data?.message || "Failed to save purchase order.");
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError(null);
+
+    const validationErrors = validateForm();
+    if (validationErrors.length) {
+      setError(validationErrors.join(". "));
+      return;
+    }
+
+    // Decide action but DO NOT call API yet
+    if (isEditing && createdPOId) {
+      setPendingAction("update");
+    } else {
+      setPendingAction("create");
+    }
+
+    // Open confirmation modal
+    setShowConfirmModal(true);
+  };
+
+  const executeSave = async () => {
+    setShowConfirmModal(false);
+    setLoading(true);
+    setError(null);
+    if (pendingAction === "update" && !isFormChanged()) {
+      setShowConfirmModal(false);
+      return;
+    }
+
+    try {
+      const completePO = {
+        ...purchaseOrder,
+        client: {
+          name: purchaseOrder.client.name.trim(),
+          address: purchaseOrder.client.address.trim(),
+          stateCode: purchaseOrder.client.stateCode?.trim() || "",
+          GSTIN: purchaseOrder.client.taxNumber?.trim() || "",
+          taxIdentifierType: purchaseOrder.client.taxIdentifierType || "",
+        },
+        deliverTo: {
+          name: purchaseOrder.deliverTo.name.trim(),
+          address: purchaseOrder.deliverTo.address.trim(),
+          stateCode: purchaseOrder.deliverTo.stateCode?.trim() || "",
+          GSTIN: purchaseOrder.deliverTo.taxNumber?.trim() || "",
+          taxIdentifierType: purchaseOrder.deliverTo.taxIdentifierType || "",
+        },
+        items: purchaseOrder.items.map((item) => ({
+          ...item,
+          description: item.description.trim(),
+          hsnSac: item.hsnSac?.trim() || "",
+        })),
+        poType: purchaseOrder.poType || "general",
+        contractDetails:
+          purchaseOrder.poType === "contract"
+            ? {
+                paymentSchedule:
+                  purchaseOrder.contractDetails?.paymentSchedule || "monthly",
+                defaultWorkingDays: Number(
+                  purchaseOrder.contractDetails?.defaultWorkingDays || 22,
+                ),
+              }
+            : undefined,
+      };
+
+      delete completePO.poNumber;
+
+      if (pendingAction === "update" && createdPOId) {
+        await updatePurchaseOrderApi(createdPOId, completePO);
+      } else {
+        const response = await createPurchaseOrderApi(completePO);
+        setCreatedPOId(response.data._id);
+      }
+
+      // Show success modal
+      setShowSuccessModal(true);
+
+      // Redirect after delay
+      setTimeout(() => {
+        navigate(-1);
+      }, 2500);
+    } catch (err) {
+      setError(err.response?.data?.message || "Failed to save purchase order.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadPdf = async () => {
+    if (!createdPOId) {
+      setError("Please save the purchase order first before downloading");
+      return;
+    }
+
+    try {
+      const response = await API.get(
+        `/purchase-orders/${createdPOId}/download/pdf`,
+        {
+          responseType: "blob",
+        },
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `PurchaseOrder_${purchaseOrder.poNumber}.pdf`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (error) {
+      console.error("Error downloading PDF:", error);
+      setError("Failed to download PDF purchase order. Please try again.");
+    }
+  };
+
+  const handleDownloadWord = async () => {
+    if (!createdPOId) {
+      setError("Please save the purchase order first before downloading");
+      return;
+    }
+
+    try {
+      const response = await API.get(
+        `/purchase-orders/${createdPOId}/download/word`,
+        {
+          responseType: "blob",
+        },
+      );
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute(
+        "download",
+        `PurchaseOrder_${purchaseOrder.poNumber}.docx`,
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (error) {
+      console.error("Error downloading Word document:", error);
+      setError("Failed to download Word purchase order. Please try again.");
+    }
+  };
+
+  const handleGoToList = () => navigate("/purchaseorder-data");
+
+  // ---------- Loading state ----------
+  if (loadingClients || loadingHsn || loadingCompany) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 max-w-md w-full text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Check className="text-green-600" size={28} />
-          </div>
-          <h2 className="text-xl font-semibold text-slate-800 mb-2">
-            Purchase Order {isEditing ? "Updated" : "Created"}
-          </h2>
-          <p className="text-slate-500 text-sm mb-6">
-            Your {selectedCategory.label} PO has been saved successfully.
-          </p>
-          <div className="flex gap-3 justify-center flex-wrap">
-  <button
-    onClick={() => navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)}
-    className="px-5 py-2 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition"
-  >
-    View All POs
-  </button>
-  {createdPOId && (
-    <button
-      onClick={() => navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)}
-      className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-    >
-      View This PO
-    </button>
-  )}
-  <button
-    onClick={() => {
-      setSuccess(false);
-      setStep(1);
-      // reset form as before...
-    }}
-    className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-  >
-    New PO
-  </button>
-</div>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-neutral-600 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading purchase order data...</p>
         </div>
       </div>
     );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  //  RENDER
-  // ─────────────────────────────────────────────────────────────
-
+  // ---------- JSX ----------
   return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Top bar */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center gap-4">
-          <button
-            onClick={() => navigate(-1)}
-            className="text-slate-400 hover:text-slate-700 transition"
-          >
-            <ArrowLeft size={18} />
-          </button>
-          <h1 className="text-base font-semibold text-slate-800">
-            {isEditing ? "Edit Purchase Order" : "New Purchase Order"}
-          </h1>
-          <div className="ml-auto flex items-center gap-1">
-            {STEPS.map((s, i) => (
-              <React.Fragment key={s.id}>
-                <button
-                  onClick={() => step > s.id && setStep(s.id)}
-                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition
-                    ${step === s.id ? `${colors.bg} ${colors.text}` : step > s.id ? "bg-green-50 text-green-600" : "text-slate-400"}`}
-                >
-                  {step > s.id ? <Check size={11} /> : <s.icon size={11} />}
-                  <span className="hidden sm:inline">{s.label}</span>
-                </button>
-                {i < STEPS.length - 1 && (
-                  <ChevronRight
-                    size={12}
-                    className={
-                      step > s.id ? "text-green-400" : "text-slate-300"
-                    }
-                  />
-                )}
-              </React.Fragment>
-            ))}
+    <div className="min-h-screen bg-slate-50 p-4">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-6 overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4" style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 60%,#60a5fa 100%)" }}>
+            <div className="flex items-center gap-3">
+              <button onClick={() => navigate(-1)} className="p-2 rounded-xl bg-white/20 hover:bg-white/30 transition-all text-white">
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <h1 className="text-base font-extrabold text-white tracking-tight">
+                  {isEditing ? `Edit Purchase Order` : "New Purchase Order"}
+                  {isEditing && purchaseOrder.poNumber && (
+                    <span className="ml-2 text-blue-200 font-mono text-sm">#{purchaseOrder.poNumber}</span>
+                  )}
+                </h1>
+                <p className="text-blue-200 text-[11px] font-medium mt-0.5">
+                  {clientIdParam && purchaseOrder?.client?.name
+                    ? `For client: ${purchaseOrder.client.name}`
+                    : "Fill in the details below"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {isEditing && (
+                <span className="px-3 py-1.5 bg-white/20 border border-white/30 text-white text-[10px] font-black rounded-xl uppercase tracking-wider">
+                  Editing
+                </span>
+              )}
+              <button onClick={handleGoToList} className="flex items-center gap-1.5 px-3 py-2 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-xl border border-white/30 transition-all">
+                <ShoppingBag className="h-3.5 w-3.5" />
+                All POs
+              </button>
+            </div>
+          </div>
+          {/* Company logo strip */}
+          <div className="flex items-center justify-center py-3 border-b border-slate-100">
+            <img src="https://res.cloudinary.com/dxqzklc00/image/upload/v1736234703/Nexu_oauth_lpewoq.png" alt="Logo" className="h-10 object-contain" />
           </div>
         </div>
-      </div>
 
-      <div className="max-w-4xl mx-auto px-4 py-8">
-        {error && (
-          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-6 text-sm">
-            <AlertCircle size={16} />
-            {error}
-          </div>
-        )}
-
-        {/* ── STEP 1: PO Type ── */}
-        {step === 1 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              What kind of Purchase Order is this?
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              This determines how invoices are calculated and raised.
-            </p>
-
-            <div className="grid sm:grid-cols-3 gap-4 mb-8">
-              {PO_CATEGORIES.map((cat) => {
-                const c = colorMap[cat.color];
-                const isSelected = form.poCategory === cat.key;
-                return (
-                  <button
-                    key={cat.key}
-                    onClick={() => selectCategory(cat.key)}
-                    className={`text-left p-5 rounded-xl border-2 transition-all
-                      ${isSelected ? `${c.bg} ${c.border} ring-2 ${c.ring} ring-offset-1` : "bg-white border-slate-200 hover:border-slate-300"}`}
-                  >
-                    <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${isSelected ? c.bg : "bg-slate-100"}`}
-                    >
-                      <cat.icon
-                        size={18}
-                        className={isSelected ? c.text : "text-slate-400"}
-                      />
-                    </div>
-                    <p
-                      className={`text-sm font-semibold mb-1 ${isSelected ? c.text : "text-slate-700"}`}
-                    >
-                      {cat.label}
-                    </p>
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      {cat.description}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Billing model selector */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                How should invoices be calculated?
-              </p>
-              <div className="grid sm:grid-cols-3 gap-3">
-                {selectedCategory.billingModels.map((bm) => {
-                  const isSelected = form.billingModel === bm.key;
-                  const c = colorMap[selectedCategory.color];
-                  return (
-                    <button
-                      key={bm.key}
-                      onClick={() => set("billingModel", bm.key)}
-                      className={`text-left p-4 rounded-lg border transition-all
-                        ${isSelected ? `${c.bg} ${c.border}` : "border-slate-200 hover:border-slate-300"}`}
-                    >
-                      <p
-                        className={`text-sm font-medium mb-1 ${isSelected ? c.text : "text-slate-700"}`}
-                      >
-                        {bm.label}
-                      </p>
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        {bm.hint}
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Staffing-specific config */}
-            {form.poCategory === "staffing" && (
-              <div className="mt-4 bg-teal-50 border border-teal-200 rounded-xl p-5">
-                <p className="text-sm font-medium text-teal-800 mb-4 flex items-center gap-2">
-                  <Info size={14} /> Staffing Configuration
-                </p>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Default Working Days / Month
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={form.staffingConfig.defaultWorkingDaysPerMonth}
-                      onChange={(e) =>
-                        set(
-                          "staffingConfig.defaultWorkingDaysPerMonth",
-                          Number(e.target.value),
-                        )
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 focus:border-teal-400 outline-none"
-                    />
-                    <p className="text-xs text-slate-400 mt-1">
-                      Standard agreement (e.g. 22 or 26)
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Leave Policy
-                    </label>
-                    <select
-                      value={form.staffingConfig.leavePolicy}
-                      onChange={(e) =>
-                        set("staffingConfig.leavePolicy", e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 focus:border-teal-400 outline-none"
-                    >
-                      {LEAVE_POLICIES.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Holiday Work Rate
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.5"
-                        value={form.staffingConfig.holidayRateMultiplier}
-                        onChange={(e) =>
-                          set(
-                            "staffingConfig.holidayRateMultiplier",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="w-24 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                      />
-                      <span className="text-xs text-slate-400">× day rate</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Overtime Rate
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.5"
-                        value={form.staffingConfig.overtimeRateMultiplier}
-                        onChange={(e) =>
-                          set(
-                            "staffingConfig.overtimeRateMultiplier",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="w-24 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                      />
-                      <span className="text-xs text-slate-400">× day rate</span>
-                    </div>
-                  </div>
+        {/* ---------- TOP CLIENT SUMMARY (when preselected via clientId) ---------- */}
+        {clientIdParam && !isEditing && purchaseOrder.client.name && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-blue-500 mb-5 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-5 flex flex-wrap items-start justify-between">
+              <div className="flex items-start gap-4">
+                <div className="bg-blue-100 p-3 rounded-full">
+                  <User className="h-6 w-6 text-blue-700" />
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── STEP 2: Client ── */}
-        {step === 2 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              Client Details
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Who is this PO raised for?
-            </p>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                Bill To (Client)
-              </p>
-              {/* Client search */}
-              <div className="relative mb-4">
-                <input
-                  type="text"
-                  placeholder="Search existing clients..."
-                  value={clientSearch}
-                  onChange={(e) => {
-                    setClientSearch(e.target.value);
-                    setClientDropdownOpen(true);
-                  }}
-                  onFocus={() => setClientDropdownOpen(true)}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400 outline-none"
-                />
-                {clientDropdownOpen && (
-                  <div className="absolute z-20 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
-                    {filteredClients.slice(0, 10).map((c, i) => (
-                      <button
-                        key={i}
-                        onClick={() => selectClient(c)}
-                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 flex items-center gap-2"
-                      >
-                        <Building size={13} className="text-slate-400" />
-                        <span>{c.name}</span>
-                        {c.taxNumber && (
-                          <span className="text-xs text-slate-400 ml-auto">
-                            {c.taxNumber}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                    {clients.filter((c) =>
-                      c.name
-                        ?.toLowerCase()
-                        .includes(clientSearch.toLowerCase()),
-                    ).length === 0 && (
-                      <p className="px-4 py-3 text-sm text-slate-400">
-                        No clients found. Fill in manually below.
-                      </p>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800 mb-1 flex items-center">
+                    {purchaseOrder.client.name}
+                    <span className="ml-3 text-xs bg-blue-200 text-blue-800 px-2 py-1 rounded-full">
+                      Client
+                    </span>
+                  </h2>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-gray-500 mt-0.5" />
+                      <span className="text-gray-700">
+                        {purchaseOrder.client.address}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-600">
+                        {getTaxLabel(purchaseOrder.client.taxIdentifierType)}:
+                      </span>{" "}
+                      <span className="text-gray-800">
+                        {purchaseOrder.client.taxNumber || "N/A"}
+                      </span>
+                    </div>
+                    {purchaseOrder.client.stateCode && (
+                      <div>
+                        <span className="font-medium text-gray-600">
+                          State Code:
+                        </span>{" "}
+                        <span className="text-gray-800">
+                          {purchaseOrder.client.stateCode}
+                        </span>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-
-              <div className="grid sm:grid-cols-2 gap-4">
-                {[
-                  {
-                    field: "client.name",
-                    label: "Client Name *",
-                    required: true,
-                  },
-                  { field: "client.GSTIN", label: "GSTIN", required: false },
-                  {
-                    field: "client.address",
-                    label: "Billing Address",
-                    required: false,
-                    span: true,
-                  },
-                  {
-                    field: "client.stateCode",
-                    label: "State Code",
-                    required: false,
-                  },
-                ].map(({ field, label, required, span }) => (
-                  <div key={field} className={span ? "sm:col-span-2" : ""}>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      {label}
-                    </label>
-                    <input
-                      type="text"
-                      value={
-                        field.split(".").reduce((o, k) => o?.[k], form) || ""
-                      }
-                      onChange={(e) => set(field, e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400 outline-none"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Deliver To */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-slate-700">
-                  Deliver To / Ship To
-                </p>
-                <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={sameAsClient}
-                    onChange={(e) => {
-                      setSameAsClient(e.target.checked);
-                      if (e.target.checked)
-                        set("deliverTo", { ...form.client });
-                    }}
-                    className="rounded border-slate-300"
-                  />
-                  Same as client
-                </label>
-              </div>
-              {!sameAsClient && (
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {[
-                    { field: "deliverTo.name", label: "Name *" },
-                    { field: "deliverTo.GSTIN", label: "GSTIN" },
-                    {
-                      field: "deliverTo.address",
-                      label: "Address",
-                      span: true,
-                    },
-                    { field: "deliverTo.stateCode", label: "State Code" },
-                  ].map(({ field, label, span }) => (
-                    <div key={field} className={span ? "sm:col-span-2" : ""}>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        {label}
-                      </label>
-                      <input
-                        type="text"
-                        value={
-                          field.split(".").reduce((o, k) => o?.[k], form) || ""
-                        }
-                        onChange={(e) => set(field, e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                      />
-                    </div>
-                  ))}
                 </div>
-              )}
-              {sameAsClient && (
-                <p className="text-sm text-slate-400 bg-slate-50 rounded-lg px-4 py-3">
-                  Using client billing address as delivery address.
+              </div>
+              <div className="bg-white px-4 py-2 rounded-lg shadow-sm">
+                <p className="text-xs text-gray-500">
+                  Ship To (same as client)
                 </p>
-              )}
+                <p className="text-sm font-medium">
+                  {purchaseOrder.client.address}
+                </p>
+              </div>
             </div>
           </div>
         )}
 
-        {/* ── STEP 3: PO Details ── */}
-        {step === 3 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              PO Details
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Dates, payment terms, and other administrative details.
-            </p>
+        <form onSubmit={handleSubmit}>
+          {/* Company Details - DYNAMIC from API */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+            <div className="flex items-center px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+              <Building className="mr-2 text-indigo-600" size={16} />
+              <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Company Details</h2>
+            </div>
+            <div className="p-6">
+              {companyInfo ? (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">
+                      Company Name
+                    </h3>
+                    <p className="text-gray-900">
+                      {companyInfo.companyName ||
+                        "Nexucon Consultancy Services Pvt Ltd"}
+                    </p>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">
+                      Company Address
+                    </h3>
+                    <p className="text-gray-900">
+                      {companyInfo.address ||
+                        "Methopara, 60/N/3, Madhyamgram, North Twenty Four Parganas, West Bengal, 700132"}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">
+                        GSTIN
+                      </h3>
+                      <p className="text-gray-900">
+                        {companyInfo.gstin }
+                      </p>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">
+                        PAN
+                      </h3>
+                      <p className="text-gray-900">
+                        {companyInfo.panNumber || "AAICN7264L"}
+                      </p>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">
+                        TAN
+                      </h3>
+                      <p className="text-gray-900">
+                        {companyInfo.tanNumber || "-"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500">Loading company details...</p>
+              )}
+            </div>
+          </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-              <div className="grid sm:grid-cols-3 gap-4">
+          {/* Purchase Order Details (unchanged) */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+            <div className="flex items-center px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+              <FileText className="mr-2 text-indigo-600" size={16} />
+              <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Purchase Order Details</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    PO Number
+                  </label>
+                  <input
+                    type="text"
+                    name="poNumber"
+                    value={purchaseOrder.poNumber}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                    readOnly
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Client PO  Reference
+                  </label>
+                  <input
+                    type="text"
+                    name="poreferencevalue"
+                    value={purchaseOrder.poreferencevalue}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="Client reference number"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Payment Terms
+                  </label>
+                  <select
+                    name="paymentTerms"
+                    value={purchaseOrder.paymentTerms}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="net-30">Net 30</option>
+                    <option value="net-60">Net 60</option>
+                    <option value="net-90">Net 90</option>
+                    <option value="cod">Cash on Delivery</option>
+                    <option value="advance">Advance Payment</option>
+                    <option value="immediate">Immediate Payment</option>
+                  </select>
+                </div>
+                {/* <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    PO Type
+                  </label>
+                  <select
+                    name="poType"
+                    value={purchaseOrder.poType || "general"}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  >
+                    <option value="general">General</option>
+                    <option value="milestone">Milestone</option>
+                    <option value="contract">Contract</option>
+                  </select>
+                </div>
+                {purchaseOrder.poType === "contract" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Contract Payment Type
+                      </label>
+                      <select
+                        name="paymentSchedule"
+                        value={
+                          purchaseOrder.contractDetails?.paymentSchedule ||
+                          "monthly"
+                        }
+                        onChange={handleContractDetailsChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      >
+                        <option value="monthly">Monthly Payment</option>
+                        <option value="quarterly">Quarterly Payment</option>
+                        <option value="half-yearly">Half Yearly Payment</option>
+                        <option value="daily">Daily Payment</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Default Working Days
+                      </label>
+                      <input
+                        type="number"
+                        name="defaultWorkingDays"
+                        value={
+                          purchaseOrder.contractDetails?.defaultWorkingDays ||
+                          22
+                        }
+                        onChange={handleContractDetailsChange}
+                        min="1"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                      />
+                    </div>
+                  </>
+                )} */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Total Amount
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500">
+                        {purchaseOrder.currency}
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      name="totalAmount"
+                      value={purchaseOrder.totalAmount.toFixed(2)}
+                      readOnly
+                      className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
                     PO Date *
                   </label>
                   <input
                     type="date"
-                    value={form.poDate}
-                    onChange={(e) => set("poDate", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+                    name="poDate"
+                    value={purchaseOrder.poDate}
+                    onChange={handleInputChange}
+                    className="w-full min-w-[11rem] px-3 py-2 border border-gray-300 rounded-md"
+                    required
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    {form.poCategory === "staffing"
-                      ? "Contract End Date"
-                      : "Delivery Date"}{" "}
-                    *
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Due Date *
                   </label>
                   <input
                     type="date"
-                    value={form.deliveryDate}
-                    onChange={(e) => set("deliveryDate", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+                    name="deliveryDate"
+                    value={purchaseOrder.deliveryDate}
+                    onChange={handleInputChange}
+                    className="w-full min-w-[11rem] px-3 py-2 border border-gray-300 rounded-md"
+                    required
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Reference #
-                  </label>
-                  <input
-                    type="text"
-                    value={form.poreferencevalue}
-                    onChange={(e) => set("poreferencevalue", e.target.value)}
-                    placeholder="Client PO ref"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                Payment Settings
-              </p>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Payment Terms
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Currency
                   </label>
                   <select
-                    value={form.paymentTerms}
-                    onChange={(e) => set("paymentTerms", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+                    name="currency"
+                    value={purchaseOrder.currency}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
                   >
-                    {PAYMENT_TERMS.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
+                    <option value="INR">INR - Indian Rupee</option>
+                    <option value="USD">USD - US Dollar</option>
+                    <option value="EUR">EUR - Euro</option>
+                    <option value="GBP">GBP - British Pound</option>
+                    <option value="JPY">JPY - Japanese Yen</option>
+                    <option value="CAD">CAD - Canadian Dollar</option>
+                    <option value="AUD">AUD - Australian Dollar</option>
                   </select>
                 </div>
-                {(form.poCategory === "retainer" ||
-                  form.billingModel === "milestone") && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Invoice Schedule
-                    </label>
-                    <select
-                      value={form.paymentSchedule}
-                      onChange={(e) => set("paymentSchedule", e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                    >
-                      {PAYMENT_SCHEDULES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Reference Date
+                  </label>
+                  <input
+                    type="date"
+                    name="referenceDate"
+                    value={purchaseOrder.referenceDate}
+                    onChange={handleInputChange}
+                    className="w-full min-w-[11rem] px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Notes (Optional)
+                </label>
+                <textarea
+                  name="notes"
+                  value={purchaseOrder.notes}
+                  onChange={handleInputChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  rows="2"
+                  placeholder="Additional notes or instructions..."
+                />
               </div>
             </div>
-
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                Internal Notes
-              </label>
-              <textarea
-                value={form.notes}
-                onChange={(e) => set("notes", e.target.value)}
-                rows={3}
-                placeholder="Any internal notes about this PO..."
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none resize-none"
-              />
-            </div>
           </div>
-        )}
 
-        {/* ── STEP 4: Line Items / Milestones / Resources ── */}
-        {step === 4 && (
-          <div>
-            {/* MILESTONE-based */}
-            {form.billingModel === "milestone" && (
-              <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Project Milestones
-                </h2>
-                <p className="text-sm text-slate-500 mb-4">
-                  Define milestones. An invoice will be raised when you mark
-                  each milestone as complete.
-                </p>
+          {/* ---------- CLIENT DETAILS SECTION (hidden when client is preselected and not editing) ---------- */}
+          {(!clientIdParam || isEditing) && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+              <div className="flex items-center px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+                <User className="mr-2 text-indigo-600" size={16} />
+                <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Client Details</h2>
+              </div>
+              <div className="p-6">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Client Section */}
+                  <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-lg font-semibold text-neutral-700">
+                        Client *
+                      </h3>
+                      {purchaseOrder.client.name && !editingClient && (
+                        <div className="flex space-x-2">
+                          <button
+                            type="button"
+                            onClick={handleEditClient}
+                            className="text-sm text-blue-600 hover:text-blue-800"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleClearClient}
+                            className="flex items-center text-sm text-red-600 hover:text-red-800"
+                          >
+                            <X size={16} className="mr-1" /> Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
 
-                {/* First set the total PO value */}
-                <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-                  <p className="text-sm font-medium text-slate-700 mb-3">
-                    Total Contract Value
-                  </p>
-                  <div className="grid sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Total Taxable Value (₹)
-                      </label>
-                      <input
-                        type="number"
-                        // min=""
-                        value={form.totalTaxableValue}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          const gst = Math.round(v * 18) / 100;
-                          setForm((prev) => ({
-                            ...prev,
-                            totalTaxableValue: v,
-                            totalCGSTAmount: Math.round((gst / 2) * 100) / 100,
-                            totalSGSTAmount: Math.round((gst / 2) * 100) / 100,
-                            totalAmount: Math.round((v + gst) * 100) / 100,
-                            valueInWords: numberToWords(
-                              Math.round((v + gst) * 100) / 100,
-                            ),
-                          }));
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        GST (18%)
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={`₹ ${(Math.round(form.totalTaxableValue * 18) / 100).toFixed(2)}`}
-                        className="w-full px-3 py-2 text-sm border border-slate-100 rounded-lg bg-slate-50 text-slate-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        Total with GST (₹)
-                      </label>
-                      <input
-                        type="text"
-                        readOnly
-                        value={`₹ ${form.totalAmount?.toFixed(2) || "0.00"}`}
-                        className="w-full px-3 py-2 text-sm border border-slate-100 rounded-lg bg-slate-50 font-medium text-slate-700"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Milestones */}
-                <div className="space-y-3">
-                  {form.milestones.map((m, i) => (
-                    <div
-                      key={i}
-                      className="bg-white border border-slate-200 rounded-xl p-4"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span className="mt-1 w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                          {i + 1}
-                        </span>
-                        <div className="flex-1 grid sm:grid-cols-4 gap-3">
-                          <div className="sm:col-span-2">
-                            <input
-                              type="text"
-                              placeholder="Milestone title"
-                              value={m.title}
-                              onChange={(e) =>
-                                updateMilestone(i, "title", e.target.value)
-                              }
-                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                            />
+                    {!purchaseOrder.client.name || editingClient ? (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Select Client
+                          {loadingClients && (
+                            <span className="ml-2 text-xs text-gray-500">
+                              (Loading...)
+                            </span>
+                          )}
+                          <span className="ml-2 text-xs text-gray-500">
+                            ({filteredClients.length} clients)
+                          </span>
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Search client..."
+                            value={clientSearch}
+                            onChange={(e) => {
+                              setClientSearch(e.target.value);
+                              setClientDropdownOpen(true);
+                            }}
+                            onFocus={() => setClientDropdownOpen(true)}
+                            className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-400 pr-10"
+                          />
+                          <ChevronDown
+                            className={`absolute right-3 top-2.5 text-gray-400 cursor-pointer ${
+                              clientDropdownOpen ? "rotate-180" : ""
+                            }`}
+                            size={20}
+                            onClick={() =>
+                              setClientDropdownOpen(!clientDropdownOpen)
+                            }
+                          />
+                          {clientDropdownOpen && (
+                            <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                              {filteredClients.length ? (
+                                filteredClients.map((client) => (
+                                  <div
+                                    key={client._id}
+                                    className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
+                                    onClick={() => handleSelectClient(client)}
+                                  >
+                                    <div className="font-medium">
+                                      {client.clientName}
+                                    </div>
+                                    <div className="text-sm text-gray-500">
+                                      <span>
+                                        {getTaxLabel(client.taxIdentifierType)}:{" "}
+                                        {client.taxNumber || "N/A"}
+                                      </span>
+                                      {client.stateCode && (
+                                        <span className="ml-2">
+                                          State: {client.stateCode}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="p-4 text-center text-gray-500">
+                                  No clients found
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">
+                              Client Name
+                            </label>
+                            <p className="text-sm font-medium">
+                              {purchaseOrder.client.name}
+                            </p>
                           </div>
                           <div>
-                            <div className="flex items-center gap-1">
-                              <input
-                                type="number"
-                                placeholder="%"
-                                min="0"
-                                max="100"
-                                value={m.percentage}
-                                onChange={(e) =>
-                                  updateMilestone(
-                                    i,
-                                    "percentage",
-                                    e.target.value,
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                              />
-                              <span className="text-slate-400 text-sm">%</span>
-                            </div>
+                            <label className="block text-xs font-medium text-gray-500">
+                              {getTaxLabel(
+                                purchaseOrder.client.taxIdentifierType,
+                              )}
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.taxNumber || "N/A"}
+                            </p>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <div className="flex-1">
-                              <input
-                                type="number"
-                                placeholder="Amount ₹"
-                                min="0"
-                                value={m.amount}
-                                onChange={(e) =>
-                                  updateMilestone(i, "amount", e.target.value)
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                              />
-                            </div>
-                            <button
-                              onClick={() => removeMilestone(i)}
-                              className="text-slate-400 hover:text-red-500 transition"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </div>
-                          <div className="sm:col-span-2">
-                            <input
-                              type="text"
-                              placeholder="Description (optional)"
-                              value={m.description}
-                              onChange={(e) =>
-                                updateMilestone(
-                                  i,
-                                  "description",
-                                  e.target.value,
-                                )
-                              }
-                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                            />
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-500">
+                              Address
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.address}
+                            </p>
                           </div>
                           <div>
-                            <input
-                              type="date"
-                              value={m.dueDate}
-                              onChange={(e) =>
-                                updateMilestone(i, "dueDate", e.target.value)
-                              }
-                              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                            />
+                            <label className="block text-xs font-medium text-gray-500">
+                              State Code
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.stateCode || "N/A"}
+                            </p>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                  <button
-                    onClick={addMilestone}
-                    className="w-full py-3 border-2 border-dashed border-slate-200 hover:border-blue-300 rounded-xl text-sm text-slate-400 hover:text-blue-500 transition flex items-center justify-center gap-2"
-                  >
-                    <Plus size={15} /> Add Milestone
-                  </button>
-                  {form.milestones.length > 0 && (
-                    <div className="bg-blue-50 rounded-xl px-4 py-3 flex justify-between text-sm">
-                      <span className="text-blue-600">
-                        Total milestone allocation:
-                      </span>
-                      <span className="font-medium text-blue-700">
-                        {form.milestones
-                          .reduce((s, m) => s + Number(m.percentage || 0), 0)
-                          .toFixed(1)}
-                        % (₹{" "}
-                        {form.milestones
-                          .reduce((s, m) => s + Number(m.amount || 0), 0)
-                          .toLocaleString()}
-                        )
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
+                    )}
 
-            {/* STAFFING / HEADCOUNT — resource roster */}
-            {(form.poCategory === "staffing" ||
-              form.billingModel === "headcount") && (
-              <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Resources / Headcount
-                </h2>
-                <p className="text-sm text-slate-500 mb-4">
-                  Add the people who will be deployed. Rates here are used when
-                  attendance is submitted.
-                </p>
-
-                <div className="space-y-3">
-                  {form.resources.map((r, i) => (
-                    <div
-                      key={i}
-                      className="bg-white border border-slate-200 rounded-xl p-4"
-                    >
-                      <div className="grid sm:grid-cols-3 gap-3">
+                    {(!purchaseOrder.client.name || editingClient) && (
+                      <div className="space-y-4 mt-4">
                         <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Full Name *
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Client Name *
                           </label>
                           <input
                             type="text"
-                            value={r.name}
-                            onChange={(e) =>
-                              updateResource(i, "name", e.target.value)
-                            }
-                            placeholder="Resource name"
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
+                            name="name"
+                            value={purchaseOrder.client.name}
+                            onChange={handleClientChange}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            required
                           />
                         </div>
                         <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Role / Designation
+                          <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Address *
                           </label>
-                          <input
-                            type="text"
-                            value={r.role}
-                            onChange={(e) =>
-                              updateResource(i, "role", e.target.value)
-                            }
-                            placeholder="e.g. Senior Developer"
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
+                          <textarea
+                            name="address"
+                            value={purchaseOrder.client.address}
+                            onChange={handleClientChange}
+                            rows="3"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            required
                           />
                         </div>
-                        <div className="flex items-end gap-2">
-                          {form.billingModel === "daily" ||
-                          form.staffingConfig?.billingUnit === "day" ? (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Day (₹)
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              State Code
+                            </label>
+                            <input
+                              type="text"
+                              name="stateCode"
+                              value={purchaseOrder.client.stateCode}
+                              onChange={handleClientChange}
+                              maxLength="2"
+                              placeholder="e.g., 19"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Tax ID
+                            </label>
+                            <input
+                              type="text"
+                              name="taxNumber"
+                              value={purchaseOrder.client.taxNumber}
+                              onChange={handleClientChange}
+                              placeholder="Tax identification number"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            />
+                          </div>
+                          {purchaseOrder.client.taxIdentifierType && (
+                            <div className="col-span-2">
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Tax ID Type
                               </label>
                               <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerDay}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerDay",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                              />
-                            </div>
-                          ) : form.billingModel === "hourly" ||
-                            form.staffingConfig?.billingUnit === "hour" ? (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Hour (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerHour}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerHour",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                              />
-                            </div>
-                          ) : (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Month (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerMonth}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerMonth",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
+                                type="text"
+                                name="taxIdentifierType"
+                                value={purchaseOrder.client.taxIdentifierType}
+                                onChange={handleClientChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
                               />
                             </div>
                           )}
-                          <button
-                            onClick={() => removeResource(i)}
-                            className="text-slate-400 hover:text-red-500 transition pb-2"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Start Date
-                          </label>
-                          <input
-                            type="date"
-                            value={r.startDate || ""}
-                            onChange={(e) =>
-                              updateResource(i, "startDate", e.target.value)
-                            }
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            End Date
-                          </label>
-                          <input
-                            type="date"
-                            value={r.endDate || ""}
-                            onChange={(e) =>
-                              updateResource(i, "endDate", e.target.value)
-                            }
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
                         </div>
                       </div>
+                    )}
+                  </div>
+
+                  {/* Deliver To Section with Dropdown */}
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                    <div className="flex justify-between items-center mb-4">
+                      <div className="flex items-center">
+                        <h3 className="text-lg font-semibold text-gray-900 mr-4">
+                          Deliver To *
+                        </h3>
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            id="sameAsClient"
+                            checked={sameAsClient}
+                            onChange={(e) =>
+                              handleSameAsClient(e.target.checked)
+                            }
+                            className="h-4 w-4 text-blue-600 rounded"
+                          />
+                          <label
+                            htmlFor="sameAsClient"
+                            className="ml-2 text-sm text-gray-700"
+                          >
+                            Same as Client
+                          </label>
+                        </div>
+                      </div>
+                      {!sameAsClient &&
+                        purchaseOrder.deliverTo.name &&
+                        !editingDeliverTo && (
+                          <div className="flex space-x-2">
+                            <button
+                              type="button"
+                              onClick={handleEditDeliverTo}
+                              className="text-sm text-blue-600 hover:text-blue-800"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleClearDeliverTo}
+                              className="flex items-center text-sm text-red-600 hover:text-red-800"
+                            >
+                              <X size={16} className="mr-1" /> Clear
+                            </button>
+                          </div>
+                        )}
                     </div>
-                  ))}
-                  <button
-                    onClick={addResource}
-                    className="w-full py-3 border-2 border-dashed border-slate-200 hover:border-teal-300 rounded-xl text-sm text-slate-400 hover:text-teal-500 transition flex items-center justify-center gap-2"
-                  >
-                    <Plus size={15} /> Add Resource
-                  </button>
+
+                    {sameAsClient ? (
+                      <div className="p-3 bg-white rounded-lg border border-gray-200">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">
+                              Client Name
+                            </label>
+                            <p className="text-sm font-medium">
+                              {purchaseOrder.client.name}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">
+                              {getTaxLabel(
+                                purchaseOrder.client.taxIdentifierType,
+                              )}
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.taxNumber || "N/A"}
+                            </p>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-500">
+                              Address
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.address}
+                            </p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">
+                              State Code
+                            </label>
+                            <p className="text-sm">
+                              {purchaseOrder.client.stateCode || "N/A"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {!purchaseOrder.deliverTo.name || editingDeliverTo ? (
+                          <div className="mb-4">
+                            <label className="block text-sm font-medium text-gray-700 mb-1">
+                              Select Delivery Address
+                              <span className="ml-2 text-xs text-gray-500">
+                                ({filteredDeliverToClients.length} clients)
+                              </span>
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                placeholder="Search client for delivery..."
+                                value={deliverToSearch}
+                                onChange={(e) => {
+                                  setDeliverToSearch(e.target.value);
+                                  setDeliverToDropdownOpen(true);
+                                }}
+                                onFocus={() => setDeliverToDropdownOpen(true)}
+                                className="w-full px-3 py-2 text-sm border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-400 pr-10"
+                              />
+                              <ChevronDown
+                                className={`absolute right-3 top-2.5 text-gray-400 cursor-pointer ${
+                                  deliverToDropdownOpen ? "rotate-180" : ""
+                                }`}
+                                size={20}
+                                onClick={() =>
+                                  setDeliverToDropdownOpen(
+                                    !deliverToDropdownOpen,
+                                  )
+                                }
+                              />
+                              {deliverToDropdownOpen && (
+                                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                  {filteredDeliverToClients.length ? (
+                                    filteredDeliverToClients.map((client) => (
+                                      <div
+                                        key={client._id}
+                                        className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b last:border-b-0"
+                                        onClick={() =>
+                                          handleSelectDeliverTo(client)
+                                        }
+                                      >
+                                        <div className="font-medium">
+                                          {client.clientName}
+                                        </div>
+                                        <div className="text-sm text-gray-500">
+                                          <span>
+                                            {getTaxLabel(
+                                              client.taxIdentifierType,
+                                            )}
+                                            : {client.taxNumber || "N/A"}
+                                          </span>
+                                          {client.stateCode && (
+                                            <span className="ml-2">
+                                              State: {client.stateCode}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))
+                                  ) : (
+                                    <div className="p-4 text-center text-gray-500">
+                                      No clients found
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="mb-4 p-3 bg-white rounded-lg border border-gray-200">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">
+                                  Name
+                                </label>
+                                <p className="text-sm font-medium">
+                                  {purchaseOrder.deliverTo.name}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">
+                                  {getTaxLabel(
+                                    purchaseOrder.deliverTo.taxIdentifierType,
+                                  )}
+                                </label>
+                                <p className="text-sm">
+                                  {purchaseOrder.deliverTo.taxNumber || "N/A"}
+                                </p>
+                              </div>
+                              <div className="col-span-2">
+                                <label className="block text-xs font-medium text-gray-500">
+                                  Address
+                                </label>
+                                <p className="text-sm">
+                                  {purchaseOrder.deliverTo.address}
+                                </p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">
+                                  State Code
+                                </label>
+                                <p className="text-sm">
+                                  {purchaseOrder.deliverTo.stateCode || "N/A"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {(!purchaseOrder.deliverTo.name ||
+                          editingDeliverTo) && (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Name *
+                              </label>
+                              <input
+                                type="text"
+                                name="name"
+                                value={purchaseOrder.deliverTo.name}
+                                onChange={handleDeliverToChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                required
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">
+                                Address *
+                              </label>
+                              <textarea
+                                name="address"
+                                value={purchaseOrder.deliverTo.address}
+                                onChange={handleDeliverToChange}
+                                rows="3"
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                required
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  State Code
+                                </label>
+                                <input
+                                  type="text"
+                                  name="stateCode"
+                                  value={purchaseOrder.deliverTo.stateCode}
+                                  onChange={handleDeliverToChange}
+                                  maxLength="2"
+                                  placeholder="e.g., 19"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">
+                                  Tax ID
+                                </label>
+                                <input
+                                  type="text"
+                                  name="taxNumber"
+                                  value={purchaseOrder.deliverTo.taxNumber}
+                                  onChange={handleDeliverToChange}
+                                  placeholder="Tax identification number"
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Items Section (unchanged) */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+              <div className="flex items-center">
+                <CreditCard className="mr-2 text-indigo-600" size={16} />
+                <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Items</h2>
+              </div>
+              <button
+                type="button"
+                onClick={handleAddItem}
+                className="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 flex items-center"
+              >
+                <Plus className="mr-2 text-indigo-600" size={16} />
+                Add Item
+              </button>
+            </div>
+            <div className="p-6">
+              {purchaseOrder.items.length > 0 ? (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase">
+                            S. No.
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Description *
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            HSN/SAC
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Qty *
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Rate *
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Taxable Value
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            GST %
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            GST Amount
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Total
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {purchaseOrder.items.map((item, index) => (
+                          <tr key={index} className="hover:bg-gray-50">
+                            <td className="px-3 py-3 text-center font-semibold text-gray-700">
+                              {index + 1}
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="text"
+                                value={item.description}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "description",
+                                    e.target.value,
+                                  )
+                                }
+                                list="descriptions"
+                                className="w-full px-2 py-1 border border-gray-300 rounded"
+                                placeholder="Item description..."
+                                required
+                              />
+                              <datalist id="descriptions">
+                                {existingDescriptions.map((desc, i) => (
+                                  <option key={i} value={desc} />
+                                ))}
+                              </datalist>
+                            </td>
+                            <td className="px-4 py-3">
+                              <select
+                                value={item.hsnSac}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "hsnSac",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-2 py-1 border border-gray-300 rounded"
+                              >
+                                <option value="">Select HSN/SAC</option>
+                                {hsnList.map((hsn) => (
+                                  <option key={hsn._id} value={hsn.hsnCode}>
+                                    {hsn.hsnCode} - {hsn.serviceType} (
+                                    {hsn.cgst + hsn.sgst}% CGST+SGST /{" "}
+                                    {hsn.igst}% IGST)
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                value={item.quantity}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "quantity",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-right"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                                required
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                value={item.rate}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "rate",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-right"
+                                min="0"
+                                step="0.01"
+                                required
+                              />
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                value={item.taxableValue}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "taxableValue",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-right"
+                                min="0"
+                                step="0.01"
+                                inputMode="decimal"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium">
+                              <input
+                                type="number"
+                                value={item.gstRate}
+                                onChange={(e) =>
+                                  handleItemChange(
+                                    index,
+                                    "gstRate",
+                                    e.target.value,
+                                  )
+                                }
+                                className="w-full px-2 py-1 border border-gray-300 rounded text-right"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-right font-medium">
+                              {item.gstAmount?.toFixed(2) || "0.00"}
+                            </td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-900">
+                              {item.total?.toFixed(2) || "0.00"}
+                            </td>
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(index)}
+                                disabled={purchaseOrder.items.length === 1}
+                                className={`text-red-500 hover:text-red-700 ${
+                                  purchaseOrder.items.length === 1
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                                }`}
+                              >
+                                <Trash2 size={20} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex justify-end mt-4">
+                    <div className="bg-gradient-to-r from-neutral-500 to-neutral-700 text-white p-4 rounded-lg w-64">
+                      <h3 className="text-lg font-bold text-right">
+                        Total: {purchaseOrder.currency}{" "}
+                        {purchaseOrder.totalAmount.toFixed(2)}
+                      </h3>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8 bg-gray-50 rounded-lg">
+                  <Package className="mx-auto text-gray-400 mb-2" size={48} />
+                  <p className="text-gray-500">
+                    No items added yet. Click "Add Item" to get started.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Bank & Amount Details - DYNAMIC from companyInfo */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+            <div className="flex items-center px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+              <Banknote className="mr-2 text-indigo-600" size={16} />
+              <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">Bank & Amount Details</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Bank Details */}
+                <div className="bg-gradient-to-r from-neutral-700 to-neutral-500 text-white p-6 rounded-lg">
+                  <h3 className="text-lg font-semibold mb-4">Bank Details</h3>
+                  {companyInfo ? (
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">
+                          Bank Name
+                        </h4>
+                        <p>{companyInfo.bankName || "ICICI Bank"}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">
+                          Account Name
+                        </h4>
+                        <p>
+                          {companyInfo.accountName ||
+                            "NEXUCON CONSULTANCY SERVICES PRIVATE"}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="text-sm font-semibold opacity-90 mb-1">
+                            Account Number
+                          </h4>
+                          <p>{companyInfo.accountNumber || "128005500629"}</p>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold opacity-90 mb-1">
+                            IFSC Code
+                          </h4>
+                          <p>{companyInfo.ifscCode || "ICIC0001280"}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">
+                          Branch
+                        </h4>
+                        <p>{companyInfo.branch || "Baranagar"}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-gray-300">Loading bank details...</p>
+                  )}
                 </div>
 
-                {/* Also show total PO value for staffing */}
-                <div className="mt-4 bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-sm font-medium text-slate-700 mb-3">
-                    PO Ceiling Value (optional but recommended)
-                  </p>
-                  <div className="grid sm:grid-cols-2 gap-4">
+                {/* Amount Details (unchanged) */}
+                <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                    Amount Details
+                  </h3>
+                  <div className="space-y-4">
                     <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        Total PO Value (₹ incl. GST)
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Total Taxable Value
                       </label>
                       <input
                         type="number"
-                        min="0"
-                        value={form.totalAmount}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setForm((prev) => ({
-                            ...prev,
-                            totalAmount: v,
-                            totalTaxableValue:
-                              Math.round((v / 1.18) * 100) / 100,
-                            valueInWords: numberToWords(v),
-                          }));
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+                        name="totalTaxableValue"
+                        value={purchaseOrder.totalTaxableValue.toFixed(2)}
+                        readOnly
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                       />
-                      <p className="text-xs text-slate-400 mt-1">
-                        Sets the maximum invoiceable limit for this PO
-                      </p>
                     </div>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* FIXED / RETAINER — standard line items */}
-            {(form.billingModel === "fixed" ||
-              (form.poCategory !== "staffing" &&
-                form.billingModel !== "milestone" &&
-                form.billingModel !== "headcount")) && (
-              <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Line Items
-                </h2>
-                <p className="text-sm text-slate-500 mb-4">
-                  Services or deliverables covered under this PO.
-                </p>
-
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  {/* Header */}
-                  <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs font-medium text-slate-500">
-                    <div className="col-span-4">Description</div>
-                    <div className="col-span-1">HSN/SAC</div>
-                    <div className="col-span-1">Qty</div>
-                    <div className="col-span-2">Rate (₹)</div>
-                    <div className="col-span-1">GST %</div>
-                    <div className="col-span-2">Total (₹)</div>
-                    <div className="col-span-1"></div>
-                  </div>
-
-                  {form.items.map((item, i) => (
-                    <div
-                      key={i}
-                      className="grid sm:grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 items-center"
-                    >
-                      <div className="sm:col-span-4">
-                        <input
-                          type="text"
-                          placeholder="Service description"
-                          value={item.description}
-                          onChange={(e) =>
-                            updateItem(i, "description", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-1 relative z-50">
-  <select
-    value={item.hsnId || ""}
-    onChange={(e) => {
-      const selectedId = e.target.value;
-      if (!selectedId) {
-        // User cleared the selection
-        updateItem(i, "hsnId", null);
-        updateItem(i, "hsnSac", "");
-        updateItem(i, "gstRate", 18);
-        return;
-      }
-      const selectedHsn = hsnList.find((h) => h._id === selectedId);
-      if (selectedHsn) {
-        updateItem(i, "hsnId", selectedId);
-        updateItem(i, "hsnSac", selectedHsn.hsnCode);
-        // Auto-fill description only if it's currently empty
-        if (!item.description.trim()) {
-          updateItem(i, "description", selectedHsn.serviceType);
-        }
-        const totalGst = getTotalGstRate(selectedHsn);
-        updateItem(i, "gstRate", totalGst);
-      }
-    }}
-    className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-  >
-    <option value="">Select HSN</option>
-    {hsnList.map((hsn) => (
-      <option key={hsn._id} value={hsn._id}>
-        {hsn.hsnCode} – {hsn.serviceType}
-      </option>
-    ))}
-  </select>
-</div>
-                      <div className="sm:col-span-1">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateItem(i, "quantity", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.rate}
-                          onChange={(e) =>
-                            updateItem(i, "rate", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="28"
-                          value={item.gstRate}
-                          onChange={(e) =>
-                            updateItem(i, "gstRate", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <span className="text-sm font-medium text-slate-700">
-                          ₹{" "}
-                          {item.total?.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                      <div className="sm:col-span-1 flex justify-end">
-                        {form.items.length > 1 && (
-                          <button
-                            onClick={() => removeItem(i)}
-                            className="text-slate-300 hover:text-red-500 transition"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="px-4 py-3 border-b border-slate-100">
-                    <button
-                      onClick={addItem}
-                      className="flex items-center gap-1.5 text-sm text-blue-500 hover:text-blue-700 transition"
-                    >
-                      <Plus size={14} /> Add Line Item
-                    </button>
-                  </div>
-
-                  {/* Totals */}
-                  <div className="px-4 py-4 bg-slate-50 space-y-1.5 text-sm">
-                    <div className="flex justify-between text-slate-600">
-                      <span>Subtotal (taxable)</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalTaxableValue?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>CGST</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalCGSTAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>SGST</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalSGSTAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200">
-                      <span>Total</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* ── STEP 5: Review ── */}
-        {step === 5 && (
-          <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              Review & Submit
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Check everything before creating the PO.
-            </p>
-
-            <div className="space-y-4">
-              {/* Summary card */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5">
-                <div className="grid sm:grid-cols-2 gap-6">
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">PO Type</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {selectedCategory.label} —{" "}
-                      {
-                        PO_CATEGORIES.flatMap((c) => c.billingModels).find(
-                          (b) => b.key === form.billingModel,
-                        )?.label
-                      }
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">Client</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {form.client.name || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">PO Date</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {form.poDate}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">Payment Terms</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {PAYMENT_TERMS.find((t) => t.value === form.paymentTerms)
-                        ?.label || form.paymentTerms}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">
-                      Total PO Value
-                    </p>
-                    <p className="text-xl font-bold text-slate-800">
-                      ₹{" "}
-                      {form.totalAmount?.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
-                    </p>
-                  </div>
-                  {form.poCategory === "staffing" && (
                     <div>
-                      <p className="text-xs text-slate-400 mb-1">Resources</p>
-                      <p className="text-sm font-medium text-slate-700">
-                        {form.resources.length} person(s) rostered
-                      </p>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Value in Words
+                      </label>
+                      <textarea
+                        value={purchaseOrder.valueInWords}
+                        readOnly
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                        rows="2"
+                      />
                     </div>
-                  )}
-                  {form.billingModel === "milestone" && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Total CGST
+                        </label>
+                        <input
+                          type="number"
+                          name="totalCGSTAmount"
+                          value={purchaseOrder.totalCGSTAmount.toFixed(2)}
+                          readOnly
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Total SGST
+                        </label>
+                        <input
+                          type="number"
+                          name="totalSGSTAmount"
+                          value={purchaseOrder.totalSGSTAmount.toFixed(2)}
+                          readOnly
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                        />
+                      </div>
+                    </div>
                     <div>
-                      <p className="text-xs text-slate-400 mb-1">Milestones</p>
-                      <p className="text-sm font-medium text-slate-700">
-                        {form.milestones.length} milestone(s) defined
-                      </p>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Total IGST
+                      </label>
+                      <input
+                        type="number"
+                        name="totalIGSTAmount"
+                        value={purchaseOrder.totalIGSTAmount.toFixed(2)}
+                        readOnly
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                      />
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
-
-              {/* Amount in words */}
-              {form.valueInWords && (
-                <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-3">
-                  <p className="text-xs text-slate-400 mb-1">Amount in Words</p>
-                  <p className="text-sm text-slate-600 italic">
-                    {form.valueInWords}
-                  </p>
-                </div>
-              )}
-
-              <label className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.withSignature}
-                  onChange={(e) => set("withSignature", e.target.checked)}
-                  className="rounded border-slate-300 text-blue-500"
-                />
-                <span className="text-sm text-slate-600">
-                  Include digital signature in document
-                </span>
-              </label>
             </div>
           </div>
-        )}
 
-        {/* ── NAVIGATION ── */}
-        <div className="flex justify-between mt-8">
-          <button
-            onClick={() => (step > 1 ? setStep(step - 1) : navigate(-1))}
-            className="px-5 py-2.5 text-sm font-medium border border-slate-200 rounded-xl hover:bg-slate-50 transition flex items-center gap-2"
-          >
-            <ArrowLeft size={15} /> Back
-          </button>
-          {step < 5 ? (
+          {/* PDF Generation Options (unchanged) */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 mb-5 overflow-hidden">
+            <div className="flex items-center px-5 py-3.5 border-b border-slate-100" style={{background:"linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)"}}>
+              <Download className="mr-2 text-indigo-600" size={16} />
+              <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">PDF Generation Options</h2>
+            </div>
+            <div className="p-6">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="digitalSignature"
+                      checked={purchaseOrder.withSignature}
+                      onChange={(e) =>
+                        setPurchaseOrder((prev) => ({
+                          ...prev,
+                          withSignature: e.target.checked,
+                        }))
+                      }
+                      className="h-5 w-5 text-blue-600 rounded"
+                    />
+                    <label
+                      htmlFor="digitalSignature"
+                      className="ml-2 text-gray-700 font-medium"
+                    >
+                      Include Digital Signature
+                    </label>
+                  </div>
+                  <span
+                    className={`px-3 py-1 text-sm rounded-full ${
+                      purchaseOrder.withSignature
+                        ? "bg-green-100 text-green-800"
+                        : "bg-gray-200 text-gray-800"
+                    }`}
+                  >
+                    {purchaseOrder.withSignature
+                      ? "With Signature"
+                      : "Without Signature"}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600 mt-2">
+                  When selected, the generated document will include a digital
+                  signature placeholder.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col items-center space-y-4 mt-8">
             <button
-              onClick={() => canProceed() && setStep(step + 1)}
-              disabled={!canProceed()}
-              className={`px-6 py-2.5 text-sm font-medium rounded-xl transition flex items-center gap-2
-                ${
-                  canProceed()
-                    ? `${colors.bg} ${colors.text} hover:opacity-90`
-                    : "bg-slate-100 text-slate-400 cursor-not-allowed"
-                }`}
-            >
-              Continue <ChevronRight size={15} />
-            </button>
-          ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={loading}
-              className="px-6 py-2.5 text-sm font-semibold rounded-xl bg-slate-800 text-white hover:bg-slate-700 transition flex items-center gap-2 disabled:opacity-60"
+              type="submit"
+              disabled={loading || (isEditing && !isFormChanged())}
+              className={`px-8 py-3 text-white rounded-lg shadow-lg font-semibold text-lg ${
+                loading || (isEditing && !isFormChanged())
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-neutral-700 hover:bg-neutral-800"
+              }`}
             >
               {loading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Check size={15} />
-              )}
-              {isEditing ? "Update PO" : "Create PO"}
+                <Loader2 className="animate-spin mr-2 inline" />
+              ) : null}
+              {isEditing ? "Update Purchase Order" : "Create Purchase Order"}
             </button>
-          )}
-        </div>
+            <div className="flex space-x-4">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={!createdPOId}
+                className={`px-6 py-2 text-white rounded-lg flex items-center ${
+                  !createdPOId
+                    ? "bg-gray-400"
+                    : "bg-gradient-to-r from-orange-500 to-pink-500"
+                }`}
+              >
+                <Download className="mr-2 text-indigo-600" size={16} /> Download PDF
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadWord}
+                disabled={!createdPOId}
+                className={`px-6 py-2 text-white rounded-lg flex items-center ${
+                  !createdPOId
+                    ? "bg-gray-400"
+                    : "bg-gradient-to-r from-green-500 to-teal-500"
+                }`}
+              >
+                <Download className="mr-2 text-indigo-600" size={16} /> Download Word
+              </button>
+            </div>
+            {error && (
+              <div className="w-full max-w-2xl bg-red-50 border-l-4 border-red-500 p-4 rounded">
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            )}
+            {successMessage && (
+              <div className="w-full max-w-2xl bg-green-50 border-l-4 border-green-500 p-4 rounded">
+                <Check className="h-5 w-5 text-green-400 inline mr-2" />
+                <p className="text-sm text-green-700 inline">
+                  {successMessage}
+                </p>
+              </div>
+            )}
+          </div>
+        </form>
       </div>
+
+      {showConfirmModal && (
+        <div className="fixed inset-0 backdrop-blur-sm bg-black/60 flex items-center justify-center z-50 -mt-100">
+          {/* Replace bg-white, rounded, shadow with your PO card classes */}
+          <div className="bg-blue-100 rounded-lg p-6 w-96 shadow-xl">
+            <h2 className="text-lg font-semibold mb-4">
+              {pendingAction === "update"
+                ? "Confirm Update"
+                : "Confirm Creation"}
+            </h2>
+
+            <p className="text-gray-600 mb-6">
+              {pendingAction === "update"
+                ? "Are you sure you want to update this Purchase Order?"
+                : "Are you sure you want to create this Purchase Order?"}
+            </p>
+
+            {/* Buttons container - adjust justify to match your layout (center/end) */}
+            <div className="flex justify-between gap-4">
+              {/* Cancel button - replace classes with your PO's secondary button style */}
+              <button
+                onClick={() => setShowConfirmModal(false)}
+                className="px-4 py-2 bg-gray-300 hover:bg-gray-300 rounded-md text-gray-900 font-medium transition-colors"
+              >
+                Cancel
+              </button>
+
+              {/* Confirm button - replace with your primary button style from PO */}
+              <button
+                onClick={executeSave}
+                className="px-4 py-2 bg-neutral-700 hover:bg-neutral-800 text-white rounded-md font-medium transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSuccessModal && (
+        <div className="fixed inset-0 backdrop-blur-sm bg-black/50 flex items-center justify-center z-50 -mt-100">
+          {/* Match card style with your PO success/notification cards */}
+          <div className="bg-blue-100 rounded-lg p-6 w-96 shadow-xl text-center">
+            <div className="text-green-600 text-4xl mb-3">✓</div>
+
+            <h2 className="text-lg font-semibold mb-2">
+              {pendingAction === "update"
+                ? "Purchase Order Updated Successfully!"
+                : "Purchase Order Created Successfully!"}
+            </h2>
+
+            <p className="text-gray-600 text-sm">Redirecting back...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
-
-// ─────────────────────────────────────────────────────────────────
-//  HELPERS
-// ─────────────────────────────────────────────────────────────────
-
-function numberToWords(num) {
-  if (!num || num === 0) return "Zero Rupees Only";
-  const a = [
-    "",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
-    "Eleven",
-    "Twelve",
-    "Thirteen",
-    "Fourteen",
-    "Fifteen",
-    "Sixteen",
-    "Seventeen",
-    "Eighteen",
-    "Nineteen",
-  ];
-  const b = [
-    "",
-    "",
-    "Twenty",
-    "Thirty",
-    "Forty",
-    "Fifty",
-    "Sixty",
-    "Seventy",
-    "Eighty",
-    "Ninety",
-  ];
-
-  const inWords = (n) => {
-    if (n < 20) return a[n];
-    if (n < 100) return b[Math.floor(n / 10)] + (n % 10 ? " " + a[n % 10] : "");
-    if (n < 1000)
-      return (
-        a[Math.floor(n / 100)] +
-        " Hundred" +
-        (n % 100 ? " " + inWords(n % 100) : "")
-      );
-    if (n < 100000)
-      return (
-        inWords(Math.floor(n / 1000)) +
-        " Thousand" +
-        (n % 1000 ? " " + inWords(n % 1000) : "")
-      );
-    if (n < 10000000)
-      return (
-        inWords(Math.floor(n / 100000)) +
-        " Lakh" +
-        (n % 100000 ? " " + inWords(n % 100000) : "")
-      );
-    return (
-      inWords(Math.floor(n / 10000000)) +
-      " Crore" +
-      (n % 10000000 ? " " + inWords(n % 10000000) : "")
-    );
-  };
-
-  const rupees = Math.floor(num);
-  const paise = Math.round((num - rupees) * 100);
-  let result = inWords(rupees) + " Rupees";
-  if (paise > 0) result += " and " + inWords(paise) + " Paise";
-  return result + " Only";
 }

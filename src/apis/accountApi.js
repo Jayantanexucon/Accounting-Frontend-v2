@@ -10,6 +10,11 @@ export const addAccountApi = async (form, companyId) => {
   return data;
 };
 
+export const updateAccountApi = async (accountId, form, companyId) => {
+  const { data } = await API.put(`/account/${companyId}/${accountId}`, form);
+  return data;
+};
+
 export const getLedgerApi = async (accountId, companyId, signal) => {
   const { data } = await API.get(`/account/${companyId}/ledger/${accountId}`, {
     signal,

@@ -32,6 +32,7 @@ const CentralUserManagement = lazy(
 const ManageEntity = lazy(() => import("../pages/ManageEntity"));
 const DayBooks = lazy(() => import("../pages/DayBook"));
 const JournalListPage = lazy(() => import("../pages/JournalListPage"));
+const JournalExcelUploadPage = lazy(() => import("../pages/JournalExcelUploadPage"));
 const ViewAllInvoices = lazy(() => import("../pages/ViewAllInvoices"));
 const ClientPurchaseOrders = lazy(
   () => import("../pages/ClientPurchaseOrders"),
@@ -94,6 +95,7 @@ export default function AppRoutes() {
                 <Route path="account" element={<LedgerPage />} />
                 <Route path="journals" element={<JournalPage />} />
                 <Route path="journals/list" element={<JournalListPage />} />
+                <Route path="journals/upload-excel" element={<JournalExcelUploadPage />} />
                 <Route path="trial" element={<TrialBalancePage />} />
                 <Route path="sheet" element={<BalanceSheetPage />} />
                 <Route path="profit-loss" element={<ProfitLossStatement />} />

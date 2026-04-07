@@ -30,11 +30,15 @@ import {
   FiPlusCircle,
   FiMinusCircle,
   FiRefreshCw,
+  FiUploadCloud,
 } from "react-icons/fi";
 import { TbFileInvoice } from "react-icons/tb";
 import { getJournalAuditLogsApi } from "../apis/auditLog.api";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNotifications } from "../modules/notification/notification.slice.jsx";
+
+const SYSTEM_JOURNAL_MESSAGE =
+  "This journal is system-generated. Please edit the source document.";
 
 export default function JournalListPage() {
   const navigate = useNavigate();
@@ -260,9 +264,11 @@ const [loadingStats, setLoadingStats] = useState(false);
 
     try {
       setDeleting(true);
-      await deleteJournalApi(user?.company?._id, confirmDelete._id);
+      const response = await deleteJournalApi(user?.company?._id, confirmDelete._id);
 
-      toast.success(`Journal ${confirmDelete.number} deleted successfully!`);
+      toast.success(
+        response?.message || `Journal ${confirmDelete.number} deleted successfully!`,
+      );
 
       // Remove from local state
       setJournals((prev) => prev.filter((j) => j._id !== confirmDelete._id));
@@ -277,9 +283,10 @@ const [loadingStats, setLoadingStats] = useState(false);
       
       // Refresh the list
       fetchJournals();
+      fetchStats();
     } catch (error) {
       console.error("Delete error:", error);
-      toast.error("Error deleting journal");
+      toast.error(error?.response?.data?.message || "Error deleting journal");
     } finally {
       setDeleting(false);
     }
@@ -287,6 +294,24 @@ const [loadingStats, setLoadingStats] = useState(false);
 
   // Get edit button status
   const getEditButtonStatus = (journal) => {
+    if (journal.sourceType === "INVOICE") {
+      return {
+        enabled: true,
+        label: "Open Invoice",
+        variant: "primary",
+        icon: FiFileText,
+      };
+    }
+
+    if (journal.sourceType === "PAYMENT") {
+      return {
+        enabled: true,
+        label: "Open Payment",
+        variant: "primary",
+        icon: FiDollarSign,
+      };
+    }
+
     if (isAdmin) {
       return {
         enabled: true,
@@ -296,21 +321,13 @@ const [loadingStats, setLoadingStats] = useState(false);
       };
     }
 
-    const canEdit = ApprovalManager.canUserEditJournal(user?.company?._id, journal._id, user?._id);
     const hasPendingRequest = ApprovalManager.hasUserRequestedEdit(user?.company?._id, journal._id, user?._id);
     const isJournalLocked = ApprovalManager.isJournalLockedForEdit(user?.company?._id, journal._id);
 
-    if (canEdit) {
-      return {
-        enabled: true,
-        label: "Edit (Approved)",
-        variant: "success",
-        icon: FiEdit,
-      };
-    } else if (hasPendingRequest) {
+    if (hasPendingRequest) {
       return {
         enabled: false,
-        label: "Pending Approval",
+        label: "Update Pending",
         variant: "warning",
         icon: FiClock,
       };
@@ -324,8 +341,8 @@ const [loadingStats, setLoadingStats] = useState(false);
     } else {
       return {
         enabled: true,
-        label: "Request Edit",
-        variant: "secondary",
+        label: "Edit & Request",
+        variant: "primary",
         icon: FiEdit,
       };
     }
@@ -348,6 +365,57 @@ const [loadingStats, setLoadingStats] = useState(false);
     });
     setSearch("");
     setPagination(prev => ({ ...prev, page: 1 }));
+  };
+
+  const getJournalDeleteContent = (journal) => {
+    if (!journal) {
+      return {
+        title: "Confirm Delete",
+        body: "",
+        note: "",
+      };
+    }
+
+    if (journal.sourceType === "INVOICE") {
+      return {
+        title: "Delete Sales Journal",
+        body:
+          "Deleting this journal will remove the sales journal posting from the invoice.",
+        note:
+          "The invoice will remain available for manual reposting. If payments exist, deletion will be blocked until those receipt journals are removed.",
+      };
+    }
+
+    if (journal.sourceType === "PAYMENT") {
+      return {
+        title: "Delete Receipt Journal",
+        body:
+          "Deleting this journal will cancel the payment and update invoice balance.",
+        note:
+          "Invoice settlement and purchase order paid totals will be recalculated from the remaining active payments.",
+      };
+    }
+
+    return {
+      title: journal.sourceType === "EXCEL" ? "Delete Excel Journal" : "Delete Manual Journal",
+      body: `Are you sure you want to delete journal ${journal.number}?`,
+      note: "This removes the journal and its lines only.",
+    };
+  };
+
+  const getSourceTypeColor = (type) => {
+    switch (type) {
+      case "INVOICE":
+        return "bg-pink-100 text-pink-800 border-pink-200";
+      case "PAYMENT":
+        return "bg-orange-100 text-orange-800 border-orange-200";
+      case "MANUAL":
+        return "bg-slate-100 text-slate-700 border-slate-200";
+      case "EXCEL":
+        return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      default:
+        return "bg-gray-100 text-gray-700 border-gray-200";
+    }
   };
 
   // Get voucher type color
@@ -420,6 +488,44 @@ const [loadingStats, setLoadingStats] = useState(false);
     setFilters(prev => ({ ...prev, [filterName]: value }));
     if (pagination.page !== 1) {
       setPagination(prev => ({ ...prev, page: 1 }));
+    }
+  };
+
+  const openSourceDocument = useCallback(
+    (journal) => {
+      if (!journal) return;
+
+      if (journal.sourceType === "INVOICE" && journal.sourceId) {
+        toast.info(SYSTEM_JOURNAL_MESSAGE);
+        navigate(`/invoice-data/viewall-invoices?invoiceId=${journal.sourceId}`);
+        return;
+      }
+
+      if (journal.sourceType === "PAYMENT") {
+        toast.info(SYSTEM_JOURNAL_MESSAGE);
+        const params = new URLSearchParams();
+        params.set("tab", "payments");
+        const paymentInvoiceId = journal.paymentLinks?.[0]?.invoiceId;
+        if (paymentInvoiceId) {
+          params.set("invoiceId", paymentInvoiceId);
+        }
+        if (journal.referenceNumber) {
+          params.set("reference", journal.referenceNumber);
+        }
+        if (journal.sourceId) {
+          params.set("paymentId", journal.sourceId);
+        }
+        navigate(`/invoice-data/viewall-invoices?${params.toString()}`);
+      }
+    },
+    [navigate],
+  );
+
+  const handleReferenceClick = (journal, e) => {
+    e.stopPropagation();
+
+    if (journal?.sourceType === "INVOICE" || journal?.sourceType === "PAYMENT") {
+      openSourceDocument(journal);
     }
   };
 
@@ -603,11 +709,16 @@ const [loadingStats, setLoadingStats] = useState(false);
   const voucherTypes = ["SALES", "PURCHASE", "PAYMENT", "RECEIPT", "CONTRA", "JOURNAL"];
 
   // Source type options
-  const sourceTypes = ["MANUAL", "INVOICE", "PAYMENT", "ADJUSTMENT"];
+  const sourceTypes = ["MANUAL", "EXCEL", "INVOICE", "PAYMENT", "ADJUSTMENT"];
 
   // Handle edit button click
   const handleEditClick = async (journal, e) => {
     e.stopPropagation();
+
+    if (journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT") {
+      openSourceDocument(journal);
+      return;
+    }
 
     if (isAdmin) {
       navigate("/accounting/journals", {
@@ -617,29 +728,22 @@ const [loadingStats, setLoadingStats] = useState(false);
         },
       });
     } else {
-      const canEdit = ApprovalManager.canUserEditJournal(user?.company?._id, journal._id, user?._id);
       const hasPendingRequest = ApprovalManager.hasUserRequestedEdit(user?.company?._id, journal._id, user?._id);
       const isJournalLocked = ApprovalManager.isJournalLockedForEdit(user?.company?._id, journal._id);
 
-      if (canEdit) {
-        navigate("/accounting/journals", {
-          state: {
-            editingJournal: journal,
-            isEditing: true,
-          },
-        });
-      } else if (hasPendingRequest) {
+      if (hasPendingRequest) {
         toast.info("Your edit request is pending admin approval.");
       } else if (isJournalLocked) {
         const pendingRequests = ApprovalManager.getPendingEditRequestsForJournal(user?.company?._id, journal._id);
         const otherUser = pendingRequests[0]?.requestedBy?.name || "another user";
         toast.warning(`This journal has a pending edit request from ${otherUser}. Please wait.`);
       } else {
-        await ApprovalManager.addEditApproval(user?.company?._id, journal);
-        toast.success("Edit approval requested! Wait for admin approval.");
-        await refreshApprovals();
-        await refreshNotifications({ silent: true });
-        fetchJournals();
+        navigate("/accounting/journals", {
+          state: {
+            editingJournal: journal,
+            isEditing: true,
+          },
+        });
       }
     }
   };
@@ -703,6 +807,14 @@ const [loadingStats, setLoadingStats] = useState(false);
                 <FiFilter size={18} />
                 Filters
                 <FiChevronDown size={16} className={`transition-transform duration-300 ${showFilters ? "rotate-180" : ""}`} />
+              </button>
+
+              <button
+                onClick={() => navigate("/accounting/journals/upload-excel")}
+                className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+              >
+                <FiUploadCloud size={18} />
+                Upload via Excel
               </button>
 
               <button
@@ -899,7 +1011,7 @@ const [loadingStats, setLoadingStats] = useState(false);
             <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={20} />
             <input
               type="text"
-              placeholder="Search journals by number, account, or narration..."
+              placeholder="Search journals by number, narration, or document reference..."
               value={search}
               onChange={(e) => handleSearch(e.target.value)}
               className="w-full pl-12 pr-4 py-4 bg-white/60 backdrop-blur-md border border-white/20 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all outline-none font-medium shadow-premium group-hover:shadow-lg"
@@ -961,7 +1073,7 @@ const [loadingStats, setLoadingStats] = useState(false);
                               {journal.voucherType}
                             </span>
                             {journal.sourceType && (
-                              <span className="px-2 py-0.5 text-[10px] font-bold rounded-full bg-slate-100 text-slate-500 border border-slate-200 uppercase">
+                              <span className={`px-2 py-0.5 text-[10px] font-bold rounded-full border uppercase ${getSourceTypeColor(journal.sourceType)}`}>
                                 {journal.sourceType}
                               </span>
                             )}
@@ -982,6 +1094,23 @@ const [loadingStats, setLoadingStats] = useState(false);
 
                           {journal.narration && (
                             <p className="text-xs text-slate-400 mt-1.5 line-clamp-1 italic">"{journal.narration}"</p>
+                          )}
+
+                          {journal.referenceNumber && (
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                onClick={(e) => handleReferenceClick(journal, e)}
+                                disabled={journal.sourceType !== "INVOICE" && journal.sourceType !== "PAYMENT"}
+                                className={`text-xs font-bold ${
+                                  journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT"
+                                    ? "text-blue-700 hover:text-blue-900 underline cursor-pointer"
+                                    : "text-slate-400 cursor-default"
+                                }`}
+                              >
+                                Ref: {journal.referenceNumber}
+                              </button>
+                            </div>
                           )}
                         </div>
 
@@ -1133,7 +1262,13 @@ const [loadingStats, setLoadingStats] = useState(false);
                     </span>
                     <span
                       className={`px-3 py-1 text-sm font-medium rounded-full ${
-                        selectedJournal.sourceType === "INVOICE" ? "bg-pink-100 text-pink-800" : selectedJournal.sourceType === "MANUAL" ? "bg-gray-100 text-gray-800" : "bg-orange-100 text-orange-800"
+                        selectedJournal.sourceType === "INVOICE"
+                          ? "bg-pink-100 text-pink-800"
+                          : selectedJournal.sourceType === "MANUAL"
+                            ? "bg-gray-100 text-gray-800"
+                            : selectedJournal.sourceType === "EXCEL"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-orange-100 text-orange-800"
                       }`}
                     >
                       {selectedJournal.sourceType}
@@ -1302,17 +1437,22 @@ const [loadingStats, setLoadingStats] = useState(false);
                 <FiTrash2 className="h-6 w-6 text-red-600" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Confirm Delete</h3>
-                <p className="text-sm text-gray-500">This action cannot be undone</p>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {getJournalDeleteContent(confirmDelete).title}
+                </h3>
+                <p className="text-sm text-gray-500">Review the rollback impact before continuing</p>
               </div>
             </div>
 
             <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
               <p className="text-sm text-red-800">
-                Are you sure you want to delete journal <span className="font-bold">{confirmDelete.number}</span>?
+                {getJournalDeleteContent(confirmDelete).body}
               </p>
-              <p className="text-xs text-red-600 mt-2">This will permanently delete the journal and all associated ledger entries.</p>
+              <p className="text-xs text-red-600 mt-2">
+                {getJournalDeleteContent(confirmDelete).note}
+              </p>
               <div className="mt-3 text-xs text-gray-600 space-y-1">
+                <div>Journal: {confirmDelete.number}</div>
                 <div>Date: {format(new Date(confirmDelete.date), "MMM dd, yyyy")}</div>
                 {confirmDelete.partyName && <div>Party: {confirmDelete.partyName}</div>}
                 <div>Amount: ₹{calculateTotals(confirmDelete.lines || []).totalDebit.toLocaleString()}</div>

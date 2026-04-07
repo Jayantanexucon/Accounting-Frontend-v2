@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { API } from "../apis/api";
 import { getClientsApi } from "../apis/clientApi";
 import {
   getPurchaseOrdersApi,
@@ -41,11 +42,35 @@ import {
 // ─────────────────────────────────────────────
 // Advanced Search Panel (inline, no external dep)
 // ─────────────────────────────────────────────
-const AdvancedSearchPanel = ({ isOpen, filters, onChange, onApply, onClear, isLoading }) => {
+const PO_STATUS_OPTIONS = [
+  { value: "", label: "All PO Statuses" },
+  { value: "OPEN", label: "Open" },
+  { value: "PARTIALLY_INVOICED", label: "Partially Invoiced" },
+  { value: "INVOICE_CREATED", label: "Invoice Created" },
+  { value: "CLOSED", label: "Closed / Fully Paid" },
+];
+
+const INVOICE_STATE_OPTIONS = [
+  { value: "", label: "All Invoice States" },
+  { value: "OPEN_NO_INVOICE", label: "Open / No Invoice" },
+  { value: "PARTIALLY_INVOICED", label: "Partially Invoiced" },
+  { value: "INVOICE_CREATED", label: "Invoice Created" },
+  { value: "FULLY_PAID", label: "Fully Paid" },
+];
+
+const AdvancedSearchPanel = ({ isOpen, filters, onApply, onClear, isLoading, companyId, clientOptions = [] }) => {
   const [local, setLocal] = useState(filters || {});
+  const [clientSearchQuery, setClientSearchQuery] = useState("");
+  const [poSearchQuery, setPoSearchQuery] = useState("");
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [showPoDropdown, setShowPoDropdown] = useState(false);
+  const [filteredClients, setFilteredClients] = useState(clientOptions);
+  const [filteredPoNumbers, setFilteredPoNumbers] = useState([]);
 
   useEffect(() => {
     setLocal(filters || {});
+    setClientSearchQuery(filters?.clientName || "");
+    setPoSearchQuery(filters?.poNumber || "");
   }, [filters]);
 
   const set = (key, val) => setLocal((p) => ({ ...p, [key]: val }));
@@ -53,12 +78,62 @@ const AdvancedSearchPanel = ({ isOpen, filters, onChange, onApply, onClear, isLo
   const handleApply = () => onApply(local);
   const handleClear = () => {
     setLocal({});
+    setClientSearchQuery("");
+    setPoSearchQuery("");
+    setShowClientDropdown(false);
+    setShowPoDropdown(false);
     onClear();
   };
 
   const inputCls =
     "w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all placeholder-slate-400 text-slate-700";
   const labelCls = "block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1";
+
+  useEffect(() => {
+    const nextClients = clientSearchQuery.trim()
+      ? clientOptions.filter((name) =>
+          name.toLowerCase().includes(clientSearchQuery.toLowerCase()),
+        )
+      : clientOptions;
+    setFilteredClients(nextClients);
+  }, [clientOptions, clientSearchQuery]);
+
+  useEffect(() => {
+    if (!isOpen || !companyId) return;
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const res = await API.get("/purchase-orders/search/number", {
+          params: {
+            q: poSearchQuery,
+            companyId,
+            ...(local.clientName ? { clientName: local.clientName } : {}),
+          },
+        });
+        setFilteredPoNumbers(
+          Array.isArray(res.data) ? res.data.map((item) => item.label).filter(Boolean) : [],
+        );
+      } catch (error) {
+        console.error("Error searching PO numbers:", error);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [companyId, isOpen, local.clientName, poSearchQuery]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showClientDropdown && !event.target.closest(".inline-client-search")) {
+        setShowClientDropdown(false);
+      }
+      if (showPoDropdown && !event.target.closest(".inline-po-search")) {
+        setShowPoDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showClientDropdown, showPoDropdown]);
 
   return (
     <AnimatePresence>
@@ -81,73 +156,104 @@ const AdvancedSearchPanel = ({ isOpen, filters, onChange, onApply, onClear, isLo
               </button>
             </div>
 
-            <div className="p-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-              <div>
+            <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="inline-po-search">
                 <label className={labelCls}>PO Number</label>
-                <input className={inputCls} placeholder="e.g. PO-001" value={local.poNumber || ""} onChange={(e) => set("poNumber", e.target.value)} />
+                <div className="relative">
+                  <input
+                    className={inputCls}
+                    placeholder="Type to search PO number"
+                    value={local.poNumber || ""}
+                    onFocus={() => setShowPoDropdown(true)}
+                    onChange={(e) => {
+                      set("poNumber", e.target.value);
+                      setPoSearchQuery(e.target.value);
+                      setShowPoDropdown(true);
+                    }}
+                  />
+                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  {showPoDropdown && (
+                    <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {filteredPoNumbers.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-slate-500">No matching PO numbers</div>
+                      ) : (
+                        filteredPoNumbers.map((poNumber) => (
+                          <button
+                            key={poNumber}
+                            type="button"
+                            onClick={() => {
+                              set("poNumber", poNumber);
+                              setPoSearchQuery(poNumber);
+                              setShowPoDropdown(false);
+                            }}
+                            className="block w-full px-3 py-2 text-left text-xs hover:bg-slate-50"
+                          >
+                            {poNumber}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
-              <div>
+              <div className="inline-client-search">
                 <label className={labelCls}>Client Name</label>
-                <input className={inputCls} placeholder="Client name" value={local.clientName || ""} onChange={(e) => set("clientName", e.target.value)} />
+                <div className="relative">
+                  <input
+                    className={inputCls}
+                    placeholder="Type to search client name"
+                    value={local.clientName || ""}
+                    onFocus={() => setShowClientDropdown(true)}
+                    onChange={(e) => {
+                      set("clientName", e.target.value);
+                      setClientSearchQuery(e.target.value);
+                      setShowClientDropdown(true);
+                    }}
+                  />
+                  <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  {showClientDropdown && (
+                    <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                      {filteredClients.length === 0 ? (
+                        <div className="px-3 py-2 text-xs text-slate-500">No matching clients</div>
+                      ) : (
+                        filteredClients.map((clientName) => (
+                          <button
+                            key={clientName}
+                            type="button"
+                            onClick={() => {
+                              set("clientName", clientName);
+                              setClientSearchQuery(clientName);
+                              setShowClientDropdown(false);
+                            }}
+                            className="block w-full px-3 py-2 text-left text-xs hover:bg-slate-50"
+                          >
+                            {clientName}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
-                <label className={labelCls}>Status</label>
-                <select className={inputCls} value={local.status || ""} onChange={(e) => set("status", e.target.value)}>
-                  <option value="">All Statuses</option>
-                  <option value="draft">Draft</option>
-                  <option value="open">Open</option>
-                  <option value="closed">Closed</option>
-                  <option value="cancelled">Cancelled</option>
+                <label className={labelCls}>PO Status</label>
+                <select className={inputCls} value={local.poStatus || local.status || ""} onChange={(e) => { set("poStatus", e.target.value); set("status", e.target.value); }}>
+                  {PO_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value || "all-po-status"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className={labelCls}>Currency</label>
-                <select className={inputCls} value={local.currency || ""} onChange={(e) => set("currency", e.target.value)}>
-                  <option value="">All Currencies</option>
-                  <option value="INR">INR</option>
-                  <option value="USD">USD</option>
-                  <option value="EUR">EUR</option>
-                  <option value="GBP">GBP</option>
+                <label className={labelCls}>Invoice State</label>
+                <select className={inputCls} value={local.invoiceState || ""} onChange={(e) => set("invoiceState", e.target.value)}>
+                  {INVOICE_STATE_OPTIONS.map((option) => (
+                    <option key={option.value || "all-invoice-state"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
-              </div>
-              <div>
-                <label className={labelCls}>Date From</label>
-                <input type="date" className={inputCls} value={local.dateFrom || ""} onChange={(e) => set("dateFrom", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Date To</label>
-                <input type="date" className={inputCls} value={local.dateTo || ""} onChange={(e) => set("dateTo", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Min Amount</label>
-                <input type="number" className={inputCls} placeholder="0" value={local.minAmount || ""} onChange={(e) => set("minAmount", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Max Amount</label>
-                <input type="number" className={inputCls} placeholder="∞" value={local.maxAmount || ""} onChange={(e) => set("maxAmount", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Payment Terms</label>
-                <select className={inputCls} value={local.paymentTerms || ""} onChange={(e) => set("paymentTerms", e.target.value)}>
-                  <option value="">Any</option>
-                  <option value="net-15">Net 15</option>
-                  <option value="net-30">Net 30</option>
-                  <option value="net-45">Net 45</option>
-                  <option value="net-60">Net 60</option>
-                  <option value="immediate">Immediate</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Country</label>
-                <input className={inputCls} placeholder="e.g. India" value={local.country || ""} onChange={(e) => set("country", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Tax / GST No.</label>
-                <input className={inputCls} placeholder="GST / PAN" value={local.taxNumber || ""} onChange={(e) => set("taxNumber", e.target.value)} />
-              </div>
-              <div>
-                <label className={labelCls}>Reference</label>
-                <input className={inputCls} placeholder="PO reference" value={local.reference || ""} onChange={(e) => set("reference", e.target.value)} />
               </div>
             </div>
 
@@ -185,8 +291,31 @@ const getOpenAmount = (po) =>
     Number(
       po?.remainingInvoicableAmount ??
         ((po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0)),
-    ),
+      ),
   );
+
+const getInvoiceState = (po) => {
+  const totalAmount = Number(po?.totalAmount || 0);
+  const totalInvoicedAmount = Number(po?.totalInvoicedAmount || 0);
+
+  if (po?.status === "CLOSED") {
+    return "FULLY_PAID";
+  }
+
+  if (totalInvoicedAmount <= 0) {
+    return "OPEN_NO_INVOICE";
+  }
+
+  if (totalInvoicedAmount < totalAmount) {
+    return "PARTIALLY_INVOICED";
+  }
+
+  if (totalInvoicedAmount >= totalAmount) {
+    return "INVOICE_CREATED";
+  }
+
+  return "PARTIALLY_INVOICED";
+};
 
 const TH = ({ label, sortKey, currentSort, onSort, icon: Icon }) => {
   const active = currentSort.key === sortKey;
@@ -279,15 +408,23 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
     return clientId || null;
   };
 
+  const visiblePurchaseOrders = useMemo(() => {
+    if (!activeFilters.invoiceState) {
+      return purchaseOrders;
+    }
+
+    return purchaseOrders.filter((po) => getInvoiceState(po) === activeFilters.invoiceState);
+  }, [activeFilters.invoiceState, purchaseOrders]);
+
   const clientIdsWithPOs = useMemo(() => {
     const ids = new Set();
-    purchaseOrders.forEach((po) => { const id = resolveClientId(po, clients); if (id) ids.add(id); });
+    visiblePurchaseOrders.forEach((po) => { const id = resolveClientId(po, clients); if (id) ids.add(id); });
     return ids;
-  }, [clients, purchaseOrders]);
+  }, [clients, visiblePurchaseOrders]);
 
   const clientStats = useMemo(() => {
     const stats = {};
-    purchaseOrders.forEach((po) => {
+    visiblePurchaseOrders.forEach((po) => {
       const clientId = resolveClientId(po, clients);
       if (!clientId) return;
       if (!stats[clientId]) {
@@ -315,12 +452,12 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
       }
     });
     return stats;
-  }, [clients, purchaseOrders]);
+  }, [clients, visiblePurchaseOrders]);
 
-  const totalPOs = purchaseOrders.length;
-  const totalValue = purchaseOrders.reduce((s, po) => s + (po.totalAmount || 0), 0);
-  const pendingPOs = purchaseOrders.filter((po) => !["CLOSED", "FULLY_INVOICED"].includes(po.status)).length;
-  const completedPOs = purchaseOrders.filter((po) => po.status === "CLOSED").length;
+  const totalPOs = visiblePurchaseOrders.length;
+  const totalValue = visiblePurchaseOrders.reduce((s, po) => s + (po.totalAmount || 0), 0);
+  const pendingPOs = visiblePurchaseOrders.filter((po) => !["CLOSED", "INVOICE_CREATED"].includes(po.status)).length;
+  const completedPOs = visiblePurchaseOrders.filter((po) => po.status === "CLOSED").length;
 
   const handleAdvancedSearch = (filters) => { setLoadingAdvanced(true); setActiveFilters(filters); setSearchQuery(""); setPage(1); };
 const handleClearSearch = () => {
@@ -330,7 +467,12 @@ const handleClearSearch = () => {
   setPage(1);
 };
   const handleSort = (key) => { setSort((p) => ({ key, dir: p.key === key && p.dir === "asc" ? "desc" : "asc" })); setPage(1); };
-  const activeFilterCount = Object.keys(activeFilters).filter((k) => activeFilters[k]).length;
+  const activeFilterEntries = Object.entries(activeFilters).filter(([key, value]) => {
+    if (!value) return false;
+    if (key === "status" && activeFilters.poStatus) return false;
+    return true;
+  });
+  const activeFilterCount = activeFilterEntries.length;
 
   const tableRows = useMemo(() => {
     const hasFilter = searchQuery || activeFilterCount > 0;
@@ -465,10 +607,11 @@ const handleClearSearch = () => {
         <AdvancedSearchPanel
           isOpen={showAdvancedSearch}
           filters={activeFilters}
-          onChange={setActiveFilters}
           onApply={handleAdvancedSearch}
           onClear={() => { setShowAdvancedSearch(false); handleClearSearch(); }}
           isLoading={loadingAdvanced}
+          companyId={companyId}
+          clientOptions={clients.map((client) => client.clientName).filter(Boolean)}
         />
       </div>
 
@@ -541,7 +684,7 @@ const handleClearSearch = () => {
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active filters:</span>
-            {Object.entries(activeFilters).filter(([, v]) => v).map(([k, v]) => (
+            {activeFilterEntries.map(([k, v]) => (
               <span key={k} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-full border border-blue-100">
                 {k}: {v}
                 <button onClick={() => { const f = { ...activeFilters }; delete f[k]; setActiveFilters(f); }} className="ml-0.5 hover:text-blue-900">

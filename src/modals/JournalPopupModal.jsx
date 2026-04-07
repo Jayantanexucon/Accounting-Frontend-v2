@@ -5,10 +5,11 @@ import { useAuth } from "../contexts/AuthContext";
 import LoadingComponent from "../components/LoadingComponent";
 import axios from "axios";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   X, Search, FileText, Trash2, Calendar,
   User, Tag, Hash, ArrowUpRight, ArrowDownLeft,
-  AlertTriangle, BookOpen,
+  AlertTriangle, BookOpen, Pencil,
 } from "lucide-react";
 
 /* ─── tiny helpers ────────────────────────────────────── */
@@ -31,6 +32,7 @@ const fmtDateTime = (d) =>
 ══════════════════════════════════════════════════════ */
 export default function JournalPopupModal({ open, onClose, initialSearch = "" }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
   const [journals, setJournals]           = useState([]);
   const [filteredJournal, setFilteredJournal] = useState(null);
@@ -100,6 +102,26 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
     user?.role === "admin" ||
     user?.role === "superAdmin" ||
     user?.privilege?.masterUpdate === true;
+
+  const handleEditJournal = useCallback(() => {
+    if (!filteredJournal) return;
+
+    if (
+      filteredJournal.sourceType &&
+      !["MANUAL", "EXCEL"].includes(filteredJournal.sourceType)
+    ) {
+      toast.info("This journal is system-generated. Please edit the source document.");
+      return;
+    }
+
+    navigate("/accounting/journals", {
+      state: {
+        editingJournal: filteredJournal,
+        isEditing: true,
+      },
+    });
+    onClose();
+  }, [filteredJournal, navigate, onClose]);
 
   /* ── totals ────────────────────────────────────────── */
   const totalDebit  = filteredJournal?.lines?.reduce((s, l) => s + (l.debit  || 0), 0) ?? 0;
@@ -247,14 +269,24 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
                     </div>
 
                     {/* Action buttons */}
-                    {canManage && (
+                    {(canManage || ["MANUAL", "EXCEL"].includes(filteredJournal.sourceType)) && (
                       <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => setConfirmDelete(filteredJournal)}
-                          className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 transition-all"
-                        >
-                          <Trash2 size={12} /> Delete
-                        </button>
+                        {["MANUAL", "EXCEL"].includes(filteredJournal.sourceType) && (
+                          <button
+                            onClick={handleEditJournal}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded-xl hover:bg-blue-100 transition-all"
+                          >
+                            <Pencil size={12} /> Edit
+                          </button>
+                        )}
+                        {canManage && (
+                          <button
+                            onClick={() => setConfirmDelete(filteredJournal)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 transition-all"
+                          >
+                            <Trash2 size={12} /> Delete
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>

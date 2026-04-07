@@ -21,7 +21,11 @@ import { useAuth } from "../contexts/AuthContext";
 import { getAccountsApi } from "../apis/accountApi";
 import LoadingComponent from "../components/LoadingComponent";
 import { formatCurrency } from "../utils/formatUtil";
-import { addJournalApi, updateJournalApi } from "../apis/journalApi";
+import {
+  addJournalApi,
+  allJournalApi,
+  updateJournalApi,
+} from "../apis/journalApi";
 import {
   getInvoiceByIdApi,
   searchInvoiceByNumberApi,
@@ -33,6 +37,7 @@ import { checkAuthorization } from "../utils/checkAuthorization";
 import AuditLogSidebar from "../components/AuditLogSidebar";
 import { useLocation, useNavigate } from "react-router-dom";
 import ManageLedgerModal from "../modals/ManageLedgerModal";
+import { FiUploadCloud } from "react-icons/fi";
 
 /* ── shared input class ─────────────────────────────────── */
 const inputCls =
@@ -40,7 +45,10 @@ const inputCls =
   "rounded-xl placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 " +
   "focus:border-indigo-400 focus:bg-white transition-all";
 
-const labelCls = "block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5";
+const labelCls =
+  "block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5";
+
+const DUPLICATE_REFERENCE_VOUCHER_TYPES = ["PAYMENT", "RECEIPT"];
 
 export default function ManualJournalPage() {
   const { user } = useAuth();
@@ -62,10 +70,15 @@ export default function ManualJournalPage() {
   const [showApprovals, setShowApprovals] = useState(false);
   const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
   const [voucherType, setVoucherType] = useState("");
+  const [requestComment, setRequestComment] = useState("");
   const [selectedInvoice, setSelectedInvoice] = useState(null);
   const [openManageLedger, setOpenManageLedger] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [accountSearch, setAccountSearch] = useState("");
+  const [duplicateReferenceWarning, setDuplicateReferenceWarning] = useState({
+    checking: false,
+    match: null,
+  });
   const [dropdownPosition, setDropdownPosition] = useState({
     top: 0,
     left: 0,
@@ -93,15 +106,33 @@ export default function ManualJournalPage() {
   });
 
   const isVoucherSelected = Boolean(voucherType);
+  const shouldCheckDuplicateReference =
+    voucherType === "PAYMENT" || voucherType === "RECEIPT";
   const totals = calculateTotals();
   const isBalanced =
     Math.abs(totals.debit - totals.credit) < 0.01 && totals.debit > 0;
+
+  const normalizeReferenceNumber = useCallback(
+    (value) => value?.trim().toLowerCase() || "",
+    [],
+  );
 
   // Load editing journal from navigation state
   useEffect(() => {
     const fetchEditingJournal = async () => {
       if (location.state?.editingJournal) {
         try {
+          if (
+            location.state.editingJournal.sourceType &&
+            !["MANUAL", "EXCEL"].includes(location.state.editingJournal.sourceType)
+          ) {
+            toast.info(
+              "This journal is system-generated. Please edit the source document.",
+            );
+            navigate("/accounting/journals/list");
+            return;
+          }
+
           setIsEditMode(true);
           setEditingJournal(location.state.editingJournal);
           setVoucherType(
@@ -170,11 +201,15 @@ export default function ManualJournalPage() {
       try {
         const requests = await ApprovalManager.syncRequests(user.company._id);
         if (!active) return;
-        const pendingCount = (requests || []).filter((r) => r.status === "pending").length;
+        const pendingCount = (requests || []).filter(
+          (r) => r.status === "pending",
+        ).length;
         setPendingApprovalsCount(pendingCount);
       } catch (error) {
         if (!active) return;
-        setPendingApprovalsCount(ApprovalManager.getPendingCount(user.company._id));
+        setPendingApprovalsCount(
+          ApprovalManager.getPendingCount(user.company._id),
+        );
       }
     };
 
@@ -282,6 +317,16 @@ export default function ManualJournalPage() {
       return false;
     }
 
+    if (!form.narration.trim()) {
+      toast.error("Please enter narration or description");
+      return false;
+    }
+
+    if (isEditMode && editingJournal && !isAdmin && !requestComment.trim()) {
+      toast.error("Please enter why this journal needs to be updated");
+      return false;
+    }
+
     if (form.lines.length < 2) {
       toast.error("At least 2 entries required");
       return false;
@@ -314,7 +359,7 @@ export default function ManualJournalPage() {
     if (!accountSearch) return accounts;
 
     return accounts.filter((acc) =>
-      acc.name.toLowerCase().includes(accountSearch.toLowerCase())
+      acc.name.toLowerCase().includes(accountSearch.toLowerCase()),
     );
   };
 
@@ -353,7 +398,7 @@ export default function ManualJournalPage() {
   // Save journal
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (!e.target.closest('[data-dropdown]')) {
+      if (!e.target.closest("[data-dropdown]")) {
         setActiveDropdown(null);
         setAccountSearch("");
       }
@@ -376,6 +421,89 @@ export default function ManualJournalPage() {
       window.removeEventListener("scroll", handleViewportUpdate, true);
     };
   }, [activeDropdown, positionLedgerDropdown]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const referenceNumber = normalizeReferenceNumber(form.externalDocNo);
+
+    if (
+      !user?.company?._id ||
+      !shouldCheckDuplicateReference ||
+      !referenceNumber
+    ) {
+      setDuplicateReferenceWarning({ checking: false, match: null });
+      return () => controller.abort();
+    }
+
+    const checkDuplicateReference = async () => {
+      try {
+        setDuplicateReferenceWarning((prev) => ({ ...prev, checking: true }));
+
+        let page = 1;
+        let totalPages = 1;
+        let duplicateMatch = null;
+
+        while (page <= totalPages && !duplicateMatch) {
+          for (const duplicateVoucherType of DUPLICATE_REFERENCE_VOUCHER_TYPES) {
+            const response = await allJournalApi(
+              user.company._id,
+              {
+                page,
+                limit: 200,
+                voucherType: duplicateVoucherType,
+              },
+              controller.signal,
+            );
+
+            const journals = response?.data || [];
+            totalPages = Math.max(
+              totalPages,
+              response?.pagination?.totalPages || 1,
+            );
+
+            duplicateMatch = journals.find((journal) => {
+              if (!journal?.externalDocNo) return false;
+              if (journal._id === editingJournal?._id) return false;
+
+              return (
+                normalizeReferenceNumber(journal.externalDocNo) ===
+                referenceNumber
+              );
+            });
+
+            if (duplicateMatch) break;
+          }
+
+          page += 1;
+        }
+
+        if (!controller.signal.aborted) {
+          setDuplicateReferenceWarning({
+            checking: false,
+            match: duplicateMatch || null,
+          });
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        console.error("Error checking duplicate document reference:", error);
+        setDuplicateReferenceWarning({ checking: false, match: null });
+      }
+    };
+
+    const timeoutId = window.setTimeout(checkDuplicateReference, 350);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    editingJournal?._id,
+    form.externalDocNo,
+    normalizeReferenceNumber,
+    shouldCheckDuplicateReference,
+    user?.company?._id,
+  ]);
+
   const handleSave = async () => {
     if (!validateJournal()) return;
 
@@ -386,10 +514,10 @@ export default function ManualJournalPage() {
         voucherType,
         companyId: user?.company?._id,
         date: new Date(form.date),
-        narration: form.narration || "Manual Journal Entry",
+        narration: form.narration.trim(),
         posted: false,
-        sourceType: selectedInvoice ? "INVOICE" : "MANUAL",
-        sourceId: selectedInvoice?._id || null,
+        sourceType: "MANUAL",
+        sourceId: null,
         referenceNumber: selectedInvoice?.invoiceNo || null,
         partyType: selectedInvoice ? "Client" : null,
         partyId: selectedInvoice?.billTo?._id || null,
@@ -403,18 +531,23 @@ export default function ManualJournalPage() {
       };
 
       if (editingJournal && isEditMode) {
-        await updateJournalApi(
-          user?.company?._id,
-          editingJournal._id,
-          journalData,
-        );
-        toast.success("Journal updated successfully!");
-
-        if (!isAdmin && editingJournal) {
-          ApprovalManager.clearApprovedEditRequests(
+        if (isAdmin) {
+          await updateJournalApi(
             user?.company?._id,
             editingJournal._id,
+            journalData,
           );
+          toast.success("Journal updated successfully!");
+        } else {
+          await ApprovalManager.addEditApproval(
+            user?.company?._id,
+            editingJournal,
+            {
+              ...journalData,
+              requestComment: requestComment.trim(),
+            },
+          );
+          toast.success("Journal update request sent for admin approval.");
         }
 
         navigate("/accounting/journals/list");
@@ -447,6 +580,8 @@ export default function ManualJournalPage() {
     setSelectedInvoice(null);
     setEditingJournal(null);
     setVoucherType("");
+    setRequestComment("");
+    setDuplicateReferenceWarning({ checking: false, match: null });
   };
 
   // Get account group name
@@ -629,16 +764,18 @@ export default function ManualJournalPage() {
   return (
     <>
       <div className="min-h-screen bg-slate-50">
-
         {/* ══ STICKY HEADER ══════════════════════════════════ */}
         <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
           <div className="max-w-screen-xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between gap-4">
-
               {/* Left — icon + title */}
               <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl shadow-md"
-                  style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
+                <div
+                  className="p-2 rounded-xl shadow-md"
+                  style={{
+                    background: "linear-gradient(135deg,#1e40af,#3b82f6)",
+                  }}
+                >
                   <BookMarked size={18} className="text-white" />
                 </div>
                 <div>
@@ -665,19 +802,28 @@ export default function ManualJournalPage() {
 
               {/* Right — actions */}
               <div className="flex items-center gap-2">
-
                 {/* Audit Trail */}
                 <button
                   onClick={() => setOpenLogs(true)}
                   title="Audit Trail"
-                  className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-200 transition-all">
+                  className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-blue-50 hover:border-blue-200 transition-all"
+                >
                   <History size={15} />
                 </button>
+
+                 <button
+                onClick={() => navigate("/accounting/journals/upload-excel")}
+                className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center shadow-lg shadow-emerald-600/20 transition-all"
+              >
+                <FiUploadCloud size={18} />
+                Upload via Excel
+              </button>
 
                 {/* Add Ledger */}
                 <button
                   onClick={() => setOpenManageLedger(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 transition-all">
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 transition-all"
+                >
                   <Plus size={13} /> Add Ledger
                 </button>
 
@@ -687,7 +833,8 @@ export default function ManualJournalPage() {
                     setOpenModal((prev) => ({ ...prev, createLedger: true }))
                   }
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
                   <FileText size={13} /> Invoice → Ledger
                 </button>
 
@@ -695,7 +842,8 @@ export default function ManualJournalPage() {
                 <button
                   onClick={() => navigate("/accounting/journals/list")}
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
                   <FileText size={13} /> Journal List
                 </button>
 
@@ -705,7 +853,8 @@ export default function ManualJournalPage() {
                   user?.privilege?.masterUpdate === true) && (
                   <button
                     onClick={() => setShowApprovals(true)}
-                    className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-all">
+                    className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-all"
+                  >
                     <Clock size={13} /> Approvals
                     {pendingApprovalsCount > 0 && (
                       <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-black rounded-full w-4 h-4 flex items-center justify-center">
@@ -719,7 +868,8 @@ export default function ManualJournalPage() {
                 <button
                   onClick={handleReset}
                   disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50">
+                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                >
                   <X size={13} />
                   {editingJournal ? "Cancel" : "Reset"}
                 </button>
@@ -734,13 +884,20 @@ export default function ManualJournalPage() {
                     style={{
                       background: "linear-gradient(135deg,#1e40af,#3b82f6)",
                       boxShadow: "0 4px 14px rgba(59,130,246,0.35)",
-                    }}>
-                    {saving
-                      ? <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      : <Save size={13} />}
+                    }}
+                  >
+                    {saving ? (
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : (
+                      <Save size={13} />
+                    )}
                     {saving
                       ? "Saving…"
-                      : editingJournal ? "Update Journal" : "Save Journal"}
+                      : editingJournal
+                        ? isAdmin
+                          ? "Update Journal"
+                          : "Request Approval"
+                        : "Save Journal"}
                   </button>
                 )}
               </div>
@@ -750,7 +907,6 @@ export default function ManualJournalPage() {
         {/* ══ END HEADER ══ */}
 
         <div className="max-w-screen-xl mx-auto px-6 py-6 space-y-4">
-
           {/* ── Voucher Type ─────────────────────────────── */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
             <label className={labelCls}>
@@ -761,7 +917,8 @@ export default function ManualJournalPage() {
                 value={voucherType}
                 onChange={(e) => setVoucherType(e.target.value)}
                 disabled={!!editingJournal}
-                className={inputCls}>
+                className={inputCls}
+              >
                 <option value="">Select Voucher Type</option>
                 <option value="SALES">Sales Voucher</option>
                 <option value="PURCHASE">Purchase Voucher</option>
@@ -773,21 +930,27 @@ export default function ManualJournalPage() {
             </div>
             {!isVoucherSelected && (
               <p className="mt-2 text-[11px] font-semibold text-amber-600 flex items-center gap-1">
-                <AlertCircle size={11} /> Select a voucher type to enable journal entry
+                <AlertCircle size={11} /> Select a voucher type to enable
+                journal entry
               </p>
             )}
             {editingJournal && (
               <p className="mt-2 text-[11px] font-semibold text-amber-600 flex items-center gap-1">
-                <AlertCircle size={11} /> Voucher type cannot be changed while editing
+                <AlertCircle size={11} /> Voucher type cannot be changed while
+                editing
               </p>
             )}
           </div>
 
           {/* ── Invoice Auto‑fill Section ──────────────────── */}
-          <div className={`bg-blue-50/40 rounded-2xl border border-blue-100 p-5 transition-all ${!isVoucherSelected ? "opacity-50 pointer-events-none" : ""}`}>
+          <div
+            className={`bg-blue-50/40 rounded-2xl border border-blue-100 p-5 transition-all ${!isVoucherSelected ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <div className="flex items-center gap-2 mb-2">
               <Search size={12} className="text-blue-600" />
-              <h3 className="text-xs font-black text-blue-800 uppercase tracking-wider">Auto‑fill Journal from Invoice</h3>
+              <h3 className="text-xs font-black text-blue-800 uppercase tracking-wider">
+                Auto‑fill Journal from Invoice
+              </h3>
             </div>
             <div className="flex gap-2">
               <div className="flex-1">
@@ -795,7 +958,10 @@ export default function ManualJournalPage() {
                   type="text"
                   value={invoiceSearch.query}
                   onChange={(e) =>
-                    setInvoiceSearch((prev) => ({ ...prev, query: e.target.value }))
+                    setInvoiceSearch((prev) => ({
+                      ...prev,
+                      query: e.target.value,
+                    }))
                   }
                   placeholder="Enter invoice number to auto‑fill journal..."
                   className={inputCls}
@@ -806,7 +972,8 @@ export default function ManualJournalPage() {
               <button
                 onClick={searchInvoices}
                 disabled={invoiceSearch.loading || editingJournal}
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all">
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all"
+              >
                 {invoiceSearch.loading ? "Searching..." : "Search"}
               </button>
             </div>
@@ -814,19 +981,29 @@ export default function ManualJournalPage() {
             {/* Search results */}
             {invoiceSearch.results.length > 0 && !editingJournal && (
               <div className="mt-3 space-y-2">
-                <p className="text-[10px] font-black text-blue-600 uppercase tracking-wider">Select an invoice:</p>
+                <p className="text-[10px] font-black text-blue-600 uppercase tracking-wider">
+                  Select an invoice:
+                </p>
                 {invoiceSearch.results.map((invoice) => (
                   <div
                     key={invoice._id}
                     onClick={() => autoFillFromInvoice(invoice)}
-                    className="p-3 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 cursor-pointer transition-all">
+                    className="p-3 bg-white border border-blue-200 rounded-xl hover:bg-blue-50 cursor-pointer transition-all"
+                  >
                     <div className="flex justify-between items-center">
                       <div>
-                        <p className="text-xs font-bold text-slate-800">{invoice.invoiceNo}</p>
-                        <p className="text-[10px] text-slate-500">{invoice.billTo?.name} • {new Date(invoice.invoiceDate).toLocaleDateString()}</p>
+                        <p className="text-xs font-bold text-slate-800">
+                          {invoice.invoiceNo}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          {invoice.billTo?.name} •{" "}
+                          {new Date(invoice.invoiceDate).toLocaleDateString()}
+                        </p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs font-black text-slate-800">₹{invoice.amountDue?.toFixed(2)}</p>
+                        <p className="text-xs font-black text-slate-800">
+                          ₹{invoice.amountDue?.toFixed(2)}
+                        </p>
                         <p className="text-[9px] text-slate-400">Amount Due</p>
                       </div>
                     </div>
@@ -840,14 +1017,21 @@ export default function ManualJournalPage() {
               <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex justify-between items-center">
                 <div>
                   <p className="text-xs font-bold text-emerald-800">
-                    {editingJournal ? "Linked to" : "Auto‑filled from"}: <span className="font-black">{selectedInvoice.invoiceNo}</span>
+                    {editingJournal ? "Linked to" : "Auto‑filled from"}:{" "}
+                    <span className="font-black">
+                      {selectedInvoice.invoiceNo}
+                    </span>
                   </p>
-                  <p className="text-[10px] text-emerald-700">{selectedInvoice.billTo?.name} • ₹{selectedInvoice.amountDue?.toFixed(2)}</p>
+                  <p className="text-[10px] text-emerald-700">
+                    {selectedInvoice.billTo?.name} • ₹
+                    {selectedInvoice.amountDue?.toFixed(2)}
+                  </p>
                 </div>
                 {!editingJournal && (
                   <button
                     onClick={() => setSelectedInvoice(null)}
-                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900">
+                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900"
+                  >
                     Clear
                   </button>
                 )}
@@ -856,9 +1040,10 @@ export default function ManualJournalPage() {
           </div>
 
           {/* ── Journal Form ─────────────────────────────── */}
-          <div className={`transition-all ${!isVoucherSelected ? "opacity-50 pointer-events-none" : ""}`}>
+          <div
+            className={`transition-all ${!isVoucherSelected ? "opacity-50 pointer-events-none" : ""}`}
+          >
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-
               {/* Header fields */}
               <div className="p-5 border-b border-slate-100 bg-slate-50/40">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -871,7 +1056,9 @@ export default function ManualJournalPage() {
                       <input
                         type="date"
                         value={form.date}
-                        onChange={(e) => handleFormChange("date", e.target.value)}
+                        onChange={(e) =>
+                          handleFormChange("date", e.target.value)
+                        }
                         className={`${inputCls} pl-9`}
                       />
                     </div>
@@ -890,33 +1077,79 @@ export default function ManualJournalPage() {
                     <input
                       type="text"
                       value={form.externalDocNo || ""}
-                      onChange={(e) => handleFormChange("externalDocNo", e.target.value)}
+                      onChange={(e) =>
+                        handleFormChange("externalDocNo", e.target.value)
+                      }
                       placeholder="Cheque no / Ref doc / Voucher ref"
                       className={inputCls}
                     />
+                    {shouldCheckDuplicateReference &&
+                      duplicateReferenceWarning.checking &&
+                      form.externalDocNo?.trim() && (
+                        <p className="mt-2 text-[11px] font-medium text-slate-500">
+                          Checking duplicate reference number...
+                        </p>
+                      )}
+                    {shouldCheckDuplicateReference &&
+                      duplicateReferenceWarning.match && (
+                        <p className="mt-2 text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                          <AlertCircle size={11} />
+                          This number is already used in journal number "
+                          {duplicateReferenceWarning.match.number}" for{" "}
+                          {duplicateReferenceWarning.match.voucherType}.
+                        </p>
+                      )}
                   </div>
                 </div>
                 <div className="mt-4">
-                  <label className={labelCls}>
+                  <label
+                    className={`${labelCls} after:content-['*'] after:ml-1 after:text-red-500`}
+                  >
                     <FileText size={10} className="inline mr-1" />
                     Narration / Description
                   </label>
                   <textarea
                     value={form.narration}
-                    onChange={(e) => handleFormChange("narration", e.target.value)}
+                    onChange={(e) =>
+                      handleFormChange("narration", e.target.value)
+                    }
                     rows={2}
+                    required
                     placeholder="Enter narration or description for this journal entry…"
                     className={`${inputCls} resize-none`}
                   />
                 </div>
+                {isEditMode && editingJournal && !isAdmin && (
+                  <div className="mt-4">
+                    <label
+                      className={`${labelCls} after:content-['*'] after:ml-1 after:text-red-500`}
+                    >
+                      Why Update Approval Is Needed
+                    </label>
+                    <textarea
+                      value={requestComment}
+                      onChange={(e) => setRequestComment(e.target.value)}
+                      rows={3}
+                      placeholder="Explain why this journal needs to be updated so the admin can review it."
+                      className={`${inputCls} resize-none`}
+                    />
+                    <p className="mt-2 text-[11px] text-slate-500">
+                      Admin will receive this reason and the changed fields in the approval notification.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Entries table */}
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-slate-100"
-                      style={{ background: "linear-gradient(90deg,#f8fafc,#eff6ff)" }}>
+                    <tr
+                      className="border-b border-slate-100"
+                      style={{
+                        background: "linear-gradient(90deg,#f8fafc,#eff6ff)",
+                      }}
+                    >
                       <th className="px-4 py-3 text-left text-[10px] font-black text-slate-400 uppercase tracking-widest w-12">
                         #
                       </th>
@@ -940,16 +1173,27 @@ export default function ManualJournalPage() {
 
                   <tbody className="divide-y divide-slate-50">
                     {form.lines.map((entry, index) => (
-                      <tr key={entry.id} className="hover:bg-slate-50/60 transition-colors" style={{ position: 'relative', zIndex: activeDropdown === entry.id ? 100 : 'auto' }}>
+                      <tr
+                        key={entry.id}
+                        className="hover:bg-slate-50/60 transition-colors"
+                        style={{
+                          position: "relative",
+                          zIndex: activeDropdown === entry.id ? 100 : "auto",
+                        }}
+                      >
                         <td className="px-4 py-3 text-xs font-black text-slate-400">
                           {index + 1}
                         </td>
                         <td className="px-4 py-3 relative z-10">
-                          <div className="relative" style={{ minHeight: "40px" }}>
+                          <div
+                            className="relative"
+                            style={{ minHeight: "40px" }}
+                          >
                             <div className="relative" data-dropdown>
                               <input
                                 ref={(el) => {
-                                  if (el) ledgerInputRefs.current[entry.id] = el;
+                                  if (el)
+                                    ledgerInputRefs.current[entry.id] = el;
                                   else delete ledgerInputRefs.current[entry.id];
                                 }}
                                 type="text"
@@ -957,7 +1201,9 @@ export default function ManualJournalPage() {
                                   activeDropdown === entry.id
                                     ? accountSearch
                                     : entry.accountId
-                                      ? accounts.find((a) => a._id === entry.accountId)?.name || ""
+                                      ? accounts.find(
+                                          (a) => a._id === entry.accountId,
+                                        )?.name || ""
                                       : ""
                                 }
                                 onFocus={() => {
@@ -989,7 +1235,10 @@ export default function ManualJournalPage() {
                                       <div
                                         key={acc._id}
                                         onClick={() => {
-                                          handleAccountSelection(entry.id, acc._id);
+                                          handleAccountSelection(
+                                            entry.id,
+                                            acc._id,
+                                          );
                                           setActiveDropdown(null);
                                           setAccountSearch("");
                                         }}
@@ -1050,7 +1299,8 @@ export default function ManualJournalPage() {
                           <button
                             onClick={() => removeRow(entry.id)}
                             disabled={form.lines.length <= 2}
-                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed">
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
                             <Trash2 size={14} />
                           </button>
                         </td>
@@ -1063,17 +1313,26 @@ export default function ManualJournalPage() {
                       <td colSpan={3} className="px-4 py-3">
                         <button
                           onClick={addRow}
-                          className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors">
+                          className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+                        >
                           <Plus size={13} /> Add Entry Line
                         </button>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Debit</p>
-                        <p className="text-base font-black text-slate-800 font-mono">{formatCurrency(totals.debit)}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                          Total Debit
+                        </p>
+                        <p className="text-base font-black text-slate-800 font-mono">
+                          {formatCurrency(totals.debit)}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Total Credit</p>
-                        <p className="text-base font-black text-slate-800 font-mono">{formatCurrency(totals.credit)}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                          Total Credit
+                        </p>
+                        <p className="text-base font-black text-slate-800 font-mono">
+                          {formatCurrency(totals.credit)}
+                        </p>
                       </td>
                       <td />
                     </tr>
@@ -1084,22 +1343,39 @@ export default function ManualJournalPage() {
               {/* Balance status */}
               {isBalanced ? (
                 <div className="flex items-center gap-3 px-5 py-3.5 bg-emerald-50 border-t border-emerald-100">
-                  <CheckCircle2 size={15} className="text-emerald-500 shrink-0" />
+                  <CheckCircle2
+                    size={15}
+                    className="text-emerald-500 shrink-0"
+                  />
                   <div>
-                    <p className="text-xs font-bold text-emerald-800">Journal Entry Balanced ✓</p>
+                    <p className="text-xs font-bold text-emerald-800">
+                      Journal Entry Balanced ✓
+                    </p>
                     <p className="text-[11px] text-emerald-600 font-medium mt-0.5">
-                      Total Debit ({formatCurrency(totals.debit)}) = Total Credit ({formatCurrency(totals.credit)})
+                      Total Debit ({formatCurrency(totals.debit)}) = Total
+                      Credit ({formatCurrency(totals.credit)})
                     </p>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start gap-3 px-5 py-3.5 bg-red-50 border-t border-red-100">
-                  <AlertCircle size={15} className="text-red-500 shrink-0 mt-0.5" />
+                  <AlertCircle
+                    size={15}
+                    className="text-red-500 shrink-0 mt-0.5"
+                  />
                   <div>
-                    <p className="text-xs font-bold text-red-800">Journal Entry Not Balanced</p>
+                    <p className="text-xs font-bold text-red-800">
+                      Journal Entry Not Balanced
+                    </p>
                     <p className="text-[11px] text-red-600 font-medium mt-0.5">
-                      Difference: <span className="font-black">₹{Math.abs(totals.debit - totals.credit).toFixed(2)}</span>
-                      {" "}— {totals.debit > totals.credit ? "Debit exceeds Credit" : "Credit exceeds Debit"}
+                      Difference:{" "}
+                      <span className="font-black">
+                        ₹{Math.abs(totals.debit - totals.credit).toFixed(2)}
+                      </span>{" "}
+                      —{" "}
+                      {totals.debit > totals.credit
+                        ? "Debit exceeds Credit"
+                        : "Credit exceeds Debit"}
                     </p>
                   </div>
                 </div>
@@ -1109,24 +1385,26 @@ export default function ManualJournalPage() {
               <div className="flex items-start gap-3 px-5 py-3.5 bg-blue-50/60 border-t border-blue-100">
                 <Info size={14} className="text-blue-500 shrink-0 mt-0.5" />
                 <p className="text-[11px] text-blue-700 font-medium leading-relaxed">
-                  Each entry line can be either debit or credit, not both. Journal number will be
-                  auto-generated on save. Minimum 2 entries required.
+                  Each entry line can be either debit or credit, not both.
+                  Journal number will be auto-generated on save. Minimum 2
+                  entries required.
                   {selectedInvoice && (
                     <span className="block mt-1 text-emerald-700 font-bold">
-                      ✓ Journal {editingJournal ? "linked to" : "auto-filled from"} Invoice {selectedInvoice.invoiceNo}
+                      ✓ Journal{" "}
+                      {editingJournal ? "linked to" : "auto-filled from"}{" "}
+                      Invoice {selectedInvoice.invoiceNo}
                     </span>
                   )}
                   {editingJournal && (
                     <span className="block mt-1 text-amber-700 font-bold">
-                      ⚠ Editing Journal {editingJournal.number} — changes will update the existing entry.
+                      ⚠ Editing Journal {editingJournal.number} — changes will
+                      update the existing entry.
                     </span>
                   )}
                 </p>
               </div>
-
             </div>
           </div>
-
         </div>
       </div>
 
@@ -1160,17 +1438,17 @@ export default function ManualJournalPage() {
           onSuccess={handleLedgerCreated}
         />
       )}
-       {openManageLedger && (
-              <ManageLedgerModal
-                open={openManageLedger}
-                onClose={() => setOpenManageLedger(false)}
-                title="Create New Ledger"
-                subtitle="Create ledger manually"
-                updateAccount={(newLedger) => {
-                  setAccounts((prev) => [...prev, newLedger]);
-                }}
-              />
-            )}
+      {openManageLedger && (
+        <ManageLedgerModal
+          open={openManageLedger}
+          onClose={() => setOpenManageLedger(false)}
+          title="Create New Ledger"
+          subtitle="Create ledger manually"
+          updateAccount={(newLedger) => {
+            setAccounts((prev) => [...prev, newLedger]);
+          }}
+        />
+      )}
 
       <AuditLogSidebar
         isOpen={openLogs}

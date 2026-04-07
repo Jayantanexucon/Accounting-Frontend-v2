@@ -7,6 +7,5 @@ export const fetchMe = async (token) => {
       Authorization: `Bearer ${token}`,
     },
   });
-  console.log("fetchMe response:", res);
   return res.data;
 };
