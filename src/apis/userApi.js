@@ -4,7 +4,7 @@ import { API } from "./api";
  * Get all users
  */
 export const getUsersApi = async () => {
-  const { data } = await API.get(`/user`);
+  const { data } = await API.get(`/users`);
   return data;
 };
 
@@ -12,7 +12,7 @@ export const getUsersApi = async () => {
  * Create new user (Super Admin)
  */
 export const createUserApi = async (payload) => {
-  const { data } = await API.post(`/user`, payload);
+  const { data } = await API.post(`/users`, payload);
   return data;
 };
 
@@ -20,7 +20,7 @@ export const createUserApi = async (payload) => {
  * Edit user (name, role, email, block)
  */
 export const editUserApi = async (id, payload) => {
-  const { data } = await API.put(`/user/${id}`, payload);
+  const { data } = await API.put(`/users/${id}`, payload);
   return data;
 };
 
@@ -28,7 +28,7 @@ export const editUserApi = async (id, payload) => {
  * Update permissions (Permission Modal)
  */
 export const updateUserPermissionsApi = async (userId, payload) => {
-  const { data } = await API.put(`/user/${userId}/permissions`, {
+  const { data } = await API.put(`/users/${userId}/permissions`, {
     companyId: payload.companyId,
     permissions: payload.permissions,
   });
@@ -36,12 +36,12 @@ export const updateUserPermissionsApi = async (userId, payload) => {
 };
 
 export const createCompanyApi = async (payload) => {
-  const { data } = await API.post("/user/company", payload);
+  const { data } = await API.post("/users/company", payload);
   return data;
 };
 
 export const updateCompanyApi = async (companyId, payload) => {
-  const { data } = await API.put(`/user/company/${companyId}`, payload);
+  const { data } = await API.put(`/users/company/${companyId}`, payload);
   return data;
 };
 
@@ -51,6 +51,6 @@ export const getAllCompaniesApi = async () => {
 };
 
 export const getCompanyByIdApi = async (companyId) => {
-  const { data } = await API.get(`user/getcompany/${companyId}`);
+  const { data } = await API.get(`users/companies/${companyId}`);
   return data;
 };
