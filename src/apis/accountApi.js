@@ -129,13 +129,23 @@ export const updateAccountApi = async (accountId, form) => {
   return data;
 };
 
-export const getLedgerApi = async (accountId, companyId, signal) => {
-  const today = new Date();
-  const currentYear = today.getMonth() + 1 <= 3 ? today.getFullYear() : today.getFullYear() + 1;
-  const { startDate, endDate } = getFinancialPeriod({
-    periodType: "yearly",
-    year: currentYear,
-  });
+export const getLedgerApi = async (accountId, companyId, signal, dateRange = null) => {
+  let startDate;
+  let endDate;
+
+  if (dateRange?.from && dateRange?.to) {
+    startDate = new Date(dateRange.from);
+    endDate = new Date(dateRange.to);
+  } else {
+    const today = new Date();
+    const currentYear = today.getMonth() + 1 <= 3 ? today.getFullYear() : today.getFullYear() + 1;
+    const period = getFinancialPeriod({
+      periodType: "yearly",
+      year: currentYear,
+    });
+    startDate = period.startDate;
+    endDate = period.endDate;
+  }
 
   const { data } = await API.get(`/accounting/report/${companyId}/ledger`, {
     params: {

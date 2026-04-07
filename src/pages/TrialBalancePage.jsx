@@ -11,6 +11,7 @@ import { Link } from "react-router-dom";
 import LedgerDetailSidebar from "../components/LedgerDetailSidebar";
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { getLedgerSidebarFilters } from "../utils/scheduleReportUtil";
 
 const formatLocalDateInput = (date) => {
   const year = date.getFullYear();
@@ -36,6 +37,7 @@ export default function TrialBalancePage() {
   // Helper function to handle account click
   const handleAccountClick = useCallback(
     (account) => {
+      if (!account?._id) return;
       window.scrollTo({
         top: 0,
         behavior: "smooth",
@@ -149,31 +151,10 @@ export default function TrialBalancePage() {
       return `As of ${monthLabel.split(" (")[0]} ${yearForMonth}`;
     }
   };
-  const academicYearDateRange = useMemo(() => {
-    // For financial year: April 1 of startYear to March 31 of endYear
-    const fromDate = new Date(fyInfo.startYear, 3, 1); // April 1 (month is 0-based, so 3 = April)
-    const toDate = new Date(fyInfo.endYear, 2, 31); // March 31 (month is 0-based, so 2 = March)
-
-    return {
-      from: fromDate,
-      to: toDate,
-    };
-  }, [fyInfo]);
-
-  // Create advanced filters for academic year
-  const academicYearFilters = useMemo(() => {
-    return {
-      dateRange: {
-        from: formatLocalDateInput(academicYearDateRange.from),
-        to: formatLocalDateInput(academicYearDateRange.to),
-      },
-      amountRange: { min: "", max: "" },
-      amountType: "both",
-      accountGroups: [],
-      journalIds: [],
-      partyName: "",
-    };
-  }, [academicYearDateRange]);
+  const academicYearFilters = useMemo(
+    () => getLedgerSidebarFilters(selectedYear, periodType, selectedQuarter, selectedMonth),
+    [selectedYear, periodType, selectedQuarter, selectedMonth]
+  );
 
   // Fetch all accounts for selected period
   // useEffect(() => {

@@ -63,9 +63,13 @@ export default function ProfitLossStatement() {
     refetchOnWindowFocus: false,
   });
 
-  const sidebarFilters = useMemo(() => getLedgerSidebarFilters(selectedYear), [selectedYear]);
+  const sidebarFilters = useMemo(
+    () => getLedgerSidebarFilters(selectedYear, periodType, selectedQuarter, selectedMonth),
+    [selectedYear, periodType, selectedQuarter, selectedMonth]
+  );
 
   const handleAccountClick = useCallback((account) => {
+    if (!account?._id) return;
     window.scrollTo({ top: 0, behavior: "smooth" });
     setSelectedAccount(account);
     setIsSidebarOpen(true);

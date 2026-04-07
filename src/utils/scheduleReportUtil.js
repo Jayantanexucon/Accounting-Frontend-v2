@@ -63,8 +63,38 @@ export const getFinancialYearDateRange = (endingYear) => {
   };
 };
 
-export const getLedgerSidebarFilters = (endingYear) => {
-  const dateRange = getFinancialYearDateRange(endingYear);
+export const getReportDateRange = (periodType, endingYear, selectedQuarter = "Q4", selectedMonth = "3") => {
+  const fy = getFinancialYearInfo(endingYear);
+
+  if (periodType === "quarterly") {
+    const quarterRanges = {
+      Q1: { from: new Date(fy.startYear, 3, 1), to: new Date(fy.startYear, 5, 30) },
+      Q2: { from: new Date(fy.startYear, 6, 1), to: new Date(fy.startYear, 8, 30) },
+      Q3: { from: new Date(fy.startYear, 9, 1), to: new Date(fy.startYear, 11, 31) },
+      Q4: { from: new Date(fy.endYear, 0, 1), to: new Date(fy.endYear, 2, 31) },
+    };
+    return quarterRanges[selectedQuarter] || quarterRanges.Q4;
+  }
+
+  if (periodType === "monthly") {
+    const monthNumber = Number.parseInt(selectedMonth, 10);
+    const actualYear = monthNumber >= 4 ? fy.startYear : fy.endYear;
+    return {
+      from: new Date(actualYear, monthNumber - 1, 1),
+      to: new Date(actualYear, monthNumber, 0),
+    };
+  }
+
+  return getFinancialYearDateRange(endingYear);
+};
+
+export const getLedgerSidebarFilters = (
+  endingYear,
+  periodType = "yearly",
+  selectedQuarter = "Q4",
+  selectedMonth = "3"
+) => {
+  const dateRange = getReportDateRange(periodType, endingYear, selectedQuarter, selectedMonth);
   return {
     dateRange: {
       from: formatLocalDateInput(dateRange.from),

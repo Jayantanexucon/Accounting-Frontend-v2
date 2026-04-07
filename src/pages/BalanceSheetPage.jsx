@@ -66,11 +66,15 @@ export default function BalanceSheetPage() {
   });
 
   const canViewReport = checkAuthorization(user, "CHART OF ACCOUNTS", "VIEW");
-  const sidebarFilters = useMemo(() => getLedgerSidebarFilters(selectedYear), [selectedYear]);
+  const sidebarFilters = useMemo(
+    () => getLedgerSidebarFilters(selectedYear, periodType, selectedQuarter, selectedMonth),
+    [selectedYear, periodType, selectedQuarter, selectedMonth]
+  );
   const fyInfo = getFinancialYearInfo(selectedYear);
   const periodLabel = getPeriodDisplayLabel("balance_sheet", periodType, selectedYear, selectedQuarter, selectedMonth);
 
   const handleAccountClick = useCallback((account) => {
+    if (!account?._id) return;
     window.scrollTo({ top: 0, behavior: "smooth" });
     setSelectedAccount(account);
     setIsSidebarOpen(true);

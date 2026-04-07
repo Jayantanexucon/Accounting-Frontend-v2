@@ -48,8 +48,26 @@ const buildNote = (title, noteNo, items = []) => ({
   title,
   total: items.reduce((sum, item) => sum + Number(item.amount || 0), 0),
   items: items.map((item) => ({
-    kind: "summary",
+    kind: item.accountId ? "ledger" : "summary",
     label: item.name || item.label,
+    ledgerName: item.name || item.label || "",
+    ledgerCode: item.code || "",
+    sourceGroup: item.groupName || item.scheduleLineItem || "",
+    account: item.accountId
+      ? {
+          _id: item.accountId,
+          name: item.name || "",
+          code: item.code || "",
+          groupName: item.groupName || "",
+          openingBalance: Number(item.openingBalance || 0),
+          openingType: `${item.normalBalance || "Debit"}`.toLowerCase(),
+          type: item.normalBalance || "Debit",
+          linkedClientId: item.linkedClientId || null,
+          linkedVendorId: item.linkedVendorId || null,
+          linkedPartyType: item.linkedPartyType || "",
+          partyName: item.partyName || "",
+        }
+      : null,
     amount: Number(item.amount || 0),
   })),
 });
