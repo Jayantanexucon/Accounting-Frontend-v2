@@ -1,6 +1,10 @@
 import React, { useEffect, useState } from "react";
+import { useAuth } from "../contexts/AuthContext";
+import { getAccountsApi } from "../apis/accountApi";
+import { addJournalApi } from "../apis/journalApi";
 
 export default function NewJournalModal({ isOpen, onClose, onSave }) {
+  const { user } = useAuth();
   const emptyLine = () => ({
     id: Date.now() + Math.random(),
     account: "",
@@ -26,11 +30,12 @@ export default function NewJournalModal({ isOpen, onClose, onSave }) {
 
   // Fetch accounts
   useEffect(() => {
-    fetch("/api/accounts")
-      .then((r) => r.json())
-      .then((data) => setAccounts(Array.isArray(data) ? data : []))
+    if (!user?.company?._id) return;
+
+    getAccountsApi(user.company._id)
+      .then((data) => setAccounts(Array.isArray(data?.data) ? data.data : []))
       .catch(() => setAccounts([]));
-  }, []);
+  }, [user?.company?._id]);
 
   useEffect(() => setError(""), [lines]);
 
@@ -83,15 +88,22 @@ export default function NewJournalModal({ isOpen, onClose, onSave }) {
     setSaving(true);
 
     try {
-      const form = new FormData();
-      form.append("meta", JSON.stringify(payload));
-      attachments.forEach((file, idx) => form.append(`file_${idx}`, file));
-
-      const res = await fetch("/api/journals", { method: "POST", body: form });
-
-      if (!res.ok) throw new Error(await res.text());
-
-      const saved = await res.json();
+      const saved = await addJournalApi(
+        {
+          voucherType: "Journal Entry",
+          companyId: user?.company?._id,
+          date,
+          referenceNumber: reference,
+          narration: notes,
+          lines: payload.lines.map((line) => ({
+            accountId: line.account,
+            debit: Number(line.debit || 0),
+            credit: Number(line.credit || 0),
+            description: line.memo || "",
+          })),
+        },
+        user?.company?._id
+      );
 
       onSave && onSave(saved);
 
@@ -216,9 +228,9 @@ export default function NewJournalModal({ isOpen, onClose, onSave }) {
                       className="p-2 border rounded w-full"
                     >
                       <option value="">Select account</option>
-                      {accounts.map((a, i) => (
-                        <option key={i} value={a}>
-                          {a}
+                      {accounts.map((a) => (
+                        <option key={a._id} value={a._id}>
+                          {a.code} - {a.name}
                         </option>
                       ))}
                     </select>

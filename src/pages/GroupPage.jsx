@@ -82,7 +82,9 @@ export default function GroupPage() {
   const loadGroups = useCallback(async () => {
     if (!companyId) return;
     try {
-      const res = await API.get(`/group/${companyId}`);
+      const res = await API.get(`/accounting/group`, {
+        params: { companyId },
+      });
       setGroups(res.data.data);
     } catch (err) {
       setErrorMsg(err?.response?.data?.message || "Failed to load groups");
@@ -91,7 +93,10 @@ export default function GroupPage() {
 
   const handleCreate = async (data) => {
     try {
-      await API.post(`/group/${user.company._id}/create`, data);
+      await API.post(`/accounting/group`, {
+        ...data,
+        companyId: user.company._id,
+      });
       setSuccessMsg("Group created successfully");
       setErrorMsg("");
       setShowForm(false);
@@ -104,7 +109,7 @@ export default function GroupPage() {
 
   const handleUpdate = async (data) => {
     try {
-      await API.put(`/group/${user.company._id}/${editData._id}`, data);
+      await API.put(`/accounting/group/${editData._id}`, data);
       setSuccessMsg("Group updated successfully");
       setErrorMsg("");
       setEditData(null);
@@ -118,7 +123,7 @@ export default function GroupPage() {
 
   const handleDelete = async (id) => {
     try {
-      await API.delete(`/group/${user.company._id}/${id}`);
+      await API.delete(`/accounting/group/${id}`);
       setSuccessMsg("Group deleted");
       setErrorMsg("");
       setDeleteConfirm(null);
