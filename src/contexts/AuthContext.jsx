@@ -97,14 +97,17 @@ export const AuthProvider = ({ children }) => {
         account: accounts[0],
       });
 
-      // 🔐 Attach token to Axios
-      setAuthToken(tokenRes.accessToken);
-      localStorage.setItem("token", tokenRes.accessToken);
-
       // 📡 Call backend (/me)
       const data = await fetchMe(tokenRes.accessToken);
+      const appAccessToken = data?.accessToken;
 
-      // // console.log("AUTH context", data);
+      if (appAccessToken) {
+        setAuthToken(appAccessToken);
+        localStorage.setItem("token", appAccessToken);
+      } else {
+        setAuthToken(null);
+        localStorage.removeItem("token");
+      }
 
       const companies = data.companies || [];
       const selectedCompany = data.selectedCompany || null;
