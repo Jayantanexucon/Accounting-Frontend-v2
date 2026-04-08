@@ -125,7 +125,9 @@ export default function ProfitLossStatement() {
   };
 
   const fyInfo = getFinancialYearInfo(selectedYear);
-  const periodLabel = getPeriodDisplayLabel("profit_and_loss", periodType, selectedYear, selectedQuarter, selectedMonth);
+  const periodLabel =
+    reportData?.reportPeriodLabel ||
+    getPeriodDisplayLabel("profit_and_loss", periodType, selectedYear, selectedQuarter, selectedMonth);
 
   return (
     <div className="min-h-screen">

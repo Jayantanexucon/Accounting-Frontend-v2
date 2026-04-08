@@ -86,8 +86,8 @@ const toLegacyLedgerData = (report = {}) => {
             transaction.narration ||
             transaction.voucherType ||
             "Journal Entry",
-          debit: Number(transaction.debit || 0),
-          credit: Number(transaction.credit || 0),
+          debit: Number(transaction.credit || 0),
+          credit: Number(transaction.debit || 0),
         },
       ],
     })),

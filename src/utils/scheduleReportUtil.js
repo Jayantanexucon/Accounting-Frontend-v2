@@ -158,6 +158,7 @@ export const buildReportExportRows = (report) => {
   const rows = [
     [report?.title || ""],
     [`Financial Year: ${report?.financialYear || ""}`],
+    ...(report?.reportPeriodLabel ? [[`Period: ${report.reportPeriodLabel}`]] : []),
     [],
     ["Particulars", "Note No", "Amount"],
   ];

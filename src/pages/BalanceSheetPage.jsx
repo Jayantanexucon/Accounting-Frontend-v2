@@ -71,7 +71,9 @@ export default function BalanceSheetPage() {
     [selectedYear, periodType, selectedQuarter, selectedMonth]
   );
   const fyInfo = getFinancialYearInfo(selectedYear);
-  const periodLabel = getPeriodDisplayLabel("balance_sheet", periodType, selectedYear, selectedQuarter, selectedMonth);
+  const periodLabel =
+    reportData?.reportPeriodLabel ||
+    getPeriodDisplayLabel("balance_sheet", periodType, selectedYear, selectedQuarter, selectedMonth);
 
   const handleAccountClick = useCallback((account) => {
     if (!account?._id) return;
