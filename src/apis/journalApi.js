@@ -187,10 +187,14 @@ export const updateJournalApprovalRequestApi = async (companyId, requestId, stat
   return data;
 };
 
-export const uploadJournalExcelApi = async () => {
-  throw new Error("Journal Excel upload route is not available in the accounting backend module.");
+export const uploadJournalExcelApi = async (companyId, formData) => {
+  const { data } = await API.post(`/accounting/journal-excel/${companyId}/upload`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
 };
 
-export const confirmJournalExcelApi = async () => {
-  throw new Error("Journal Excel confirm route is not available in the accounting backend module.");
+export const confirmJournalExcelApi = async (companyId, payload) => {
+  const { data } = await API.post(`/accounting/journal-excel/${companyId}/confirm`, payload);
+  return data;
 };
