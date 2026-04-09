@@ -34,7 +34,7 @@ export default function VendorPage() {
   const { data: vendorResponse, isLoading: loading } = useQuery({
     queryKey: ["vendors", companyId, page, LIMIT],
     queryFn: async () => {
-      const res = await API.get(`/vendor/${companyId}`, { params: { page, limit: LIMIT } });
+      const res = await API.get(`masterData/vendor/${companyId}`, { params: { page, limit: LIMIT } });
       return res.data.data;
     },
     enabled: !!companyId,

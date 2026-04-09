@@ -4,7 +4,10 @@ import { API } from "./api";
  * GET ALL HSN (company scoped)
  */
 export const getallhsn = async (companyId) => {
-  const { data } = await API.get(`/hsn/${companyId}`);
+  const { data } = await API.get(`/masterData/hsn/${companyId}`);
+  console.log("===============================================");
+  console.log(data);
+  
   return data;
 };
 
@@ -12,7 +15,7 @@ export const getallhsn = async (companyId) => {
  * GET SINGLE HSN
  */
 export const gethsnbyid = async (companyId, id) => {
-  const { data } = await API.get(`/hsn/${companyId}/${id}`);
+  const { data } = await API.get(`/masterData/hsn/${companyId}/${id}`);
   return data;
 };
 
@@ -20,7 +23,7 @@ export const gethsnbyid = async (companyId, id) => {
  * CREATE HSN
  */
 export const createhsn = async (companyId, payload) => {
-  const { data } = await API.post(`/hsn/${companyId}`, payload);
+  const { data } = await API.post(`/masterData/hsn/${companyId}`, payload);
   return data;
 };
 
@@ -28,7 +31,7 @@ export const createhsn = async (companyId, payload) => {
  * UPDATE HSN
  */
 export const updatehsnbyid = async (companyId, id, payload) => {
-  const { data } = await API.put(`/hsn/${companyId}/${id}`, payload);
+  const { data } = await API.put(`/masterData/hsn/${companyId}/${id}`, payload);
   return data;
 };
 
@@ -36,7 +39,7 @@ export const updatehsnbyid = async (companyId, id, payload) => {
  * DELETE HSN
  */
 export const deletehsnbyid = async (companyId, id) => {
-  const { data } = await API.delete(`/hsn/${companyId}/${id}`);
+  const { data } = await API.delete(`/masterData/hsn/${companyId}/${id}`);
   return data;
 };
 
