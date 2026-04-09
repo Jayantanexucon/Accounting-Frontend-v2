@@ -60,6 +60,7 @@ export default function GroupPage() {
   const [showForm, setShowForm] = useState(false);
   const [editData, setEditData] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [formErrorMsg, setFormErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [openLogs, setOpenLogs] = useState(false);
   const [sort, setSort] = useState({ key: "name", dir: "asc" });
@@ -99,10 +100,11 @@ export default function GroupPage() {
       });
       setSuccessMsg("Group created successfully");
       setErrorMsg("");
+      setFormErrorMsg("");
       setShowForm(false);
       loadGroups();
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Failed to create group");
+      setFormErrorMsg(err.response?.data?.message || "Failed to create group");
       setSuccessMsg("");
     }
   };
@@ -112,11 +114,12 @@ export default function GroupPage() {
       await API.put(`/accounting/group/${editData._id}`, data);
       setSuccessMsg("Group updated successfully");
       setErrorMsg("");
+      setFormErrorMsg("");
       setEditData(null);
       setShowForm(false);
       loadGroups();
     } catch (err) {
-      setErrorMsg(err.response?.data?.message || "Failed to update group");
+      setFormErrorMsg(err.response?.data?.message || "Failed to update group");
       setSuccessMsg("");
     }
   };
@@ -207,6 +210,7 @@ export default function GroupPage() {
                 <button
                   onClick={() => {
                     setEditData(null);
+                    setFormErrorMsg("");
                     setShowForm(true);
                   }}
                   className="flex items-center gap-2 px-4 py-2.5 text-white text-xs font-bold rounded-xl transition-all hover:opacity-90"
@@ -539,6 +543,7 @@ export default function GroupPage() {
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     setEditData(g);
+                                    setFormErrorMsg("");
                                     setShowForm(true);
                                   }}
                                   className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-lg hover:bg-indigo-100 transition-all"
@@ -687,9 +692,12 @@ export default function GroupPage() {
         <GroupForm
           initial={editData}
           onSubmit={editData ? handleUpdate : handleCreate}
+          submitError={formErrorMsg}
+          onClearSubmitError={() => setFormErrorMsg("")}
           onClose={() => {
             setShowForm(false);
             setEditData(null);
+            setFormErrorMsg("");
           }}
         />
       )}

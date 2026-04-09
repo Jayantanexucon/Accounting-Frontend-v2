@@ -290,6 +290,10 @@ export default function ProfitLossStatement() {
           <div>
             <p className="text-xs font-bold text-slate-700">{periodLabel}</p>
             <p className="mt-0.5 text-[10px] text-slate-400">
+              {reportData?.startDate && reportData?.endDate
+                ? `${new Date(reportData.startDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} to ${new Date(reportData.endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })} • `
+                : ""
+              }
               {fyInfo.displayLabel} • Generated {new Date().toLocaleDateString()}
             </p>
           </div>

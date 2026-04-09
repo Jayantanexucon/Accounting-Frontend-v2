@@ -10,7 +10,13 @@ export default function DialogBox({
   onSubmit = () => {},
   contents = <></>,
   maxWidth = "max-w-2xl",
+  width,
+  footer = null,
+  submitLabel = "Confirm",
+  submitDisabled = false,
 }) {
+  const dialogWidth = width || maxWidth;
+
   return (
     <AnimatePresence>
       {open && (
@@ -29,7 +35,7 @@ export default function DialogBox({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className={`relative max-h-[90vh] flex flex-col bg-white rounded-3xl shadow-2xl ${maxWidth} w-full overflow-hidden border border-slate-100`}
+            className={`relative max-h-[90vh] flex flex-col bg-white rounded-3xl shadow-2xl ${dialogWidth} w-full overflow-hidden border border-slate-100`}
           >
             {/* Header */}
             <div className="p-6 md:p-8 border-b border-slate-100 flex items-start justify-between bg-slate-50/50">
@@ -51,24 +57,26 @@ export default function DialogBox({
             </div>
 
             {/* Footer / Actions */}
-            <div className="p-6 md:p-8 border-t border-slate-100 flex gap-3 justify-end bg-slate-50/50">
-              <button
-                onClick={onClose}
-                className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={loading}
-                onClick={onSubmit}
-                className="px-6 py-2.5 text-sm font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 cursor-pointer disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none flex items-center gap-2"
-              >
-                {loading && (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                )}
-                Confirm
-              </button>
-            </div>
+            {footer ?? (
+              <div className="p-6 md:p-8 border-t border-slate-100 flex gap-3 justify-end bg-slate-50/50">
+                <button
+                  onClick={onClose}
+                  className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-sm cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={loading || submitDisabled}
+                  onClick={onSubmit}
+                  className="px-6 py-2.5 text-sm font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 cursor-pointer disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none flex items-center gap-2"
+                >
+                  {loading && (
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  )}
+                  {submitLabel}
+                </button>
+              </div>
+            )}
           </motion.div>
         </div>
       )}
