@@ -35,6 +35,13 @@ const getPeriodDates = ({ periodType = "yearly", year, quarter = "Q4", month = "
   return { startDate, endDate, asOfDate: endDate };
 };
 
+const formatDisplayDate = (date) =>
+  new Intl.DateTimeFormat("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+
 const slugify = (value = "") =>
   value
     .toString()
@@ -241,6 +248,8 @@ export const getScheduleIIIBalanceSheetApi = async (companyId, params, signal) =
     data: {
       title: "Schedule III Balance Sheet",
       financialYear: `${params?.year || ""}`,
+      asOfDate: formatDate(asOfDate),
+      reportPeriodLabel: `As of ${formatDisplayDate(asOfDate)}`,
       rows,
       notes,
       issues: report.validation?.assetsEqualLiabilitiesPlusEquity
@@ -282,6 +291,9 @@ export const getScheduleIIIProfitLossApi = async (companyId, params, signal) => 
     data: {
       title: "Schedule III Profit and Loss",
       financialYear: `${params?.year || ""}`,
+      startDate: formatDate(startDate),
+      endDate: formatDate(endDate),
+      reportPeriodLabel: `${formatDisplayDate(startDate)} to ${formatDisplayDate(endDate)}`,
       rows,
       notes,
       issues: [],

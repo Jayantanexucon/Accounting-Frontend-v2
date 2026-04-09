@@ -6,15 +6,19 @@ const normalizeVoucherType = (value = "") => {
   switch (normalized) {
     case "JOURNAL":
     case "JOURNAL ENTRY":
-      return "Journal Entry";
+      return "JOURNAL";
     case "RECEIPT":
-      return "Receipt";
+      return "RECEIPT";
     case "PAYMENT":
-      return "Payment";
+      return "PAYMENT";
     case "CONTRA":
-      return "Contra";
+      return "CONTRA";
+    case "SALES":
+      return "SALES";
+    case "PURCHASE":
+      return "PURCHASE";
     default:
-      return value;
+      return normalized;
   }
 };
 
@@ -187,10 +191,14 @@ export const updateJournalApprovalRequestApi = async (companyId, requestId, stat
   return data;
 };
 
-export const uploadJournalExcelApi = async () => {
-  throw new Error("Journal Excel upload route is not available in the accounting backend module.");
+export const uploadJournalExcelApi = async (companyId, formData) => {
+  const { data } = await API.post(`/accounting/journal-excel/${companyId}/upload`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
 };
 
-export const confirmJournalExcelApi = async () => {
-  throw new Error("Journal Excel confirm route is not available in the accounting backend module.");
+export const confirmJournalExcelApi = async (companyId, payload) => {
+  const { data } = await API.post(`/accounting/journal-excel/${companyId}/confirm`, payload);
+  return data;
 };

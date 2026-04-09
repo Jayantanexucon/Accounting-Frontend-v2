@@ -7,7 +7,13 @@ import {
   SCHEDULE_III_GROUP_OPTIONS,
 } from "../utils/scheduleIIIConfig.js";
 
-export default function GroupForm({ onSubmit, onClose, initial }) {
+export default function GroupForm({
+  onSubmit,
+  onClose,
+  initial,
+  submitError = "",
+  onClearSubmitError,
+}) {
   const [form, setForm] = useState({
     name: "",
     nature: "",
@@ -109,6 +115,7 @@ export default function GroupForm({ onSubmit, onClose, initial }) {
 
   const handleChange = (event) => {
     const { name, value } = event.target;
+    if (submitError) onClearSubmitError?.();
 
     if (name === "name") {
       setForm((prev) => {
@@ -165,6 +172,13 @@ export default function GroupForm({ onSubmit, onClose, initial }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 p-6">
+          {submitError && (
+            <div className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertCircle size={16} className="mt-0.5 shrink-0" />
+              <div className="flex-1">{submitError}</div>
+            </div>
+          )}
+
           <div>
             <label className="mb-1 block text-sm font-medium text-gray-700">Sub Group Name</label>
             <input
