@@ -1,17 +1,23 @@
-import React, { useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import DialogBox from "./DialogBox";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
-import { addAccountApi } from "../apis/accountApi";
+import { addAccountApi, updateAccountApi } from "../apis/accountApi";
 import { API } from "../apis/api";
 
-const GROUP_DEFAULTS = {
-  Asset: { type: "balanceSheet", openingType: "debit" },
-  Liability: { type: "balanceSheet", openingType: "credit" },
-  Equity: { type: "balanceSheet", openingType: "credit" },
-  Income: { type: "revenueAccount", openingType: "credit" },
-  Expense: { type: "revenueAccount", openingType: "debit" },
+const GROUP_NATURE_DEFAULTS = {
+  Asset: { accountType: "Balance Sheet", openingType: "Debit" },
+  Liability: { accountType: "Balance Sheet", openingType: "Credit" },
+  Equity: { accountType: "Balance Sheet", openingType: "Credit" },
+  Income: { accountType: "Profit & Loss", openingType: "Credit" },
+  Expense: { accountType: "Profit & Loss", openingType: "Debit" },
 };
+
+const isTradeReceivableGroup = (group) =>
+  group?.scheduleLineItem === "Trade Receivables";
+
+const isTradePayableGroup = (group) =>
+  group?.scheduleLineItem === "Trade Payables";
 
 export default function ManageLedgerModal({
   open,
@@ -19,24 +25,20 @@ export default function ManageLedgerModal({
   title = "",
   subtitle = "",
   updateAccount = () => {},
+  ledgerToEdit = null,
 }) {
   const { user } = useAuth();
+  const isEditMode = Boolean(ledgerToEdit?._id);
+  const dropdownRef = useRef(null);
 
   const [groups, setGroups] = React.useState([]);
   const [loadingGroups, setLoadingGroups] = React.useState(false);
-  const [allowOverride, setAllowOverride] = React.useState(false);
-  const [showSubType, setShowSubType] = React.useState(false);
-  const [isCurrent, setIsCurrent] = React.useState(true);
   const [tempLedgers, setTempLedgers] = React.useState([]);
   const [editingIndex, setEditingIndex] = React.useState(null);
   const [search, setSearch] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
-
-  // For Sundry Debtors (Clients)
   const [invoiceClients, setInvoiceClients] = React.useState([]);
   const [showClients, setShowClients] = React.useState(false);
-
-  // For Sundry Creditors (Vendors)
   const [vendors, setVendors] = React.useState([]);
   const [showVendors, setShowVendors] = React.useState(false);
 
@@ -44,22 +46,59 @@ export default function ManageLedgerModal({
     name: "",
     groupId: "",
     groupName: "",
-    type: "",
-    openingType: "",
     openingBalance: 0,
     isActive: true,
     linkedClientId: null,
     linkedVendorId: null,
   });
 
-  /* ---------------- LOAD GROUPS ---------------- */
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group._id === form.groupId) || null,
+    [groups, form.groupId]
+  );
+
+  const derivedInfo = useMemo(() => {
+    if (!selectedGroup?.nature) return null;
+    return {
+      ...GROUP_NATURE_DEFAULTS[selectedGroup.nature],
+      scheduleMainHead: selectedGroup.scheduleMainHead,
+      scheduleGroup: selectedGroup.scheduleGroup,
+      scheduleLineItem: selectedGroup.scheduleLineItem,
+      noteNo: selectedGroup.noteNo,
+    };
+  }, [selectedGroup]);
+
+  const resetAuxiliaryState = () => {
+    setShowClients(false);
+    setShowVendors(false);
+    setInvoiceClients([]);
+    setVendors([]);
+  };
+
+  const resetForm = () => {
+    setForm({
+      name: "",
+      groupId: "",
+      groupName: "",
+      openingBalance: 0,
+      isActive: true,
+      linkedClientId: null,
+      linkedVendorId: null,
+    });
+    setSearch("");
+    setShowDropdown(false);
+    resetAuxiliaryState();
+  };
+
   React.useEffect(() => {
     if (!open) return;
 
     const loadGroups = async () => {
       try {
         setLoadingGroups(true);
-        const res = await API.get(`/group/${user.company._id}`);
+        const res = await API.get("/accounting/group", {
+          params: { companyId: user.company._id },
+        });
         setGroups(res.data.data || []);
       } catch (error) {
         toast.error(error.message || "Failed to load groups");
@@ -69,101 +108,55 @@ export default function ManageLedgerModal({
     };
 
     loadGroups();
-  }, [open]);
+  }, [open, user.company._id]);
 
-  /* ---------------- HANDLERS ---------------- */
-  const handleChange = async (e) => {
-    const { name, value, type, checked } = e.target;
-
-    if (name === "groupId") {
-      const selectedGroup = groups.find((g) => g._id === value);
-      const defaults = GROUP_DEFAULTS[selectedGroup?.nature] || {};
-
-      // Show subType checkbox only for Balance Sheet accounts
-      const isBalanceSheet = defaults.type === "balanceSheet";
-      setShowSubType(isBalanceSheet);
-
-      // Reset to current by default for Balance Sheet accounts
-      if (isBalanceSheet) {
-        setIsCurrent(true);
-      } else {
-        setIsCurrent(false);
+  const loadReceivableOrPayableSource = async (group) => {
+    resetAuxiliaryState();
+    if (isTradeReceivableGroup(group)) {
+      try {
+        const res = await API.get("/invoices/invoice-clients");
+        setInvoiceClients(res.data.data || []);
+        setShowClients(true);
+      } catch (error) {
+        toast.error(error.message || "Failed to load clients");
       }
-
-      setForm((prev) => ({
-        ...prev,
-        groupId: value,
-        groupName: selectedGroup?.name || "",
-        type: defaults.type || "",
-        openingType: defaults.openingType || "",
-      }));
-
-      // 🔥 Sundry Debtors → fetch clients from invoices
-      if (selectedGroup?.name === "Sundry Debtors") {
-        try {
-          const res = await API.get("/invoices/invoice-clients");
-          setInvoiceClients(res.data.data || []);
-          setShowClients(true);
-          setShowVendors(false);
-        } catch (error) {
-          toast.error(error.message || "Failed to load clients");
-          setInvoiceClients([]);
-          setShowClients(false);
-        }
-      }
-      // 🔥 Sundry Creditors → fetch vendors
-      else if (selectedGroup?.name === "Sundry Creditors") {
-        try {
-          const res = await API.get(`/vendor/${user?.company?._id}`);
-          setVendors(res.data.data?.vendors || []);
-          setShowVendors(true);
-          setShowClients(false);
-        } catch (error) {
-          toast.error(error.message || "Failed to load vendors");
-          setVendors([]);
-          setShowVendors(false);
-        }
-      }
-      // Reset both lists if neither group selected
-      else {
-        setInvoiceClients([]);
-        setShowClients(false);
-        setVendors([]);
-        setShowVendors(false);
-      }
-
-      setAllowOverride(false);
       return;
     }
 
-    // Handle isCurrent checkbox
-    if (name === "isCurrent") {
-      setIsCurrent(checked);
-      return;
-    }
-
-    // Handle manual type change (when override is allowed)
-    if (name === "type") {
-      const isBalanceSheet = value === "balanceSheet";
-      setShowSubType(isBalanceSheet);
-      if (isBalanceSheet) {
-        setIsCurrent(true);
-      } else {
-        setIsCurrent(false);
+    if (isTradePayableGroup(group)) {
+      try {
+        const res = await API.get(`/vendor/${user?.company?._id}`);
+        setVendors(res.data.data?.vendors || []);
+        setShowVendors(true);
+      } catch (error) {
+        toast.error(error.message || "Failed to load vendors");
       }
+    }
+  };
 
-      setForm((prev) => ({
-        ...prev,
-        [name]: value,
-      }));
+  const setSelectedGroupState = async (group) => {
+    if (!group) {
+      resetForm();
       return;
     }
+
+    setForm((prev) => ({
+      ...prev,
+      groupId: group._id,
+      groupName: group.name,
+      linkedClientId: null,
+      linkedVendorId: null,
+    }));
+    setSearch(`${group.name} (${group.nature})`);
+    setShowDropdown(false);
+    await loadReceivableOrPayableSource(group);
+  };
+
+  const handleChange = (event) => {
+    const { name, value, type, checked } = event.target;
 
     if (name === "openingBalance") {
-      setForm((prev) => ({
-        ...prev,
-        openingBalance: Number(value),
-      }));
+      setForm((prev) => ({ ...prev, openingBalance: Number(value) }));
       return;
     }
 
@@ -175,42 +168,63 @@ export default function ManageLedgerModal({
     setForm((prev) => ({ ...prev, [name]: value }));
   };
 
-  const filteredGroups = groups.filter((g) =>
-    `${g.name} ${g.nature}`.toLowerCase().includes(search.toLowerCase()),
+  const filteredGroups = groups.filter((group) =>
+    `${group.name} ${group.nature} ${group.scheduleGroup || ""} ${group.scheduleLineItem || ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
   );
+
+  const handleGroupSearchChange = (value) => {
+    setSearch(value);
+    setShowDropdown(true);
+
+    const currentSelectionLabel = form.groupName
+      ? `${form.groupName} (${groups.find((group) => group._id === form.groupId)?.nature || ""})`
+      : "";
+
+    if (!value.trim() || value !== currentSelectionLabel) {
+      setForm((prev) => ({
+        ...prev,
+        groupId: "",
+        groupName: "",
+        linkedClientId: null,
+        linkedVendorId: null,
+      }));
+      resetAuxiliaryState();
+    }
+  };
+
+  const buildPayload = () => {
+    if (!form.groupId) throw new Error("Account Group is required");
+    if (!form.name.trim()) throw new Error("Account Name is required");
+    if (!selectedGroup?.scheduleLineItem) {
+      throw new Error("Selected group does not have Schedule III mapping");
+    }
+
+    const ledgerCode = form.name
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "")
+      .slice(0, 12);
+
+    return {
+      ...form,
+      code: ledgerCode,
+      name: form.name.trim(),
+    };
+  };
 
   const handleAddAccount = () => {
     try {
-      if (!form.name || !form.groupId || !form.type || !form.openingType) {
-        throw new Error("Please fill all required fields");
-      }
+      const payload = buildPayload();
 
-      const ledgerCode = form.name
-        .toUpperCase()
-        .replace(/[^A-Z0-9]/g, "")
-        .slice(0, 12);
-
-      let subTypeValue = null;
-      if (form.type === "balanceSheet") {
-        subTypeValue = isCurrent ? "current" : "nonCurrent";
-      }
-
-      const payload = {
-        ...form,
-        code: ledgerCode,
-        subType: subTypeValue,
-        allowOverride,
-      };
-
-      //  Check duplicate in temporary list
       const alreadyExists = tempLedgers.some(
         (ledger, index) =>
-          ledger.name.trim().toLowerCase() === form.name.trim().toLowerCase() &&
-          index !== editingIndex,
+          ledger.name.trim().toLowerCase() === payload.name.trim().toLowerCase() &&
+          index !== editingIndex
       );
 
       if (alreadyExists) {
-        toast.error(error.message || "Already added in the temporary list");
+        toast.error("Already added in the temporary list");
         return;
       }
 
@@ -223,21 +237,7 @@ export default function ManageLedgerModal({
         setTempLedgers((prev) => [...prev, payload]);
       }
 
-      // Reset form
-      setForm({
-        name: "",
-        groupId: "",
-        groupName: "",
-        type: "",
-        openingType: "",
-        openingBalance: 0,
-        isActive: true,
-        linkedClientId: null,
-        linkedVendorId: null,
-      });
-      setSearch("");
-      setShowDropdown(false);
-
+      resetForm();
       toast.success("Ledger added to temporary list");
     } catch (error) {
       toast.error(error.message);
@@ -246,8 +246,20 @@ export default function ManageLedgerModal({
 
   const handleFinalSubmit = async () => {
     try {
+      if (isEditMode) {
+        const res = await updateAccountApi(
+          ledgerToEdit._id,
+          buildPayload(),
+          user.company._id
+        );
+        updateAccount(res.data);
+        toast.success("Ledger updated successfully");
+        onClose();
+        return;
+      }
+
       if (tempLedgers.length === 0) {
-        toast.error( error.message|| "No ledgers to create");
+        toast.error("No ledgers to create");
         return;
       }
 
@@ -260,31 +272,44 @@ export default function ManageLedgerModal({
       setTempLedgers([]);
       onClose();
     } catch (error) {
-      toast.error(error.message || "Failed to create ledgers");
+      toast.error(error?.response?.data?.message || error.message || "Failed to create ledgers");
     }
   };
 
-  /* ---------------- RESET FORM ON CLOSE ---------------- */
+  React.useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (open && dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  React.useEffect(() => {
+    if (open && ledgerToEdit && groups.length > 0) {
+      const group = groups.find((item) => item._id === ledgerToEdit.groupId);
+      setForm({
+        name: ledgerToEdit.name || "",
+        groupId: ledgerToEdit.groupId || "",
+        groupName: ledgerToEdit.groupName || "",
+        openingBalance: ledgerToEdit.openingBalance || 0,
+        isActive: ledgerToEdit.isActive ?? true,
+        linkedClientId: ledgerToEdit.linkedClientId || null,
+        linkedVendorId: ledgerToEdit.linkedVendorId || null,
+      });
+      setSearch(group ? `${group.name} (${group.nature})` : ledgerToEdit.groupName || "");
+      setShowDropdown(false);
+      loadReceivableOrPayableSource(group);
+    }
+  }, [open, ledgerToEdit, groups]);
+
   React.useEffect(() => {
     if (!open) {
-      setForm({
-        name: "",
-        groupId: "",
-        groupName: "",
-        type: "",
-        openingType: "",
-        openingBalance: 0,
-        isActive: true,
-        linkedClientId: null,
-        linkedVendorId: null,
-      });
-      setAllowOverride(false);
-      setShowSubType(false);
-      setIsCurrent(true);
-      setShowClients(false);
-      setShowVendors(false);
-      setInvoiceClients([]);
-      setVendors([]);
+      resetForm();
+      setTempLedgers([]);
+      setEditingIndex(null);
     }
   }, [open]);
 
@@ -292,143 +317,111 @@ export default function ManageLedgerModal({
     <DialogBox
       open={open}
       onClose={onClose}
-      onSubmit={handleAddAccount}
+      onSubmit={isEditMode ? handleFinalSubmit : handleAddAccount}
       title={title}
       subtitle={subtitle}
       contents={
         <div className="flex gap-6">
-          <div className="w-2/3">
-            <form className="space-y-6 mt-4">
-              {/* Account Group */}
-              <div className="space-y-2">
-                <label className="text-sm font-semibold">Account Group</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => {
-                      setSearch(e.target.value);
-                      setShowDropdown(true);
-                    }}
-                    onFocus={() => setShowDropdown(true)}
-                    placeholder="Search group..."
-                    className="w-full px-4 py-2.5 border rounded-lg"
-                  />
+          <div className={isEditMode ? "w-full" : "w-2/3"}>
+            <form className="mt-4 space-y-6">
+              <div className="relative" ref={dropdownRef}>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold">Account Group</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => handleGroupSearchChange(e.target.value)}
+                      onFocus={() => setShowDropdown(true)}
+                      placeholder="Search group..."
+                      className="w-full rounded-lg border px-4 py-2.5"
+                    />
 
-                  {showDropdown && (
-                    <div className="absolute w-full bg-white border rounded-lg mt-1 max-h-40 overflow-y-auto z-50">
-                      {filteredGroups.map((g) => (
-                        <div
-                          key={g._id}
-                          className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
-                          onClick={() => {
-                            setSearch(`${g.name} (${g.nature})`);
-                            setShowDropdown(false);
-
-                            handleChange({
-                              target: {
-                                name: "groupId",
-                                value: g._id,
-                              },
-                            });
-                          }}
-                        >
-                          {g.name} ({g.nature})
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                    {showDropdown && (
+                      <div className="absolute z-50 mt-1 max-h-40 w-full overflow-y-auto rounded-lg border bg-white">
+                        {loadingGroups && <div className="px-4 py-2 text-sm text-gray-500">Loading groups...</div>}
+                        {filteredGroups.map((group) => (
+                          <button
+                            key={group._id}
+                            type="button"
+                            className="w-full px-4 py-2 text-left hover:bg-gray-100"
+                            onClick={() => setSelectedGroupState(group)}
+                          >
+                            <div className="text-sm font-medium">{group.name} ({group.nature})</div>
+                            <div className="text-[11px] text-gray-500">
+                              {group.scheduleMainHead} • {group.scheduleGroup} • {group.scheduleLineItem}
+                            </div>
+                          </button>
+                        ))}
+                        {!loadingGroups && filteredGroups.length === 0 && (
+                          <div className="px-4 py-2 text-sm text-gray-500">No groups found</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              {/* 🔥 SUNDRY DEBTORS - Show Clients */}
               {showClients && (
-                <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                  <p className="text-sm font-semibold mb-2">
-                    Clients (from invoices)
-                  </p>
-
-                  <div className="max-h-48 overflow-y-auto space-y-1">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="mb-2 text-sm font-semibold">Clients (Trade Receivables)</p>
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
                     {invoiceClients.length > 0 ? (
-                      invoiceClients.map((c, idx) => (
+                      invoiceClients.map((client, index) => (
                         <button
-                          key={idx}
+                          key={index}
                           type="button"
-                          onClick={() => {
+                          onClick={() =>
                             setForm((prev) => ({
                               ...prev,
-                              name: c.name,
-                              openingType: "debit",
-                              type: "balanceSheet",
-                            }));
-                            setIsCurrent(true);
-                            setShowSubType(true);
-                            setShowClients(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-white border border-transparent hover:border-gray-300 text-sm"
+                              name: client.name,
+                              linkedClientId: client._id || null,
+                              linkedVendorId: null,
+                            }))
+                          }
+                          className="w-full rounded border border-transparent px-3 py-2 text-left text-sm hover:border-gray-300 hover:bg-white"
                         >
-                          <div className="font-medium">{c.name}</div>
-                          {c.gstin && (
-                            <div className="text-xs text-gray-500">
-                              GSTIN: {c.gstin}
-                            </div>
-                          )}
+                          <div className="font-medium">{client.name}</div>
+                          {client.gstin && <div className="text-xs text-gray-500">GSTIN: {client.gstin}</div>}
                         </button>
                       ))
                     ) : (
-                      <p className="text-xs text-gray-500 text-center py-4">
-                        No clients found
-                      </p>
+                      <p className="py-4 text-center text-xs text-gray-500">No clients found</p>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* 🔥 SUNDRY CREDITORS - Show Vendors */}
               {showVendors && (
-                <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                  <p className="text-sm font-semibold mb-2">Vendors</p>
-
-                  <div className="max-h-48 overflow-y-auto space-y-1">
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                  <p className="mb-2 text-sm font-semibold">Vendors (Trade Payables)</p>
+                  <div className="max-h-48 space-y-1 overflow-y-auto">
                     {vendors.length > 0 ? (
-                      vendors.map((v) => (
+                      vendors.map((vendor) => (
                         <button
-                          key={v._id}
+                          key={vendor._id}
                           type="button"
-                          onClick={() => {
+                          onClick={() =>
                             setForm((prev) => ({
                               ...prev,
-                              name: v.vendorName,
-                              openingType: "credit",
-                              type: "balanceSheet",
-                            }));
-                            setIsCurrent(true);
-                            setShowSubType(true);
-                            setShowVendors(false);
-                          }}
-                          className="w-full text-left px-3 py-2 rounded hover:bg-white border border-transparent hover:border-gray-300 text-sm"
+                              name: vendor.vendorName,
+                              linkedVendorId: vendor._id,
+                              linkedClientId: null,
+                            }))
+                          }
+                          className="w-full rounded border border-transparent px-3 py-2 text-left text-sm hover:border-gray-300 hover:bg-white"
                         >
-                          <div className="font-medium">{v.vendorName}</div>
-                          <div className="text-xs text-gray-500">
-                            Code: {v.vendorCode}
-                          </div>
-                          {v.gstin && (
-                            <div className="text-xs text-gray-500">
-                              GSTIN: {v.gstin}
-                            </div>
-                          )}
+                          <div className="font-medium">{vendor.vendorName}</div>
+                          <div className="text-xs text-gray-500">Code: {vendor.vendorCode}</div>
                         </button>
                       ))
                     ) : (
-                      <p className="text-xs text-gray-500 text-center py-4">
-                        No vendors found
-                      </p>
+                      <p className="py-4 text-center text-xs text-gray-500">No vendors found</p>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Account Name */}
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Account Name</label>
                 <input
@@ -436,100 +429,40 @@ export default function ManageLedgerModal({
                   name="name"
                   value={form.name}
                   onChange={handleChange}
-                  className="w-full px-4 py-2.5 border rounded-lg"
+                  className="w-full rounded-lg border px-4 py-2.5"
                   required
                 />
               </div>
 
-              {/* Account Type + Balance Type */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold">Account Type</label>
-                  <select
-                    name="type"
-                    value={form.type}
-                    onChange={handleChange}
-                    disabled={!allowOverride}
-                    className="w-full px-4 py-2.5 border rounded-lg disabled:bg-gray-100"
-                    required
-                  >
-                    <option value="balanceSheet">Balance Sheet</option>
-                    <option value="revenueAccount">Profit & Loss</option>
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-semibold">Balance Type</label>
-                  <select
-                    name="openingType"
-                    value={form.openingType}
-                    onChange={handleChange}
-                    disabled={!allowOverride}
-                    className="w-full px-4 py-2.5 border rounded-lg disabled:bg-gray-100"
-                    required
-                  >
-                    <option value="debit">Debit</option>
-                    <option value="credit">Credit</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Current/Non-Current Checkbox - Only for Balance Sheet */}
-              {showSubType && (
-                <div className="flex items-start gap-2 bg-blue-50 p-4 rounded-lg border border-blue-200">
-                  <input
-                    type="checkbox"
-                    name="isCurrent"
-                    id="isCurrentCheckbox"
-                    checked={isCurrent}
-                    onChange={handleChange}
-                    className="h-4 w-4 text-blue-600 rounded mt-1"
-                  />
+              {derivedInfo && (
+                <div className="grid grid-cols-1 gap-4 rounded-lg border border-blue-100 bg-blue-50 p-4 md:grid-cols-2">
                   <div>
-                    <label
-                      htmlFor="isCurrentCheckbox"
-                      className="text-sm font-medium text-gray-700 cursor-pointer"
-                    >
-                      Mark as Current Asset/Liability
-                    </label>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {isCurrent
-                        ? "✓ This account will appear under Current Assets/Current Liabilities (short-term, typically < 1 year)"
-                        : "✗ This account will appear under Non-Current Assets/Non-Current Liabilities (long-term, typically > 1 year)"}
+                    <p className="text-xs font-black uppercase tracking-widest text-blue-700">Derived Classification</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">{derivedInfo.accountType}</p>
+                    <p className="text-xs text-slate-500">Opening type: {derivedInfo.openingType}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-widest text-blue-700">Schedule III Mapping</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-900">{derivedInfo.scheduleMainHead}</p>
+                    <p className="text-xs text-slate-500">
+                      {derivedInfo.scheduleGroup} • {derivedInfo.scheduleLineItem}
                     </p>
+                    {derivedInfo.noteNo && <p className="text-xs text-slate-500">Note {derivedInfo.noteNo}</p>}
                   </div>
                 </div>
               )}
 
-              {/* Override Checkbox */}
-              <div className="flex items-center gap-2">
+              <div className="space-y-2 max-w-xs">
+                <label className="text-sm font-semibold">Opening Balance</label>
                 <input
-                  type="checkbox"
-                  checked={allowOverride}
-                  onChange={(e) => setAllowOverride(e.target.checked)}
+                  type="number"
+                  name="openingBalance"
+                  value={form.openingBalance}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border px-4 py-2.5"
                 />
-                <span className="text-xs text-gray-600">
-                  Allow manual override of Account Type / Balance Type
-                </span>
               </div>
 
-              {/* Opening Balance */}
-              {showSubType && (
-                <div className="space-y-2 max-w-xs">
-                  <label className="text-sm font-semibold">
-                    Opening Balance
-                  </label>
-                  <input
-                    type="number"
-                    name="openingBalance"
-                    value={form.openingBalance}
-                    onChange={handleChange}
-                    className="w-full px-4 py-2.5 border rounded-lg"
-                  />
-                </div>
-              )}
-
-              {/* Active */}
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -542,60 +475,56 @@ export default function ManageLedgerModal({
             </form>
           </div>
 
-          {/* Temporary Ledger List */}
-          <div className="w-1/3 border-l pl-4 max-h-[500px] overflow-y-auto">
-            <h3 className="text-sm font-semibold mb-3">Temporary Ledgers</h3>
+          {!isEditMode && (
+            <div className="max-h-[500px] w-1/3 overflow-y-auto border-l pl-4">
+              <h3 className="mb-3 text-sm font-semibold">Temporary Ledgers</h3>
 
-            {tempLedgers.length === 0 && (
-              <p className="text-xs text-gray-500">No ledgers added yet</p>
-            )}
+              {tempLedgers.length === 0 && <p className="text-xs text-gray-500">No ledgers added yet</p>}
 
-            {tempLedgers.map((ledger, index) => (
-              <div
-                key={index}
-                className="border rounded p-2 mb-2 text-sm bg-gray-50"
-              >
-                <div className="font-medium">{ledger.name}</div>
-                <div className="text-xs text-gray-500">{ledger.groupName}</div>
+              {tempLedgers.map((ledger, index) => (
+                <div key={index} className="mb-2 rounded border bg-gray-50 p-2 text-sm">
+                  <div className="font-medium">{ledger.name}</div>
+                  <div className="text-xs text-gray-500">{ledger.groupName}</div>
+                  <div className="text-[11px] text-gray-400">{ledger.openingBalance} opening balance</div>
 
-                <div className="flex gap-2 mt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForm(ledger);
-                      setSearch(ledger.groupName);
-                      setEditingIndex(index);
-                    }}
-                    className="text-blue-600 text-xs"
-                  >
-                    Edit
-                  </button>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setForm(ledger);
+                        const group = groups.find((item) => item._id === ledger.groupId);
+                        setSearch(group ? `${group.name} (${group.nature})` : ledger.groupName);
+                        setShowDropdown(false);
+                        await loadReceivableOrPayableSource(group);
+                        setEditingIndex(index);
+                      }}
+                      className="text-xs text-blue-600"
+                    >
+                      Edit
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setTempLedgers((prev) =>
-                        prev.filter((_, i) => i !== index),
-                      )
-                    }
-                    className="text-red-600 text-xs"
-                  >
-                    Delete
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setTempLedgers((prev) => prev.filter((_, itemIndex) => itemIndex !== index))}
+                      className="text-xs text-red-600"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
 
-            {tempLedgers.length > 0 && (
-              <button
-                type="button"
-                onClick={handleFinalSubmit}
-                className="mt-4 w-full bg-green-600 text-white py-2 rounded"
-              >
-                Final Submit All
-              </button>
-            )}
-          </div>
+              {tempLedgers.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleFinalSubmit}
+                  className="mt-4 w-full rounded bg-green-600 py-2 text-white"
+                >
+                  Final Submit All
+                </button>
+              )}
+            </div>
+          )}
         </div>
       }
     />

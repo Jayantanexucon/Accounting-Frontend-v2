@@ -1,8 +1,11 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import NewJournalModal from "../components/NewJournalModal";
+import { useAuth } from "../contexts/AuthContext";
+import { allJournalApi } from "../apis/journalApi";
 
 export default function ManualJournalsPage() {
+  const { user } = useAuth();
   const [journals, setJournals] = useState([]);
   const [open, setOpen] = useState(false);
 
@@ -12,9 +15,8 @@ export default function ManualJournalsPage() {
 
   async function loadJournals() {
     try {
-      const res = await fetch("/api/journals");
-      const data = await res.json();
-      setJournals(Array.isArray(data) ? data : []);
+      const res = await allJournalApi(user?.company?._id, { page: 1, limit: 500 });
+      setJournals(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
       console.error(err);
       setJournals([]);
@@ -29,7 +31,7 @@ export default function ManualJournalsPage() {
   }
 
   function handleSave(newJournal) {
-    setJournals((prev) => [newJournal, ...prev]);
+    setJournals((prev) => [newJournal?.data || newJournal, ...prev]);
   }
 
   return (
@@ -74,23 +76,23 @@ export default function ManualJournalsPage() {
 
           <tbody>
             {journals.map((j) => (
-              <tr key={j.id} className="border-b hover:bg-gray-50">
+              <tr key={j._id || j.id} className="border-b hover:bg-gray-50">
                 <td className="py-3 px-4">
                   {new Date(j.date).toLocaleDateString()}
                 </td>
                 <td className="py-3 px-4 text-blue-600 cursor-pointer hover:underline">
-                  {j.journalNo}
+                  {j.number || j.journalNo}
                 </td>
-                <td className="py-3 px-4">{j.reference}</td>
+                <td className="py-3 px-4">{j.referenceNumber || j.reference}</td>
                 <td className="py-3 px-4">
                   <span className="font-medium text-green-600">{j.status}</span>
                 </td>
-                <td className="py-3 px-4">{j.notes || "—"}</td>
+                <td className="py-3 px-4">{j.narration || j.notes || "—"}</td>
                 <td className="py-3 px-4 font-medium">
-                  {formatAmount(j.amount)}
+                  {formatAmount(j.totalDebit || j.amount)}
                 </td>
-                <td className="py-3 px-4">{j.createdBy}</td>
-                <td className="py-3 px-4">{j.reportingMethod}</td>
+                <td className="py-3 px-4">{j.createdBy || "—"}</td>
+                <td className="py-3 px-4">{j.sourceType || "MANUAL"}</td>
               </tr>
             ))}
           </tbody>

@@ -208,7 +208,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
     const ctrl = new AbortController();
     setLoading(true);
     setLedgerData(null);
-    getLedgerApi(accountId, user?.company?._id, ctrl.signal)
+    getLedgerApi(accountId, user?.company?._id, ctrl.signal, advancedFilters?.dateRange)
       .then((res) => setLedgerData(res.data))
       .catch((err) => {
         if (err?.name !== "CanceledError" && err?.name !== "AbortError")
@@ -216,7 +216,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
       })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [accountId]);
+  }, [accountId, advancedFilters?.dateRange?.from, advancedFilters?.dateRange?.to, user?.company?._id, account?.name]);
 
   /* ── filter helpers ────────────────────────────────── */
   const hasActiveFilters = useMemo(() => {

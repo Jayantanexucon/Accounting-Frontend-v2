@@ -253,7 +253,7 @@ export default function NavbarComponent() {
         </div>
       )}
 
-      {/* Navigation */}
+   
       <nav className="flex-1 overflow-y-auto overflow-x-hidden px-3 space-y-1 custom-scrollbar">
         {links.map((link, index) => {
           if (!link.alwaysShow && !hasViewPermission(link._id)) return null;
@@ -334,8 +334,7 @@ export default function NavbarComponent() {
           );
         })}
 
-        {/* Admin/SuperAdmin specific tabs */}
-        {/* Admin/SuperAdmin specific tabs */}
+
         {(user?.role === "superAdmin" || user?.role === "admin") && (
           <div className="mb-1">
             <button
@@ -384,7 +383,7 @@ export default function NavbarComponent() {
           </div>
         )}
 
-        {/* <NavLink
+         <NavLink
           to="/accounting/bank-reconciliation"
           className={({ isActive }) =>
             `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
@@ -405,8 +404,15 @@ export default function NavbarComponent() {
           {!isCollapsed && (
             <span className="text-sm font-medium flex-1">Reconciliation</span>
           )}
-        </NavLink> */}
-      </nav>
+        </NavLink> 
+      </nav> 
+      
+
+{/* // Inside NavbarComponent, replace the entire <nav> block with this static version */}
+
+
+
+
 
       {/* Footer / User Profile */}
       <div className="p-4 border-t border-white/5 bg-black/20">
@@ -436,8 +442,8 @@ export default function NavbarComponent() {
 
             <div className={`flex ${isCollapsed ? "flex-col" : "items-center"} gap-0.5 shrink-0`}>
               <NotificationBell
-                collapsed={true} // Always icon-only in sidebar footer
-                isLink={true}    // Redirect directly to /notifications
+                collapsed={true}
+                isLink={true}
                 buttonClassName="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors w-9 h-9 flex items-center justify-center"
                 className="flex items-center"
               />
