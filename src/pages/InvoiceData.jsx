@@ -133,8 +133,10 @@ const InvoiceData = () => {
   useEffect(() => {
     const fetchAllInvoices = async () => {
       try {
-        const response = await API.get(`/invoices/getall/${user.company._id}`, {
+        const response = await API.get(`/invoices/`, {
+          // ✅ Changed
           params: {
+            companyId: user.company._id, // ✅ Move to params
             page: 1,
             limit: 1,
             approvalStatus: "Approved",
@@ -157,7 +159,8 @@ const InvoiceData = () => {
     setError(null);
 
     try {
-      const response = await API.get(`/invoices/getall/${user.company._id}`, {
+      const response = await API.get(`/invoices/`, {
+        // ✅ Changed
         params: {
           companyId: user.company._id,
           page: 1,
@@ -171,19 +174,17 @@ const InvoiceData = () => {
       const invoicesData = response.data?.data || [];
       setInvoices(invoicesData);
 
-      const allFilteredResponse = await API.get(
-        `/invoices/getall/${user.company._id}`,
-        {
-          params: {
-            companyId: user.company._id,
-            page: 1,
-            limit: 10000, // IMPORTANT
-            approvalStatus: "Approved",
-            sort: "-createdAt",
-            ...advancedFilters, // 🔥 SAME FILTERS
-          },
+      const allFilteredResponse = await API.get(`/invoices/`, {
+        // ✅ Changed
+        params: {
+          companyId: user.company._id,
+          page: 1,
+          limit: 10000,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
+          ...advancedFilters,
         },
-      );
+      });
 
       setFilteredAllInvoices(allFilteredResponse.data?.data || []);
 
@@ -195,18 +196,16 @@ const InvoiceData = () => {
         }));
       }
 
-      const allInvoicesResponse = await API.get(
-        `/invoices/getall/${user.company._id}`,
-        {
-          params: {
-            companyId: user.company._id,
-            page: 1,
-            limit: 10000,
-            approvalStatus: "Approved",
-            sort: "-createdAt",
-          },
+      const allInvoicesResponse = await API.get(`/invoices/`, {
+        // ✅ Changed
+        params: {
+          companyId: user.company._id,
+          page: 1,
+          limit: 10000,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
         },
-      );
+      });
 
       setAllInvoices(allInvoicesResponse.data?.data || []);
     } catch (err) {
@@ -317,7 +316,14 @@ const InvoiceData = () => {
     const totalReceived =
       payments.length > 0
         ? paymentsTotal
-        : Number(invoice.paidAmount ?? Math.max(0, invoiceAmount - Number(invoice.remainingAmount ?? invoiceAmount)));
+        : Number(
+            invoice.paidAmount ??
+              Math.max(
+                0,
+                invoiceAmount -
+                  Number(invoice.remainingAmount ?? invoiceAmount),
+              ),
+          );
     const pendingAmount = Math.max(
       0,
       payments.length > 0
@@ -354,18 +360,30 @@ const InvoiceData = () => {
   const getTdsDetailRows = () =>
     (filteredAllInvoices || []).flatMap((invoice) =>
       (invoice.payments || [])
-        .filter((payment) => Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0) > 0)
+        .filter(
+          (payment) =>
+            Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0) > 0,
+        )
         .map((payment) => ({
           invoiceNo: invoice.invoiceNo,
           clientName: invoice.billTo?.name || "-",
           paymentDate: payment.paymentDate,
           reference: payment.referenceNumber || payment.reference || "-",
-          receivedAmount: Number(payment.receivedAmount ?? payment.amountReceived ?? payment.amountPaid ?? 0),
+          receivedAmount: Number(
+            payment.receivedAmount ??
+              payment.amountReceived ??
+              payment.amountPaid ??
+              0,
+          ),
           tdsAmount: Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
           settledAmount: Number(
             payment.grossAmount ??
-              Number(payment.receivedAmount ?? payment.amountReceived ?? payment.amountPaid ?? 0) +
-                Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
+              Number(
+                payment.receivedAmount ??
+                  payment.amountReceived ??
+                  payment.amountPaid ??
+                  0,
+              ) + Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
           ),
         })),
     );
@@ -390,7 +408,10 @@ const InvoiceData = () => {
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "TDS Report");
-    XLSX.writeFile(workbook, `tds-report-${dayjs().format("DD-MMM-YYYY")}.xlsx`);
+    XLSX.writeFile(
+      workbook,
+      `tds-report-${dayjs().format("DD-MMM-YYYY")}.xlsx`,
+    );
   };
 
   // Get payment status badge
@@ -781,13 +802,12 @@ const InvoiceData = () => {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               {/* <div className="flex items-center space-x-2"> */}
               {user?.role === "user" && (
-               
-               
-                <button onClick={() => setUserPendingModalOpen(true)}
+                <button
+                  onClick={() => setUserPendingModalOpen(true)}
                   className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
                 >
                   <CircleCheckBig size={13} className="text-emerald-500" />{" "}
-                   Pending Invoices
+                  Pending Invoices
                 </button>
               )}
               {(user?.role === "admin" ||
@@ -817,7 +837,7 @@ const InvoiceData = () => {
               )}
               {checkAuthorization(user, "INVOICE", "CREATE") && (
                 <button
-                  onClick={() => navigate('/invoice-data/bulk-upload')}
+                  onClick={() => navigate("/invoice-data/bulk-upload")}
                   className="flex items-center gap-1.5 px-3 py-2 text-white text-xs font-bold rounded-xl transition-all hover:opacity-90"
                   style={{
                     background: "linear-gradient(135deg,#064e3b,#059669)",
@@ -966,7 +986,11 @@ const InvoiceData = () => {
                 transition={{ delay: i * 0.06 }}
                 className={`relative overflow-hidden rounded-2xl p-4 shadow-lg group ${s.label === "Total TDS" ? "cursor-pointer" : "cursor-default"}`}
                 style={{ background: s.g }}
-                onClick={s.label === "Total TDS" ? () => setTdsDetailsModalOpen(true) : undefined}
+                onClick={
+                  s.label === "Total TDS"
+                    ? () => setTdsDetailsModalOpen(true)
+                    : undefined
+                }
               >
                 <div
                   className="absolute -top-6 -right-6 w-20 h-16 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
@@ -1063,8 +1087,8 @@ const InvoiceData = () => {
                     : invoice.status === "PAID"
                       ? "linear-gradient(180deg,#2563eb,#60a5fa)"
                       : invoice.status === "PARTIALLY_PAID"
-                      ? "linear-gradient(180deg,#d97706,#fbbf24)"
-                    : "linear-gradient(180deg,#dc2626,#f87171)";
+                        ? "linear-gradient(180deg,#d97706,#fbbf24)"
+                        : "linear-gradient(180deg,#dc2626,#f87171)";
 
                 return (
                   <motion.div
@@ -1110,7 +1134,9 @@ const InvoiceData = () => {
                               />
                               {paymentBadge.text}
                             </span>
-                            <span className={`px-2 py-0.5 text-[10px] font-black rounded-full border uppercase tracking-wider ${lifecycleBadge.color}`}>
+                            <span
+                              className={`px-2 py-0.5 text-[10px] font-black rounded-full border uppercase tracking-wider ${lifecycleBadge.color}`}
+                            >
                               {lifecycleBadge.text}
                             </span>
                             {journalPosted && (
@@ -1172,15 +1198,20 @@ const InvoiceData = () => {
                             {formatAmount(invoice.amountDue || 0)}
                           </p>
                           <p className="text-[10px] font-bold text-slate-500 tabular-nums">
-                            Paid {formatAmount(paymentInfo.totalReceived)} · Remaining {formatAmount(paymentInfo.pendingAmount)}
+                            Paid {formatAmount(paymentInfo.totalReceived)} ·
+                            Remaining {formatAmount(paymentInfo.pendingAmount)}
                           </p>
                           {paymentInfo.pendingAmount > 0 && (
                             <p className="text-[10px] font-bold text-red-500 tabular-nums">
                               {formatAmount(paymentInfo.pendingAmount)} pending
                             </p>
                           )}
-                          <p className={`text-[10px] font-bold tabular-nums ${paymentInfo.pendingAmount <= 0 ? "text-emerald-700" : "text-blue-700"}`}>
-                            {paymentInfo.pendingAmount <= 0 ? "Fully Settled" : "Pending Settlement"}
+                          <p
+                            className={`text-[10px] font-bold tabular-nums ${paymentInfo.pendingAmount <= 0 ? "text-emerald-700" : "text-blue-700"}`}
+                          >
+                            {paymentInfo.pendingAmount <= 0
+                              ? "Fully Settled"
+                              : "Pending Settlement"}
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -1632,9 +1663,17 @@ const InvoiceData = () => {
                                             )}
                                           </td>
                                           <td className="px-4 py-2.5 text-violet-600 tabular-nums">
-                                            {Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0) > 0
+                                            {Number(
+                                              payment.tdsAdjusted ??
+                                                payment.tdsAmount ??
+                                                0,
+                                            ) > 0
                                               ? formatAmount(
-                                                  Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
+                                                  Number(
+                                                    payment.tdsAdjusted ??
+                                                      payment.tdsAmount ??
+                                                      0,
+                                                  ),
                                                 )
                                               : "—"}
                                           </td>
@@ -1828,7 +1867,9 @@ const InvoiceData = () => {
           <div className="w-full max-w-5xl rounded-2xl bg-white shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">Total TDS Details</h3>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Total TDS Details
+                </h3>
                 <p className="text-xs text-slate-500 mt-1">
                   Complete list of TDS-adjusted payments
                 </p>
@@ -1852,8 +1893,19 @@ const InvoiceData = () => {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
-                    {["Invoice", "Client", "Payment Date", "Reference", "Received", "TDS", "Settlement"].map((label) => (
-                      <th key={label} className="px-4 py-3 text-left font-black text-slate-500 uppercase tracking-widest">
+                    {[
+                      "Invoice",
+                      "Client",
+                      "Payment Date",
+                      "Reference",
+                      "Received",
+                      "TDS",
+                      "Settlement",
+                    ].map((label) => (
+                      <th
+                        key={label}
+                        className="px-4 py-3 text-left font-black text-slate-500 uppercase tracking-widest"
+                      >
                         {label}
                       </th>
                     ))}
@@ -1862,19 +1914,39 @@ const InvoiceData = () => {
                 <tbody className="divide-y divide-slate-100">
                   {getTdsDetailRows().length > 0 ? (
                     getTdsDetailRows().map((row, index) => (
-                      <tr key={`${row.invoiceNo}-${row.reference}-${index}`} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-semibold text-slate-800">{row.invoiceNo}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.clientName}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(row.paymentDate)}</td>
-                        <td className="px-4 py-3 font-mono text-slate-500">{row.reference}</td>
-                        <td className="px-4 py-3 text-emerald-700 font-bold tabular-nums">{formatAmount(row.receivedAmount)}</td>
-                        <td className="px-4 py-3 text-violet-700 font-bold tabular-nums">{formatAmount(row.tdsAmount)}</td>
-                        <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">{formatAmount(row.settledAmount)}</td>
+                      <tr
+                        key={`${row.invoiceNo}-${row.reference}-${index}`}
+                        className="hover:bg-slate-50"
+                      >
+                        <td className="px-4 py-3 font-semibold text-slate-800">
+                          {row.invoiceNo}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {row.clientName}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          {formatDate(row.paymentDate)}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-slate-500">
+                          {row.reference}
+                        </td>
+                        <td className="px-4 py-3 text-emerald-700 font-bold tabular-nums">
+                          {formatAmount(row.receivedAmount)}
+                        </td>
+                        <td className="px-4 py-3 text-violet-700 font-bold tabular-nums">
+                          {formatAmount(row.tdsAmount)}
+                        </td>
+                        <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">
+                          {formatAmount(row.settledAmount)}
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                      <td
+                        colSpan={7}
+                        className="px-4 py-8 text-center text-slate-400"
+                      >
                         No TDS-adjusted payments found
                       </td>
                     </tr>

@@ -370,30 +370,36 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   return () => clearTimeout(timer);
 }, [searchQuery]);
   const fetchAllData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const clientRes = await getClientsApi(user.company._id);
-      const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
-      setClients(clientsList.filter((c) => c.isActive !== false));
+  setLoading(true);
+  setError(null);
+  try {
+    const clientRes = await getClientsApi(user.company._id);
+    const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
+    setClients(clientsList.filter((c) => c.isActive !== false));
 
-      let poData;
-      if (Object.keys(activeFilters).length > 0) {
-        const res = await advancedSearchPurchaseOrdersApi({ ...activeFilters, limit: 1000 });
-        poData = res.data || [];
-      } else {
-        const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
-        poData = res.data || [];
-      }
-      setPurchaseOrders(poData);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to fetch data");
-    } finally {
-      setLoading(false);
-      setLoadingAdvanced(false);
+    let poData;
+    if (Object.keys(activeFilters).length > 0) {
+      // ✅ Pass companyId in params
+      const res = await advancedSearchPurchaseOrdersApi({
+        ...activeFilters,
+        companyId: companyId,
+        limit: 1000,
+      });
+      poData = res.data || [];
+    } else {
+      // ✅ Already fixed in getPurchaseOrdersApi
+      const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+      poData = res.data || [];
     }
-  };
+    setPurchaseOrders(poData);
+  } catch (err) {
+    console.error(err);
+    setError("Failed to fetch data");
+  } finally {
+    setLoading(false);
+    setLoadingAdvanced(false);
+  }
+};
 
   useEffect(() => { if (user?.company?._id) fetchAllData(); }, [user, activeFilters]);
 

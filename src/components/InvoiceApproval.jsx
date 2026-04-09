@@ -78,58 +78,68 @@ export default function InvoiceApproval({
   const [expandedRows, setExpandedRows] = useState({});
 
   useEffect(() => {
-    const controller = new AbortController();
+  const controller = new AbortController();
 
-    // In your frontend, update the fetch logic:
-const getAllPending = async () => {
-  try {
-    if (!open) return;
-    setLoading(true);
+  const getAllPending = async () => {
+    try {
+      if (!open) return;
+      setLoading(true);
 
-    const res = await API.get(`/invoices/pending-approval/${user.company._id}`);
+      // ✅ Changed: Use /invoices/ with query params (same as InvoiceData)
+      const res = await API.get(`/invoices/`, {
+        params: {
+          companyId: user.company._id,  // ✅ Pass as query param
+          approvalStatus: "Pending",     // ✅ Get pending approvals
+          limit: 1000,
+          page: 1,
+        },
+        signal: controller.signal,
+      });
 
-    if (res.data.success) {
-      // ✅ Process invoices with pendingVersion
-      const mapped = res.data.data
-        .map(invoice => {
-          if (!invoice.pendingVersion) return null;
-          
-          return {
-            id: invoice._id,
-            versionNo: invoice.pendingVersion.versionNo,
-            actionType: invoice.pendingVersion.actionType,
-            snapshot: invoice.pendingVersion.snapshot,
-            invoiceData: invoice,
-            pendingCreatedAt: invoice.pendingVersion.createdAt || invoice.updatedAt,
-            createdAt: invoice.createdAt
-          };
-        })
-        .filter(Boolean);
+      if (res.data.success) {
+        // ✅ Map invoices to pending items
+        const mapped = (res.data.data || [])
+          .map((invoice) => {
+            if (!invoice.pendingVersion) return null;
+
+            return {
+              id: invoice._id,
+              versionNo: invoice.pendingVersion.versionNo,
+              actionType: invoice.pendingVersion.actionType,
+              snapshot: invoice.pendingVersion.snapshot,
+              invoiceData: invoice,
+              pendingCreatedAt: invoice.pendingVersion.createdAt || invoice.updatedAt,
+              createdAt: invoice.createdAt,
+            };
+          })
+          .filter(Boolean);
 
         const sorted = mapped.sort((a, b) => {
-  const timeA = new Date(a.pendingCreatedAt).getTime();
-  const timeB = new Date(b.pendingCreatedAt).getTime();
-  
-  if (timeA && timeB) {
-    return timeB - timeA; // Descending (newest first)
-  }
-  
-  return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-});
+          const timeA = new Date(a.pendingCreatedAt).getTime();
+          const timeB = new Date(b.pendingCreatedAt).getTime();
 
-      setPendingItems(mapped || []);
+          if (timeA && timeB) {
+            return timeB - timeA; // Descending (newest first)
+          }
+
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+
+        setPendingItems(sorted || []);
+      }
+    } catch (error) {
+      if (error.name !== "AbortError") {
+        console.error("Error:", error);
+        toast.error("Failed to load pending approvals");
+      }
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error("Error:", error);
-    toast.error("Failed to load pending approvals");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
-    getAllPending();
-    return () => controller.abort();
-  }, [open, user.company?._id]);
+  getAllPending();
+  return () => controller.abort();
+}, [open, user.company?._id]);
 
   const toggleRowExpand = (invoiceId, e) => {
     e?.stopPropagation();
