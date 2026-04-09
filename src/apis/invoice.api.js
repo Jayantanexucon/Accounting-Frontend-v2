@@ -1,55 +1,69 @@
 import { API } from "./api";
 
+const INVOICE_BASE = "api/invoices/";
+
 // CREATE
 export const createInvoiceApi = async (payload) => {
-  const { data } = await API.post("/invoices/create", payload);
+  const { data } = await API.post(INVOICE_BASE, payload);
   return data;
 };
 
 //bulk upload
 export const bulkCreateInvoicesApi = async (payload) => {
-  const { data } = await API.post("/invoices/bulk-create", payload);
+  const { data } = await API.post(INVOICE_BASE, payload);
   return data;
 };
 
 // GET LIST
 export const getInvoicesApi = async (companyId, params = {}) => {
-  const { data } = await API.get(`/invoices/getall/${companyId}`, { params });
+  const { data } = await API.get(INVOICE_BASE, {
+    params: { companyId, ...params },
+  });
   return data;
 };
 
 // GET SINGLE
 export const getInvoiceByIdApi = async (id) => {
-  const { data } = await API.get(`/invoices/get/${id}`);
+  const { data } = await API.get(`${INVOICE_BASE}/${id}`);
   return data;
 };
 
 // UPDATE
 export const updateInvoiceApi = async (id, payload) => {
-  const { data } = await API.put(`/invoices/put/${id}`, payload);
+  const { data } = await API.put(`${INVOICE_BASE}/${id}`, payload);
   return data;
 };
 
 // DELETE
 export const deleteInvoiceApi = async (id) => {
-  const { data } = await API.delete(`/invoices/delete/${id}`);
+  const { data } = await API.delete(`${INVOICE_BASE}/${id}`);
   return data;
 };
 
 // DOWNLOAD
-export const downloadInvoicePdfApi = (id) => API.get(`/invoices/${id}/download/pdf`, { responseType: "blob" });
+export const downloadInvoicePdfApi = (id) =>
+  API.get(`${INVOICE_BASE}/${id}/export`, {
+    params: { format: "pdf" },
+  });
 
-export const downloadInvoiceWordApi = (id) => API.get(`/invoices/${id}/download/word`, { responseType: "blob" });
+export const downloadInvoiceWordApi = (id) =>
+  API.get(`${INVOICE_BASE}/${id}/export`, {
+    params: { format: "word" },
+  });
 
 // Search invoice by number
 export const searchInvoiceByNumberApi = async (invoiceNumber) => {
-  const { data } = await API.get(`/invoices/search/${invoiceNumber}`);
+  const { data } = await API.get(`${INVOICE_BASE}/search/number`, {
+    params: { invoiceNo: invoiceNumber },
+  });
   return data;
 };
 
 // Get invoice by number (for ledger creation)
 export const getInvoiceByNumberApi = async (invoiceNo) => {
-  const { data } = await API.get(`/invoices/by-number/${invoiceNo}`);
+  const { data } = await API.get(`${INVOICE_BASE}/search/number`, {
+    params: { invoiceNo },
+  });
   return data;
 };
 
@@ -79,14 +93,17 @@ export const getAllInvoiceNumbersApi = async () => {
 
 // Get pending invoice approvals
 export const pendingApprovalInvoiceApi = (companyId, signal) =>
-  API.get(`/invoices/pending-approval/${companyId}`, { signal });
+  API.get(`${INVOICE_BASE}/approvals/pending`, {
+    params: { companyId },
+    signal,
+  });
 
 // approve / reject invoice
 export const updateInvoiceApprovalApi = (id, versionNo, approvalStatus) =>
-  API.put(`/invoices/update-approval/${id}`, {
-    versionNo,
-    approvalStatus,
-  });
+  API.post(
+    `${INVOICE_BASE}/${id}/${approvalStatus === "Approved" ? "approve" : "reject"}`,
+    { versionNo, approvalStatus }
+  );
 
 export const validateInvoiceAccountsApi = async (companyId) => {
   const { data } = await API.get(`/invoice-accounting/validate-accounts/${companyId}`);
