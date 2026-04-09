@@ -122,8 +122,15 @@ const InvoiceData = () => {
   useEffect(() => {
     const fetchAllInvoices = async () => {
       try {
-        const response = await API.get(`/invoices/getall/${user.company._id}`, {
-          params: { page: 1, limit: 10000, approvalStatus: "Approved", sort: "-createdAt" },
+        // ✅ Changed: Use /invoices/ with query params
+        const response = await API.get(`/invoices/`, {
+          params: {
+            companyId: user.company._id,
+            page: 1,
+            limit: 10000,
+            approvalStatus: "Approved",
+            sort: "-createdAt",
+          },
         });
         setAllInvoices(response.data?.data || []);
       } catch (error) {
@@ -135,47 +142,90 @@ const InvoiceData = () => {
   }, [user?.company?._id]);
 
   const fetchInvoices = async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
-      const response = await API.get(`/invoices/getall/${user.company._id}`, {
-        params: { companyId: user.company._id, page: pagination.page, limit: pagination.limit, approvalStatus: "Approved", sort: "-createdAt", ...advancedFilters },
+      // ✅ Changed: First API call
+      const response = await API.get(`/invoices/`, {
+        params: {
+          companyId: user.company._id,
+          page: pagination.page,
+          limit: pagination.limit,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
+          ...advancedFilters,
+        },
       });
       setInvoices(response.data?.data || []);
-      const allFiltered = await API.get(`/invoices/getall/${user.company._id}`, {
-        params: { companyId: user.company._id, page: 1, limit: 10000, approvalStatus: "Approved", sort: "-createdAt", ...advancedFilters },
+      const allFiltered = await API.get(`/invoices/`, {
+        params: {
+          companyId: user.company._id,
+          page: 1,
+          limit: 10000,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
+          ...advancedFilters,
+        },
       });
       setFilteredAllInvoices(allFiltered.data?.data || []);
       if (response.data?.pagination) {
-        setPagination((prev) => ({ ...prev, total: response.data.pagination.total, totalPages: response.data.pagination.totalPages }));
+        setPagination((prev) => ({
+          ...prev,
+          total: response.data.pagination.total,
+          totalPages: response.data.pagination.totalPages,
+        }));
       }
-      const allInvoicesRes = await API.get(`/invoices/getall/${user.company._id}`, {
-        params: { companyId: user.company._id, page: 1, limit: 10000, approvalStatus: "Approved", sort: "-createdAt" },
+      const allInvoicesRes = await API.get(`/invoices/`, {
+        params: {
+          companyId: user.company._id,
+          page: 1,
+          limit: 10000,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
+        },
       });
       setAllInvoices(allInvoicesRes.data?.data || []);
     } catch (err) {
       console.error(err);
       setError("Failed to fetch invoices");
       toast.error(err?.response?.data?.message);
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { fetchInvoices(); }, [pagination.page, pagination.limit, advancedFilters]);
+useEffect(() => {
+    fetchInvoices();
+  }, [pagination.page, pagination.limit, advancedFilters]);
 
   useEffect(() => {
     const invoiceId = new URLSearchParams(location.search).get("invoiceId");
     if (!invoiceId || autoOpenedInvoiceId === invoiceId) return;
     const existing = [...invoices, ...allInvoices].find((inv) => inv._id === invoiceId);
-    if (existing) { setSelectedInvoiceForDetail(existing); setDetailModalOpen(true); setAutoOpenedInvoiceId(invoiceId); return; }
+    if (existing) {
+      setSelectedInvoiceForDetail(existing);
+      setDetailModalOpen(true);
+      setAutoOpenedInvoiceId(invoiceId);
+      return;
+    }
     let active = true;
     (async () => {
       try {
-        const res = await API.get(`/invoices/get/${invoiceId}`);
+        // ✅ Changed: Use correct endpoint
+        const res = await API.get(`/invoices/${invoiceId}`);
         const inv = res.data?.data;
-        if (active && inv) { setSelectedInvoiceForDetail(inv); setDetailModalOpen(true); setAutoOpenedInvoiceId(invoiceId); }
-      } catch { console.error("Failed to open invoice from notification"); }
+        if (active && inv) {
+          setSelectedInvoiceForDetail(inv);
+          setDetailModalOpen(true);
+          setAutoOpenedInvoiceId(invoiceId);
+        }
+      } catch {
+        console.error("Failed to open invoice from notification");
+      }
     })();
-    return () => { active = false; };
+    return () => {
+      active = false;
+    };
   }, [location.search, autoOpenedInvoiceId, invoices, allInvoices]);
-
   const fetchUsers = async () => {
     try {
       const response = await getUsersApi();

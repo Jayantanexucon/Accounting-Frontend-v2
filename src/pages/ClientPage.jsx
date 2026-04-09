@@ -46,10 +46,10 @@ export default function ClientPage() {
     refetchOnWindowFocus: false,
   });
 
-  const clientData  = clientResponse?.data ?? [];
-  const totalItems  = clientResponse?.totalItems ?? 0;
-  const totalPages  = Math.ceil(totalItems / LIMIT);
-  const activeCount = clientData.filter((c) => c.isActive).length;
+const clientData  = clientResponse?.data?.clients ?? [];
+const totalItems  = clientResponse?.data?.totalCount ?? 0;
+const totalPages  = Math.ceil(totalItems / LIMIT);
+const activeCount = clientData.filter((c) => c.isActive).length;
 
   const countries = useMemo(() => {
     const set = new Set();

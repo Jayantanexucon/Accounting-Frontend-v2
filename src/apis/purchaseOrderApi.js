@@ -16,9 +16,15 @@ export const createPurchaseOrderApi = async (poData) => {
  * @param {Object} params - Query params (page, limit, search)
  */
 export const getPurchaseOrdersApi = async (companyId, params = {}) => {
-  const { data } = await API.get(`/purchase-orders/company/${companyId}`, { params });
+  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/company/{companyId}
+    params: {
+      companyId,  // ✅ Pass companyId as query param
+      ...params,
+    },
+  });
   return data;
 };
+
 
 /**
  * Get a single purchase order by ID
@@ -97,16 +103,19 @@ export const searchPoReferencesApi = async (query) => {
 };
 
 export const searchPoNumbersApi = async (query, companyId) => {
-  const params = { q: query };
-  if (companyId) params.companyId = companyId;
-  const { data } = await API.get("/purchase-orders/search-numbers", { params });
+  const { data } = await API.get(`/purchase-orders/search/number`, {
+    params: {
+      q: query,
+      companyId,
+    },
+  });
   return data;
 };
 
 // ==================== Advanced Search ====================
 
 export const advancedSearchPurchaseOrdersApi = async (filters) => {
-  const { data } = await API.get("/purchase-orders/advanced/search", {
+  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/advanced/search
     params: filters,
   });
   return data;
@@ -127,8 +136,12 @@ export const getPOProgressApi = async (id, companyId) => {
 };
 
 export const getAllPurchaseOrdersApi = async (companyId, params = {}) => {
-  const { data } = await API.get("/purchase-orders/all", {
-    params: { companyId, ...params },
+  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/all
+    params: {
+      companyId,
+      limit: 10000,
+      ...params,
+    },
   });
   return data;
 };
