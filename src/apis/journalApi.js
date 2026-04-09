@@ -6,15 +6,19 @@ const normalizeVoucherType = (value = "") => {
   switch (normalized) {
     case "JOURNAL":
     case "JOURNAL ENTRY":
-      return "Journal Entry";
+      return "JOURNAL";
     case "RECEIPT":
-      return "Receipt";
+      return "RECEIPT";
     case "PAYMENT":
-      return "Payment";
+      return "PAYMENT";
     case "CONTRA":
-      return "Contra";
+      return "CONTRA";
+    case "SALES":
+      return "SALES";
+    case "PURCHASE":
+      return "PURCHASE";
     default:
-      return value;
+      return normalized;
   }
 };
 

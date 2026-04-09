@@ -1,5 +1,8 @@
 import { API } from "./api";
 
+const normalizeOpeningType = (value = "debit") =>
+  String(value).trim().toLowerCase() === "credit" ? "credit" : "debit";
+
 const formatDate = (date) => {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -119,13 +122,19 @@ export const getAccountsApi = async (companyId, signal) => {
 export const addAccountApi = async (form, companyId) => {
   const { data } = await API.post(`/accounting/account`, {
     ...form,
+    openingType:
+      form.openingType !== undefined ? normalizeOpeningType(form.openingType) : undefined,
     companyId,
   });
   return data;
 };
 
 export const updateAccountApi = async (accountId, form) => {
-  const { data } = await API.put(`/accounting/account/${accountId}`, form);
+  const { data } = await API.put(`/accounting/account/${accountId}`, {
+    ...form,
+    openingType:
+      form.openingType !== undefined ? normalizeOpeningType(form.openingType) : undefined,
+  });
   return data;
 };
 
