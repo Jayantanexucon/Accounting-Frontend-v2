@@ -35,7 +35,6 @@ import {
   Package,
 } from "lucide-react";
 import dayjs from "dayjs";
-import { API } from "../apis/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import PurchaseOrderDetailModal from "./PurchaseOrderDetailModal";
@@ -43,6 +42,11 @@ import JournalDetailsModal from "./JournalDetailsModal";
 import { getJournalByIdApi } from "../apis/journalApi";
 import PaymentReceiptModal from "./PaymentReceiptModal";
 import CreateLedgerFromInvoiceModal from "./CreateLedgerFromInvoiceModal";
+import {
+  downloadInvoicePdfApi,
+  downloadInvoiceWordApi,
+  getInvoiceByIdApi,
+} from "../apis/invoice.api";
 
 const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   const { user } = useAuth();
@@ -70,9 +74,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     setError(null);
 
     try {
-      const response = await API.get(`/invoices/get/${invoiceId}`);
-      if (response.data.success) {
-        setInvoice(response.data.data);
+      const response = await getInvoiceByIdApi(invoiceId);
+      if (response?.data) {
+        setInvoice(response.data);
       } else {
         setError("Failed to load invoice details");
       }
@@ -269,9 +273,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     if (!invoice) return;
 
     try {
-      const response = await API.get(`/invoices/${invoice._id}/download/pdf`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoicePdfApi(invoice._id);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -291,9 +293,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     if (!invoice) return;
 
     try {
-      const response = await API.get(`/invoices/${invoice._id}/download/word`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoiceWordApi(invoice._id);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");

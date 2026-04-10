@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
-import { API } from "../apis/api";
 import { Outlet, useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
 import dayjs from "dayjs";
@@ -18,6 +17,13 @@ import ViewAllInvoices from "./ViewAllInvoices";
 
 import UserPendingInvoices from "../components/UserPendingInvoices";
 import { getUsersApi } from "../apis/userApi";
+import {
+  deleteInvoiceApi,
+  downloadInvoicePdfApi,
+  downloadInvoiceWordApi,
+  getInvoiceByIdApi,
+  getInvoicesApi,
+} from "../apis/invoice.api";
 import {
   Plus,
   RefreshCw,
@@ -133,18 +139,14 @@ const InvoiceData = () => {
   useEffect(() => {
     const fetchAllInvoices = async () => {
       try {
-        const response = await API.get(`/invoices/`, {
-          // ✅ Changed
-          params: {
-            companyId: user.company._id, // ✅ Move to params
-            page: 1,
-            limit: 1,
-            approvalStatus: "Approved",
-            sort: "-createdAt",
-          },
+        const response = await getInvoicesApi(user.company._id, {
+          page: 1,
+          limit: 10000,
+          approvalStatus: "Approved",
+          sort: "-createdAt",
         });
 
-        setAllInvoices(response.data?.data || []);
+        setAllInvoices(response?.data || []);
       } catch (error) {
         console.error("Error fetching all invoices:", error);
         toast.error(error?.response?.data?.message);
@@ -159,55 +161,35 @@ const InvoiceData = () => {
     setError(null);
 
     try {
-      const response = await API.get(`/invoices/`, {
-        // ✅ Changed
-        params: {
-          companyId: user.company._id,
-          page: 1,
-          limit: 1,
-          approvalStatus: "Approved",
-          sort: "-createdAt",
-          ...advancedFilters,
-        },
+      const response = await getInvoicesApi(user.company._id, {
+        page: pagination.page,
+        limit: pagination.limit,
+        approvalStatus: "Approved",
+        sort: "-createdAt",
+        ...advancedFilters,
       });
 
-      const invoicesData = response.data?.data || [];
+      const invoicesData = response?.data || [];
       setInvoices(invoicesData);
 
-      const allFilteredResponse = await API.get(`/invoices/`, {
-        // ✅ Changed
-        params: {
-          companyId: user.company._id,
-          page: 1,
-          limit: 10000,
-          approvalStatus: "Approved",
-          sort: "-createdAt",
-          ...advancedFilters,
-        },
+      const allFilteredResponse = await getInvoicesApi(user.company._id, {
+        page: 1,
+        limit: 10000,
+        approvalStatus: "Approved",
+        sort: "-createdAt",
+        ...advancedFilters,
       });
 
-      setFilteredAllInvoices(allFilteredResponse.data?.data || []);
+      setFilteredAllInvoices(allFilteredResponse?.data || []);
 
-      if (response.data?.pagination) {
-        setPagination((prev) => ({
-          ...prev,
-          total: response.data.pagination.total,
-          totalPages: response.data.pagination.totalPages,
-        }));
-      }
-
-      const allInvoicesResponse = await API.get(`/invoices/`, {
-        // ✅ Changed
-        params: {
-          companyId: user.company._id,
-          page: 1,
-          limit: 10000,
-          approvalStatus: "Approved",
-          sort: "-createdAt",
-        },
+      const allInvoicesResponse = await getInvoicesApi(user.company._id, {
+        page: 1,
+        limit: 10000,
+        approvalStatus: "Approved",
+        sort: "-createdAt",
       });
 
-      setAllInvoices(allInvoicesResponse.data?.data || []);
+      setAllInvoices(allInvoicesResponse?.data || []);
     } catch (err) {
       console.error(err);
       setError("Failed to fetch invoices");
@@ -468,9 +450,7 @@ const InvoiceData = () => {
   const handleDownloadWord = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/word`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoiceWordApi(invoiceId);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -490,9 +470,7 @@ const InvoiceData = () => {
   const handleDownloadPdf = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/pdf`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoicePdfApi(invoiceId);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -512,11 +490,10 @@ const InvoiceData = () => {
   const handleEmailInvoice = async (invoiceId, e) => {
     if (e) e.stopPropagation();
     try {
-      await API.post(`/invoices/${invoiceId}/send-email`);
-      toast.success("Invoice email sent successfully");
+      toast.info("Invoice email sending is not available in the current backend");
     } catch (error) {
       console.error("Error sending email:", error);
-      toast.error("Failed to send invoice email");
+      toast.error("Failed to process invoice email action");
     }
   };
 
@@ -548,8 +525,8 @@ const InvoiceData = () => {
 
     try {
       // Fetch full invoice data
-      const response = await API.get(`/invoices/get/${invoice._id}`);
-      const fullInvoiceData = response.data?.data || invoice;
+      const response = await getInvoiceByIdApi(invoice._id);
+      const fullInvoiceData = response?.data || invoice;
 
       setCreateLedgerModal({
         open: true,

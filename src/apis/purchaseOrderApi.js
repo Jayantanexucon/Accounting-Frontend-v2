@@ -129,7 +129,7 @@ export const getPurchaseOrderFilterOptionsApi = async (companyId) => {
 };
 
 export const getPOProgressApi = async (id, companyId) => {
-  const { data } = await API.get(`/invoices/purchase-order/${id}/progress`, {
+  const { data } = await API.get(`/invoices/purchase-order/${id}`, {
     params: companyId ? { companyId } : {},
   });
   return data;

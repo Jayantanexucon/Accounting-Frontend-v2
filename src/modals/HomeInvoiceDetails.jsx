@@ -1,5 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { API } from "../apis/api";
+import {
+  deleteInvoiceApi,
+  downloadInvoicePdfApi,
+  downloadInvoiceWordApi,
+  getInvoiceByIdApi,
+  getInvoicePaymentsApi,
+} from "../apis/invoice.api";
 import dayjs from "dayjs";
 import {
   X, FileText, User, Calendar, Package, CreditCard,
@@ -86,8 +93,8 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
   const fetchInvoiceDetails = async () => {
     setLoading(true);
     try {
-      const response = await API.get(`/invoices/get/${invoiceId}`);
-      setInvoice(response.data?.data || null);
+      const response = await getInvoiceByIdApi(invoiceId);
+      setInvoice(response?.data || null);
     } catch { toast.error("Failed to load invoice details"); }
     finally { setLoading(false); }
   };
@@ -103,8 +110,8 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
     setPaymentHistoryLoading(true);
     try {
       // Try dedicated payment history endpoint first
-      const response = await API.get(`/invoices/${invoiceId}/payments`);
-      const data = response.data?.data || response.data?.payments || response.data || [];
+      const response = await getInvoicePaymentsApi(invoice?.companyId, invoiceId);
+      const data = response?.data || [];
       setPaymentHistory(Array.isArray(data) ? data : []);
     } catch {
       // Fallback: use payments already on invoice object
@@ -155,7 +162,7 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
 
   const handleDownloadPdf = async () => {
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/pdf`, { responseType: "blob" });
+      const response = await downloadInvoicePdfApi(invoiceId);
       const url  = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -167,7 +174,7 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
 
   const handleDownloadWord = async () => {
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/word`, { responseType: "blob" });
+      const response = await downloadInvoiceWordApi(invoiceId);
       const url  = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -179,7 +186,7 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
 
   const handleDelete = async () => {
     try {
-      await API.delete(`/invoices/delete/${invoiceId}`);
+      await deleteInvoiceApi(invoiceId);
       toast.success("Invoice deleted successfully");
       setShowDeleteModal(false);
       onClose();
@@ -189,9 +196,8 @@ const HomeInvoiceDetails = ({ open, onClose, invoiceId, refreshInvoices }) => {
 
   const handleEmailInvoice = async () => {
     try {
-      await API.post(`/invoices/${invoiceId}/send-email`);
-      toast.success("Invoice email sent successfully");
-    } catch { toast.error("Failed to send invoice email"); }
+      toast.info("Invoice email sending is not available in the current backend");
+    } catch { toast.error("Failed to process invoice email action"); }
   };
 
   const calculatePaymentInfo = () => {

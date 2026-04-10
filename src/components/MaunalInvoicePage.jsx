@@ -1,10 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { API } from "../apis/api";
 import { useAuth } from "../contexts/AuthContext";
 import { getClientsApi } from "../apis/clientApi";
 import { getallhsn } from "../apis/hsnapi";
-import { getPOProgressApi } from "../apis/purchaseOrderApi";
+import {
+  getPOProgressApi,
+  getPurchaseOrderApi,
+  getPurchaseOrdersApi,
+} from "../apis/purchaseOrderApi";
+import {
+  createInvoiceApi,
+  downloadInvoicePdfApi,
+  downloadInvoiceWordApi,
+  getInvoiceByIdApi,
+  getInvoicesApi,
+  updateInvoiceApi,
+} from "../apis/invoice.api";
 
 import InvoiceCreatedModal from "../modals/InvoiceCreatedModal";
 import { toast } from "react-toastify";
@@ -174,6 +185,10 @@ const normalizeInvoiceItemForPayload = (item = {}) => {
     ...rest,
     itemId: rest.itemId || rest.poItemId,
     poItemId: rest.poItemId || rest.itemId,
+    totalAmount:
+      rest.totalAmount ??
+      rest.total ??
+      Number(rest.taxableValue || 0) + Number(rest.gstAmount || 0),
   };
 };
 
@@ -738,8 +753,8 @@ useEffect(() => {
         return;
       }
 
-      const response = await API.get(`/invoices/get/${invoiceId}`);
-      const invoiceData = response.data?.data;
+      const response = await getInvoiceByIdApi(invoiceId);
+      const invoiceData = response?.data;
 
       if (!invoiceData || Array.isArray(invoiceData)) {
         throw new Error("Invalid invoice data for edit");
@@ -780,15 +795,18 @@ useEffect(() => {
       setLoadingDescriptions(true);
       try {
         const clientsResponse = await getClientsApi(user.company._id);
-        setClients(clientsResponse.data || []);
-        setFilteredBillToClients(clientsResponse.data || []);
-        setFilteredShipToClients(clientsResponse.data || []);
+        const clientList = clientsResponse?.data || [];
+        setClients(clientList);
+        setFilteredBillToClients(clientList);
+        setFilteredShipToClients(clientList);
 
-        const invoicesResponse = await API.get(`/invoices/getall/${user.company._id}`, { params: { limit: 100 } });
+        const invoicesResponse = await getInvoicesApi(user.company._id, {
+          limit: 100,
+        });
 
         const descriptions = new Set();
 
-        invoicesResponse.data?.data?.forEach((invoice) => {
+        (invoicesResponse?.data || []).forEach((invoice) => {
           invoice.items?.forEach((item) => {
             if (item.description?.trim()) {
               descriptions.add(item.description.trim());
@@ -815,8 +833,8 @@ useEffect(() => {
 
       setLoadingPOs(true);
       try {
-        const response = await API.get(`/purchase-orders/company/${companyId}`);
-        const poList = response.data?.data || [];
+        const response = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+        const poList = response?.data || [];
 
         const activePOs = poList.filter(
           (po) =>
@@ -850,9 +868,9 @@ useEffect(() => {
       // PO not in the list (maybe fully invoiced), fetch it directly
       const fetchAndSelectPO = async () => {
         try {
-          const response = await API.get(`/purchase-orders/${poIdFromUrl}`);
-          if (response.data.success) {
-            handleSelectPO(response.data.data);
+          const response = await getPurchaseOrderApi(poIdFromUrl);
+          if (response?.data) {
+            handleSelectPO(response.data);
             setAutoSelectedPoId(poIdFromUrl);
           } else {
             toast.error("Failed to load purchase order details");
@@ -2020,7 +2038,7 @@ useEffect(() => {
       
       if ((isEditMode || isEditPendingMode) && editableInvoiceId) {
         // ✅ UPDATE EXISTING INVOICE
-        response = await API.put(`/invoices/put/${editableInvoiceId}`, completeInvoice);
+        response = await updateInvoiceApi(editableInvoiceId, completeInvoice);
 
         // // console.log("Edit API Response:", response.data);
 
@@ -2035,7 +2053,7 @@ useEffect(() => {
           companyId: user?.company?._id,
           status: status,
           approvalStatus: "Pending", // Edit always creates pending approval
-          createdAt: response.data?.data?.createdAt || invoice.createdAt,
+          createdAt: response?.data?.createdAt || invoice.createdAt,
           updatedAt: new Date().toISOString(),
           // Ensure all financial fields are present
           currency: invoice.currency || "INR",
@@ -2072,12 +2090,12 @@ useEffect(() => {
       } else {
         // ✅ CREATE NEW INVOICE
         delete completeInvoice.invoiceNo;
-        response = await API.post("/invoices/create", completeInvoice);
+        response = await createInvoiceApi(completeInvoice);
 
         // // console.log("Create API Response:", response.data);
 
-        const generatedInvoiceNo = response.data.data.invoiceNo;
-        setCreatedInvoiceId(response.data.data._id);
+        const generatedInvoiceNo = response?.data?.invoiceNo;
+        setCreatedInvoiceId(response?.data?._id);
 
         // Update invoice number in state
         setInvoice((prev) => ({
@@ -2086,7 +2104,7 @@ useEffect(() => {
         }));
 
 	        // For create, use the API response directly
-	        setCreatedInvoice(response.data.data);
+	        setCreatedInvoice(response?.data);
 	        setShowSuccessModal(true);
 
         toast.success("Invoice created and submitted for approval.");
@@ -2112,9 +2130,7 @@ useEffect(() => {
     }
 
     try {
-      const response = await API.get(`/invoices/${createdInvoiceId}/download/pdf`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoicePdfApi(createdInvoiceId);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -2136,9 +2152,7 @@ useEffect(() => {
     }
     
     try {
-      const response = await API.get(`/invoices/${createdInvoiceId}/download/word`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoiceWordApi(createdInvoiceId);
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
