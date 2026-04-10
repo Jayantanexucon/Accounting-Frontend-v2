@@ -1,6 +1,7 @@
 import { API } from "./api";
 
 const INVOICE_BASE = "/invoices";
+const INVOICE_ACCOUNTING_BASE = "/invoice-accounting";
 const ACCOUNTING_PAYMENT_BASE = "/accounting/payment";
 
 const normalizeInvoicePayload = (payload = {}) => {
@@ -140,31 +141,27 @@ export const updateInvoiceApprovalApi = (id, versionNo, approvalStatus) =>
   );
 
 export const validateInvoiceAccountsApi = async (companyId) => {
-  return {
-    data: {
-      allRequiredAccountsExist: true,
-      missingAccounts: [],
-    },
-  };
+  const { data } = await API.get(`${INVOICE_ACCOUNTING_BASE}/validate-accounts/${companyId}`);
+  return data;
 };
 
 export const createClientLedgerFromInvoiceApi = async (companyId, invoiceId) => {
-  const { data } = await API.post(`${INVOICE_BASE}/${invoiceId}/post-sales-journal`);
+  const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/create-ledger`, { invoiceId });
   return data;
 };
 
 export const createJournalFromInvoiceApi = async (companyId, invoiceId) => {
-  const { data } = await API.post(`${INVOICE_BASE}/${invoiceId}/post-sales-journal`);
+  const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/create-journal`, { invoiceId });
   return data;
 };
 
 export const completeInvoiceAccountingApi = async (companyId, invoiceId) => {
-  const { data } = await API.post(`${INVOICE_BASE}/${invoiceId}/post-sales-journal`);
+  const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/complete-accounting`, { invoiceId });
   return data;
 };
 
 export const getInvoiceAccountingStatusApi = async (companyId, invoiceId) => {
-  const { data } = await API.get(`${INVOICE_BASE}/${invoiceId}`);
+  const { data } = await API.get(`${INVOICE_ACCOUNTING_BASE}/${companyId}/status/${invoiceId}`);
   return data;
 };
 
@@ -194,7 +191,7 @@ export const recordInvoicePaymentApi = async ({
   const normalizedAmountPaid = Number(amountPaid || 0);
   const normalizedTdsAmount = Number(tdsAmount || 0);
 
-  const paymentRecord = await API.post(ACCOUNTING_PAYMENT_BASE, {
+  const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/record-payment`, {
     invoiceId,
     companyId,
     clientId,
@@ -206,17 +203,13 @@ export const recordInvoicePaymentApi = async ({
     reference: referenceNumber,
     notes: remarks,
   });
-
-  const invoicePayment = await API.post(`${INVOICE_BASE}/${invoiceId}/payment`, {
-    paidAmount: normalizedAmountPaid,
-    tdsAmount: normalizedTdsAmount,
-    paymentDate,
-    reference: referenceNumber,
-  });
-
   return {
-    payment: paymentRecord.data,
-    invoice: invoicePayment.data,
+    payment: { data: data?.data?.payment || null },
+    invoice: { data: data?.data?.invoice || null },
+    journal: { data: data?.data?.journal || null },
+    ledger: { data: data?.data?.ledger || null },
+    message: data?.message,
+    success: data?.success,
   };
 };
 
