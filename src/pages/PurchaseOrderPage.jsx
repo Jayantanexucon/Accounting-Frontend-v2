@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { getallhsn } from "../apis/hsnapi";
-import { getClientsApi } from "../apis/clientApi";
+import { getClientsPaginatedApi } from "../apis/clientApi";
 import {
   createPurchaseOrderApi,
   getPurchaseOrderApi,
@@ -252,38 +252,62 @@ export default function PurchaseOrderPage() {
   //  DATA LOADING
   // ─────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!companyId) return;
+useEffect(() => {
+  if (!companyId) return;
 
-    (async () => {
-      try {
-        const [clientsRes, hsnRes] = await Promise.all([
-          getClientsApi(companyId),
-          getallhsn(companyId),
-        ]);
-        console.log(clientsRes, hsnRes);
+  (async () => {
+    try {
+      // Use paginated API instead
+      const clientsRes = await getClientsPaginatedApi({
+        companyId,
+        limit: 1000,   // get all clients
+        page: 1,
+      });
+      
+      console.log("Clients paginated response:", clientsRes);
 
-        const clientsDataRaw =
-          clientsRes?.data?.data || clientsRes?.data || clientsRes || [];
-        const hsnDataRaw = hsnRes?.data?.data || hsnRes?.data || hsnRes || [];
-
-        const normalized = clientsDataRaw.map((c) => ({
-          ...c,
-          name: c.name || c.clientName || c.contactPerson || "",
-          address:
-            c.address || c.clientAddress || c.billingAddress?.line1 || "",
-          stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
-          GSTIN: c.GSTIN || c.gstNumber || "",
-          taxNumber: c.taxNumber || c.gstNumber || "",
-        }));
-
-        setClients(normalized);
-        setHsnList(hsnDataRaw);
-      } catch (e) {
-        console.error(e);
+      // Extract clients array (structure: data.data.clients)
+      let clientsArray = [];
+      if (clientsRes?.data?.clients) {
+        clientsArray = clientsRes.data.clients;
+      } else if (clientsRes?.clients) {
+        clientsArray = clientsRes.clients;
+      } else if (Array.isArray(clientsRes)) {
+        clientsArray = clientsRes;
       }
-    })();
-  }, [companyId]);
+
+      // Normalize client data (same as before)
+      const normalized = clientsArray.map((c) => ({
+        _id: c._id,
+        name: c.name || c.clientName || c.contactPerson || "",
+        address: c.address || c.clientAddress || (c.billingAddress?.line1) || "",
+        stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
+        GSTIN: c.GSTIN || c.gstNumber || "",
+        taxNumber: c.taxNumber || c.gstNumber || "",
+        clientName: c.clientName || c.name,
+      }));
+
+      setClients(normalized);
+      console.log("Normalized clients:", normalized);
+
+      // Fetch HSN (unchanged)
+      const hsnRes = await getallhsn(companyId);
+      let hsnArray = [];
+      if (hsnRes?.data?.data) {
+        hsnArray = hsnRes.data.data;
+      } else if (hsnRes?.data) {
+        hsnArray = hsnRes.data;
+      } else if (Array.isArray(hsnRes)) {
+        hsnArray = hsnRes;
+      }
+      setHsnList(hsnArray);
+      
+    } catch (e) {
+      console.error("Failed to load clients or HSN:", e);
+      setError("Could not load clients. Please refresh the page.");
+    }
+  })();
+}, [companyId]);
   const filteredClients = clients.filter((c) => {
     if (!clientSearch?.trim()) return true;
     const q = clientSearch.toLowerCase();
@@ -302,24 +326,30 @@ export default function PurchaseOrderPage() {
   }, [companyId]);
 
   useEffect(() => {
-    if (editId) {
-      setIsEditing(true);
-      getPurchaseOrderApi(editId)
-        .then((res) => {
-          const d = res.data;
-          const fmt = (date) =>
-            date ? new Date(date).toISOString().split("T")[0] : "";
-          setForm((prev) => ({
-            ...prev,
-            ...d,
-            poDate: fmt(d.poDate),
-            deliveryDate: fmt(d.deliveryDate),
-            referenceDate: fmt(d.referenceDate),
-          }));
-        })
-        .catch(console.error);
-    }
-  }, [editId]);
+  if (editId) {
+    setIsEditing(true);
+    getPurchaseOrderApi(editId)
+      .then((res) => {
+        const d = res.data?.data || res.data;
+        const fmt = (date) => (date ? new Date(date).toISOString().split("T")[0] : "");
+        
+        setForm((prev) => ({
+          ...prev,
+          ...d,
+          client: d.vendor || d.client || prev.client,   // ✅ map vendor → client
+          deliverTo: d.deliverTo || prev.deliverTo,
+          poDate: fmt(d.poDate),
+          deliveryDate: fmt(d.deliveryDate),
+          referenceDate: fmt(d.referenceDate),
+          items: d.items?.map(item => ({ ...item, total: item.totalAmount })) || prev.items,
+        }));
+      })
+      .catch((err) => {
+        console.error("Failed to load PO for editing:", err);
+        setError("Could not load purchase order details.");
+      });
+  }
+}, [editId]);
 
   // ─────────────────────────────────────────────────────────────
   //  FORM HELPERS
@@ -527,7 +557,7 @@ export default function PurchaseOrderPage() {
   //  SUBMIT
   // ─────────────────────────────────────────────────────────────
 
-  const handleSubmit = async () => {
+const handleSubmit = async () => {
   setLoading(true);
   setError(null);
   try {
@@ -535,22 +565,53 @@ export default function PurchaseOrderPage() {
       ? form.items.map(recalcItem).filter(hasMeaningfulLineItem)
       : [];
 
-    const payload = { ...form, companyId, items: sanitizedItems };
+    // Build payload matching backend expectations
+    const payload = {
+      companyId,
+      poNumber: form.poNumber, // will be auto-generated if not present
+      poDate: form.poDate,
+      deliveryDate: form.deliveryDate,
+      poCategory: form.poCategory,
+      billingModel: form.billingModel,
+      paymentTerms: form.paymentTerms,
+      vendor: form.client,        // ✅ map client → vendor
+      deliverTo: form.deliverTo,
+      items: sanitizedItems.map(item => ({
+        description: item.description,
+        hsnSac: item.hsnSac,
+        hsnId: item.hsnId,
+        quantity: item.quantity,
+        rate: item.rate,
+        taxableValue: item.taxableValue,
+        gstRate: item.gstRate,
+        gstAmount: item.gstAmount,
+        totalAmount: item.total,   // ✅ backend expects totalAmount
+      })),
+      totalTaxableValue: form.totalTaxableValue,
+      totalGSTAmount: (form.totalCGSTAmount || 0) + (form.totalSGSTAmount || 0),
+      totalAmount: form.totalAmount,
+      valueInWords: form.valueInWords,
+      notes: form.notes,
+      ...(form.poreferencevalue && { poreferencevalue: form.poreferencevalue }),
+      ...(form.paymentSchedule && { paymentSchedule: form.paymentSchedule }),
+      ...(form.staffingConfig && { staffingConfig: form.staffingConfig }),
+      ...(form.milestones?.length && { milestones: form.milestones }),
+      ...(form.resources?.length && { resources: form.resources }),
+    };
+
     let res;
-    // ... your existing logic ...
     if (isEditing && editId) {
       res = await updatePurchaseOrderApi(editId, payload);
     } else {
       res = await createPurchaseOrderApi(payload);
     }
+
     const createdId = res.data?.data?._id || res.data?._id;
-    const createdClientId = form.client._id;   // <-- capture the client ID
     setCreatedPOId(createdId);
     setSuccess(true);
-    // optionally store createdClientId in state if you want to use it later
-    // but you can also directly use it in the success screen (since it's captured)
   } catch (e) {
-    // ... error handling ...
+    console.error("PO submission error:", e);
+    setError(e.response?.data?.message || e.message || "Failed to save Purchase Order");
   } finally {
     setLoading(false);
   }

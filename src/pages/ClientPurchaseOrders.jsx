@@ -119,42 +119,41 @@ const ClientPurchaseOrders = () => {
     return clientId || null;
   };
   // ---------- Fetch client details and POs for this client ----------
-  const fetchClientAndPOs = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const clientRes = await getClientsApi(user.company._id);
-      const foundClient = clientRes.data?.find((c) => c._id === clientId);
-      setClient(foundClient);
+const fetchClientAndPOs = async () => {
+  setLoading(true);
+  setError(null);
+  try {
+    // Get companyId robustly
+    const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
+    const companyId = localStorage.getItem("selectedCompanyId") ||
+                      user?.company?._id ||
+                      selectedCompany?._id;
 
-      // Build filters – try exact ID first
-      const filters = {
-        ...activeFilters,
-        clientId,
-        limit: 1000,
-      };
+    if (!companyId) throw new Error("Company ID missing");
 
-      if (clientId) {
-        filters.clientId = clientId;
-      }
+    const clientRes = await getClientsApi(companyId);
+    const foundClient = clientRes.data?.find((c) => c._id === clientId);
+    setClient(foundClient);
 
-      // // If we have the client name, also try a name search as fallback
-      if (foundClient?.clientName) {
-        filters.clientName = foundClient.clientName;
-      }
+    const filters = {
+      ...activeFilters,
+      clientId,
+      companyId,        // ✅ ADD THIS
+      limit: 1000,
+    };
 
-      if (searchQuery) filters.poNumber = searchQuery;
+    if (searchQuery) filters.poNumber = searchQuery;
 
-      const res = await advancedSearchPurchaseOrdersApi(filters);
-      setPurchaseOrders(res.data || []);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to fetch client purchase orders");
-    } finally {
-      setLoading(false);
-      setLoadingAdvanced(false);
-    }
-  };
+    const res = await advancedSearchPurchaseOrdersApi(filters);
+    setPurchaseOrders(res.data || []);
+  } catch (err) {
+    console.error(err);
+    setError("Failed to fetch client purchase orders");
+  } finally {
+    setLoading(false);
+    setLoadingAdvanced(false);
+  }
+};
   useEffect(() => {
     if (user?.company?._id && clientId) {
       fetchClientAndPOs();

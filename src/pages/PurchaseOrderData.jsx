@@ -338,8 +338,11 @@ const TH = ({ label, sortKey, currentSort, onSort, icon: Icon }) => {
 const PurchaseOrderData = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
-  const companyId = selectedCompany?._id;
+  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
+const companyId =
+  localStorage.getItem("selectedCompanyId") ||
+  user?.company?._id ||
+  selectedCompany?._id;
 
   const [clients, setClients] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
@@ -372,8 +375,15 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const fetchAllData = async () => {
   setLoading(true);
   setError(null);
+
+  if (!companyId) {
+  console.error("Company ID is missing");
+  setError("Company information not found. Please refresh the page.");
+  setLoading(false);
+  return;
+}
   try {
-    const clientRes = await getClientsApi(user.company._id);
+    const clientRes = await getClientsApi(companyId);
     const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
     setClients(clientsList.filter((c) => c.isActive !== false));
 
