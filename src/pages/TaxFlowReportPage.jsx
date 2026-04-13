@@ -80,6 +80,55 @@ const typeBadge = (type) => {
   return "bg-emerald-50 text-emerald-600 border-emerald-200";
 };
 
+const ledgerTypeBadge = (type) => {
+  const map = {
+    client: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    vendor: "bg-blue-50 text-blue-700 border-blue-200",
+    expense: "bg-amber-50 text-amber-700 border-amber-200",
+    income: "bg-violet-50 text-violet-700 border-violet-200",
+    cashBank: "bg-sky-50 text-sky-700 border-sky-200",
+    general: "bg-slate-100 text-slate-700 border-slate-200",
+  };
+
+  return map[type] || map.general;
+};
+
+const sourceBadge = (transaction = {}) => {
+  if (transaction.sourceType === "PAYMENT" || transaction.voucherType === "RECEIPT") {
+    return "bg-emerald-500 text-white";
+  }
+  if (transaction.sourceType === "INVOICE" || transaction.voucherType === "SALES") {
+    return "bg-blue-500 text-white";
+  }
+  if (transaction.voucherType === "PAYMENT") {
+    return "bg-amber-500 text-white";
+  }
+  return "bg-slate-500 text-white";
+};
+
+const formatLedgerTypeLabel = (type = "") => {
+  const labels = {
+    client: "Client Ledger",
+    vendor: "Vendor Ledger",
+    expense: "Expense Ledger",
+    income: "Income Ledger",
+    cashBank: "Cash / Bank",
+    general: "General Ledger",
+  };
+
+  return labels[type] || "Ledger";
+};
+
+const formatTransactionType = (transaction = {}) => {
+  if (transaction.sourceType === "PAYMENT" || transaction.voucherType === "RECEIPT") return "Receipt";
+  if (transaction.sourceType === "INVOICE" || transaction.voucherType === "SALES") return "Invoice";
+  if (transaction.voucherType === "PAYMENT") return "Payment";
+  if (transaction.voucherType === "PURCHASE") return "Purchase";
+  if (transaction.voucherType === "JOURNAL") return "Journal";
+  if (transaction.voucherType === "CONTRA") return "Contra";
+  return transaction.sourceType || transaction.voucherType || "Manual";
+};
+
 const InputField = ({ label, children }) => (
   <label className="block">
     <span className="mb-2 block text-[11px] font-semibold text-slate-500">{label}</span>
@@ -207,6 +256,154 @@ const InvoiceDrilldown = ({ invoices = [] }) => (
     </div>
   </div>
 );
+
+const LedgerDrilldown = ({ row }) => {
+  const title =
+    row.ledgerType === "client"
+      ? "Incoming receipts and invoice activity"
+      : row.ledgerType === "vendor"
+        ? "Vendor-linked payment activity"
+        : row.groupNature === "Expense"
+          ? "Payment allocation and expense breakup"
+          : "Ledger activity breakdown";
+
+  const breakdown = row.breakdown || [];
+  const transactions = row.transactions || [];
+
+  return (
+    <div className="border-t border-[#eee5d9] bg-[#fcfaf7] px-6 py-5">
+      <div className="rounded-2xl border border-[#eee5d9] bg-white">
+        <div className="border-b border-[#f1ebe2] px-5 py-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="text-sm font-semibold text-slate-800">{title}</div>
+                <span className={`inline-flex rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase ${ledgerTypeBadge(row.ledgerType)}`}>
+                  {formatLedgerTypeLabel(row.ledgerType)}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                {row.ledgerType === "client"
+                  ? "Invoice postings and receipt settlements linked to this client ledger."
+                  : row.groupNature === "Expense"
+                    ? "Grouped from journal narration and line descriptions to show rent, maintenance, electricity, and other payment heads."
+                    : "Detailed entries posted into this ledger for the selected period."}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+              <div className="rounded-xl bg-[#faf7f2] px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Entries</div>
+                <div className="mt-1 text-lg font-bold text-slate-800">{row.transactionCount || 0}</div>
+              </div>
+              <div className="rounded-xl bg-[#faf7f2] px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Invoices</div>
+                <div className="mt-1 text-lg font-bold text-blue-600">{row.invoiceCount || 0}</div>
+              </div>
+              <div className="rounded-xl bg-[#faf7f2] px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Payments</div>
+                <div className="mt-1 text-lg font-bold text-emerald-600">{row.paymentCount || 0}</div>
+              </div>
+              <div className="rounded-xl bg-[#faf7f2] px-3 py-2">
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Last Activity</div>
+                <div className="mt-1 text-sm font-bold text-slate-800">
+                  {row.lastActivityDate ? dayjs(row.lastActivityDate).format("DD MMM YYYY") : "—"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-5 px-5 py-4 lg:grid-cols-[1.1fr,1.9fr]">
+          <div>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Breakdown</div>
+            {breakdown.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[#e8dfd2] bg-[#faf7f2] px-4 py-6 text-sm text-slate-500">
+                No grouped activity found for this ledger.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {breakdown.map((entry) => (
+                  <div key={entry.label} className="rounded-xl border border-[#f1ebe2] bg-[#fcfaf7] px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">{entry.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          {entry.count} entr{entry.count === 1 ? "y" : "ies"}
+                          {entry.sources?.length ? ` • ${entry.sources.join(" / ")}` : ""}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs font-semibold text-rose-500">Cr {amount(entry.credit)}</div>
+                        <div className="text-xs font-semibold text-emerald-600">Dr {amount(entry.debit)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-400">Transactions</div>
+            <div className="overflow-hidden rounded-xl border border-[#eee5d9]">
+              <table className="min-w-full bg-white text-sm">
+                <thead className="bg-[#faf7f2] text-left text-[11px] font-semibold text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Details</th>
+                    <th className="px-4 py-3">Reference</th>
+                    <th className="px-4 py-3 text-right">Debit</th>
+                    <th className="px-4 py-3 text-right">Credit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {transactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">
+                        No transactions found for this ledger.
+                      </td>
+                    </tr>
+                  ) : (
+                    transactions.map((transaction) => (
+                      <tr key={transaction.transactionId} className="border-t border-[#f1ebe2] align-top">
+                        <td className="px-4 py-3 text-slate-600">
+                          {transaction.journalDate ? dayjs(transaction.journalDate).format("DD MMM YYYY") : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded-md px-2.5 py-1 text-[10px] font-semibold uppercase ${sourceBadge(transaction)}`}>
+                            {formatTransactionType(transaction)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-slate-800">{transaction.label || "Ledger activity"}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {transaction.description || transaction.narration || transaction.partyName || "—"}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">
+                          <div>{transaction.externalDocNo || transaction.referenceNumber || "—"}</div>
+                          <div className="text-xs text-slate-400">{transaction.journalNumber || "—"}</div>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-emerald-600">
+                          {transaction.debit ? amount(transaction.debit) : "—"}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-rose-500">
+                          {transaction.credit ? amount(transaction.credit) : "—"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const mergeClientRowsByName = (rows = []) => {
   const grouped = new Map();
@@ -842,6 +1039,7 @@ export default function TaxFlowReportPage() {
             <table className="min-w-full">
               <thead className="bg-[#faf7f2] text-left text-[12px] font-semibold text-slate-600">
                 <tr>
+                  <th className="w-10 px-4 py-4" />
                   <th className="px-4 py-4">Ledger</th>
                   <th className="px-4 py-4">Group</th>
                   <th className="px-4 py-4 text-right">Debit</th>
@@ -852,27 +1050,71 @@ export default function TaxFlowReportPage() {
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-14 text-center text-sm text-slate-500">Loading ledger report...</td>
+                    <td colSpan={6} className="px-6 py-14 text-center text-sm text-slate-500">Loading ledger report...</td>
                   </tr>
                 ) : (businessInsights.ledgerImpactSummary || []).length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-14 text-center text-sm text-slate-500">No ledger data found for the selected period.</td>
+                    <td colSpan={6} className="px-6 py-14 text-center text-sm text-slate-500">No ledger data found for the selected period.</td>
                   </tr>
                 ) : (
-                  (businessInsights.ledgerImpactSummary || []).map((row) => (
-                    <tr key={row.ledgerId || `${row.ledger}-${row.group}`} className="border-t border-[#f0e8dc] text-sm">
-                      <td className="px-4 py-4">
-                        <div className="font-semibold text-slate-700">{row.ledger}</div>
-                        <div className="text-xs text-slate-400">{row.ledgerCode || "—"}</div>
-                      </td>
-                      <td className="px-4 py-4 text-slate-600">{row.group}</td>
-                      <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.debit)}</td>
-                      <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.credit)}</td>
-                      <td className={`px-4 py-4 text-right font-semibold ${Number(row.closingBalance) >= 0 ? "text-emerald-600" : "text-rose-500"}`}>
-                        {amount(row.closingBalance)}
-                      </td>
-                    </tr>
-                  ))
+                  (businessInsights.ledgerImpactSummary || []).map((row) => {
+                    const key = `ledger:${row.ledgerId || `${row.ledger}-${row.group}`}`;
+
+                    return (
+                      <React.Fragment key={key}>
+                        <tr className="border-t border-[#f0e8dc] text-sm">
+                          <td className="px-4 py-4">
+                            <button
+                              type="button"
+                              onClick={() => toggleRow(key)}
+                              className="flex h-5 w-5 items-center justify-center text-slate-400"
+                            >
+                              {expandedRows[key] ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          </td>
+                          <td className="px-4 py-4">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <div className="font-semibold text-slate-700">{row.ledger}</div>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase ${ledgerTypeBadge(row.ledgerType)}`}>
+                                {formatLedgerTypeLabel(row.ledgerType)}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                              <span>{row.ledgerCode || "—"}</span>
+                              <span>•</span>
+                              <span>{row.transactionCount || 0} entries</span>
+                              {!!row.paymentCount && (
+                                <>
+                                  <span>•</span>
+                                  <span>{row.paymentCount} payments</span>
+                                </>
+                              )}
+                              {!!row.invoiceCount && (
+                                <>
+                                  <span>•</span>
+                                  <span>{row.invoiceCount} invoices</span>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 text-slate-600">{row.group}</td>
+                          <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.debit)}</td>
+                          <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.credit)}</td>
+                          <td className={`px-4 py-4 text-right font-semibold ${Number(row.closingBalance) >= 0 ? "text-emerald-600" : "text-rose-500"}`}>
+                            {amount(row.closingBalance)}
+                          </td>
+                        </tr>
+
+                        {expandedRows[key] && (
+                          <tr>
+                            <td colSpan={6} className="p-0">
+                              <LedgerDrilldown row={row} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
                 )}
               </tbody>
             </table>
