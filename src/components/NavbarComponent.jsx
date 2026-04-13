@@ -4,7 +4,6 @@ import { useAuth } from "../contexts/AuthContext";
 import { useState, useEffect, useMemo } from "react";
 import { Settings, ChevronRight, ChevronLeft, LogOut } from "lucide-react";
 import { setCookie } from "../utils/cookieUtil";
-import { ChangeCircleOutlined } from "@mui/icons-material";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Import all icons
@@ -337,6 +336,50 @@ export default function NavbarComponent() {
 
         {(user?.role === "superAdmin" || user?.role === "admin") && (
           <div className="mb-1">
+             <NavLink
+          to="/reports/tax-flow"
+          className={({ isActive }) =>
+            `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
+              isActive
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-gray-400 hover:bg-white/5 hover:text-white"
+            }`
+          }
+          title={isCollapsed ? " Report Summary" : ""}
+        >
+          <div
+            className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+              isCollapsed ? "mx-auto" : "group-hover:bg-white/5"
+            }`}
+          >
+            <BarChart2 strokeWidth={1.5} size={20} className="transition-transform duration-200 group-hover:scale-110" />
+          </div>
+          {!isCollapsed && (
+            <span className="text-sm font-medium flex-1">Report Summary</span>
+          )}
+        </NavLink> 
+             <NavLink
+          to="/accounting/bank-reconciliation"
+          className={({ isActive }) =>
+            `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
+              isActive
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-gray-400 hover:bg-white/5 hover:text-white"
+            }`
+          }
+          title={isCollapsed ? "Reconciliation" : ""}
+        >
+          <div
+            className={`p-1.5 rounded-lg transition-colors shrink-0 ${
+              isCollapsed ? "mx-auto" : "group-hover:bg-white/5"
+            }`}
+          >
+            <Receipt strokeWidth={1.5} size={20} className="transition-transform duration-200 group-hover:scale-110" />
+          </div>
+          {!isCollapsed && (
+            <span className="text-sm font-medium flex-1">Reconciliation</span>
+          )}
+        </NavLink> 
             <button
               onClick={() => toggleMenu("Admin Settings")}
               className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 ${openMenu === "Admin Settings" ? "bg-white/10 text-white" : "text-gray-400 hover:bg-white/5 hover:text-white"}`}
@@ -383,28 +426,7 @@ export default function NavbarComponent() {
           </div>
         )}
 
-         <NavLink
-          to="/accounting/bank-reconciliation"
-          className={({ isActive }) =>
-            `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
-              isActive
-                ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/30"
-                : "text-gray-400 hover:bg-white/5 hover:text-white"
-            }`
-          }
-          title={isCollapsed ? "Reconciliation" : ""}
-        >
-          <div
-            className={`p-1.5 rounded-lg transition-colors shrink-0 ${
-              isCollapsed ? "mx-auto" : "group-hover:bg-white/5"
-            }`}
-          >
-            <Receipt strokeWidth={1.5} size={20} className="transition-transform duration-200 group-hover:scale-110" />
-          </div>
-          {!isCollapsed && (
-            <span className="text-sm font-medium flex-1">Reconciliation</span>
-          )}
-        </NavLink> 
+        
       </nav> 
       
 

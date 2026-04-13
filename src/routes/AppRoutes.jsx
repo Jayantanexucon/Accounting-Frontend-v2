@@ -46,6 +46,9 @@ const BankReconciliationPage = lazy(
 const BulkInvoiceUploadPage = lazy(
   () => import("../pages/BulkInvoiceUploadPage"),
 );
+const TaxFlowReportPage = lazy(
+  () => import("../pages/TaxFlowReportPage"),
+);
 
 // Already lazy in your code (keeping same)
 const AuthPage = lazy(() => import("../pages/AuthPage"));
@@ -140,6 +143,7 @@ export default function AppRoutes() {
               />
 
               <Route path="notifications" element={<NotificationsPage />} />
+              <Route path="reports/tax-flow" element={<TaxFlowReportPage />} />
               <Route path="settings" element={<SettingPage />} />
             </Route>
           </Route>
