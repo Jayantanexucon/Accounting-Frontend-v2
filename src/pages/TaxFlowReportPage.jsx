@@ -458,8 +458,8 @@ export default function TaxFlowReportPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#f6f1ea] text-slate-800">
-      <div className="border-b border-[#eadfce] bg-[#f8f4ee]">
+    <div className="min-h-screen  text-slate-800">
+      <div className="border-b border-[#eadfce] ">
         <div className="mx-auto flex max-w-[1180px] items-center justify-between px-6 py-5">
           <div className="flex items-start gap-4">
             <div className="mt-0.5 flex h-11 w-11 items-center justify-center rounded-xl border border-[#e4d8c7] bg-white">
