@@ -37,23 +37,23 @@ import { motion, AnimatePresence } from "framer-motion";
 
 /* ─── stat gradient config ────────────────────────────── */
 const STAT_CFG = [
-  { key: "totalInvoices",       label: "Total Invoices",   icon: FileText,    gradient: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)", glow: "#93c5fd", fmt: (v) => v },
-  { key: "totalReceivedAmount", label: "Total Received",   icon: CheckCircle2,gradient: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)", glow: "#6ee7b7", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
-  { key: "totalPendingAmount",  label: "Pending Payment",  icon: AlertCircle, gradient: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)", glow: "#fde68a", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
-  { key: "totalAmount",         label: "Total Revenue",    icon: Banknote,    gradient: "linear-gradient(135deg,#312e81 0%,#4f46e5 55%,#a78bfa 100%)", glow: "#c4b5fd", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
-  { key: "totalTDS",            label: "Total TDS",        icon: Percent,     gradient: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#f87171 100%)", glow: "#fca5a5", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+  { key: "totalInvoices", label: "Total Invoices", icon: FileText, gradient: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)", glow: "#93c5fd", fmt: (v) => v },
+  { key: "totalReceivedAmount", label: "Total Received", icon: CheckCircle2, gradient: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)", glow: "#6ee7b7", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+  { key: "totalPendingAmount", label: "Pending Payment", icon: AlertCircle, gradient: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)", glow: "#fde68a", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+  { key: "totalAmount", label: "Total Revenue", icon: Banknote, gradient: "linear-gradient(135deg,#312e81 0%,#4f46e5 55%,#a78bfa 100%)", glow: "#c4b5fd", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
+  { key: "totalTDS", label: "Total TDS", icon: Percent, gradient: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#f87171 100%)", glow: "#fca5a5", fmt: (v) => `₹${Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 })}` },
 ];
 
 /* ─── small action button ─────────────────────────────── */
 const ActionBtn = ({ onClick, icon: Icon, label, color = "slate", stopProp = true, to, disabled = false }) => {
   const base = "flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-xl border transition-all";
   const colors = {
-    slate:  "text-slate-600 bg-white border-slate-200 hover:bg-slate-50",
-    blue:   "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600",
-    green:  "text-emerald-700 bg-emerald-50 border-emerald-100 hover:bg-emerald-100",
+    slate: "text-slate-600 bg-white border-slate-200 hover:bg-slate-50",
+    blue: "text-blue-600 bg-blue-50 border-blue-100 hover:bg-blue-600 hover:text-white hover:border-blue-600",
+    green: "text-emerald-700 bg-emerald-50 border-emerald-100 hover:bg-emerald-100",
     purple: "text-violet-700 bg-violet-50 border-violet-100 hover:bg-violet-100",
-    red:    "text-red-600 bg-red-50 border-red-100 hover:bg-red-100",
-    amber:  "text-amber-700 bg-amber-50 border-amber-100 hover:bg-amber-100",
+    red: "text-red-600 bg-red-50 border-red-100 hover:bg-red-100",
+    amber: "text-amber-700 bg-amber-50 border-amber-100 hover:bg-amber-100",
     indigo: "text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100",
   };
   const cls = `${base} ${colors[color] || colors.slate} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`;
@@ -76,36 +76,36 @@ const InvoiceData = () => {
   const { user } = useAuth();
 
   /* ── state (unchanged from original) ───────────────── */
-  const [invoices, setInvoices]                   = useState([]);
-  const [loading, setLoading]                     = useState(true);
-  const [error, setError]                         = useState(null);
-  const [pagination, setPagination]               = useState({ page: 1, limit: 10, totalPages: 0, total: 0 });
-  const [expandedRows, setExpandedRows]           = useState({});
-  const [allInvoices, setAllInvoices]             = useState([]);
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [pagination, setPagination] = useState({ page: 1, limit: 10, totalPages: 0, total: 0 });
+  const [expandedRows, setExpandedRows] = useState({});
+  const [allInvoices, setAllInvoices] = useState([]);
   const [filteredAllInvoices, setFilteredAllInvoices] = useState([]);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
-  const [advancedFilters, setAdvancedFilters]     = useState({});
-  const [appliedFilters, setAppliedFilters]       = useState({});
+  const [advancedFilters, setAdvancedFilters] = useState({});
+  const [appliedFilters, setAppliedFilters] = useState({});
   const [createLedgerModal, setCreateLedgerModal] = useState({ open: false, invoiceNo: null, invoiceData: null });
-  const [createdByUsers, setCreatedByUsers]       = useState([]);
-  const invoiceOptions  = [...new Set(allInvoices.map((i) => i.invoiceNo))];
-  const clientOptions   = [...new Set(allInvoices.map((i) => i.billTo?.name))];
+  const [createdByUsers, setCreatedByUsers] = useState([]);
+  const invoiceOptions = [...new Set(allInvoices.map((i) => i.invoiceNo))];
+  const clientOptions = [...new Set(allInvoices.map((i) => i.billTo?.name))];
   const [showPreviousInvoices, setShowPreviousInvoices] = useState(false);
-  const [selectedInvoice, setSelectedInvoice]     = useState(null);
-  const [paymentModal, setPaymentModal]           = useState({ open: false, invoiceData: null });
+  const [selectedInvoice, setSelectedInvoice] = useState(null);
+  const [paymentModal, setPaymentModal] = useState({ open: false, invoiceData: null });
   const [paymentHistoryModal, setPaymentHistoryModal] = useState(false);
   const [tdsDetailsModalOpen, setTdsDetailsModalOpen] = useState(false);
-  const [tdsDetailRows, setTdsDetailRows]         = useState([]);
+  const [tdsDetailRows, setTdsDetailRows] = useState([]);
   const [tdsDetailsLoading, setTdsDetailsLoading] = useState(false);
-  const [openLogs, setOpenLogs]                   = useState(false);
-  const [auditModal, setAuditModal]               = useState({ open: false, invoiceId: null, invoiceNo: null });
-  const [auditLogCounts, setAuditLogCounts]       = useState({});
-  const [detailModalOpen, setDetailModalOpen]     = useState(false);
+  const [openLogs, setOpenLogs] = useState(false);
+  const [auditModal, setAuditModal] = useState({ open: false, invoiceId: null, invoiceNo: null });
+  const [auditLogCounts, setAuditLogCounts] = useState({});
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState(null);
   const [autoOpenedInvoiceId, setAutoOpenedInvoiceId] = useState(null);
-  const navigate   = useNavigate();
-  const location   = useLocation();
+  const navigate = useNavigate();
+  const location = useLocation();
 
   /* ── all original handlers preserved exactly ───────── */
   const handleViewAuditLog = (invoice, e) => {
@@ -130,12 +130,16 @@ const InvoiceData = () => {
       try {
         // ✅ Changed: Use /invoices/ with query params
         const response = await getInvoicesApi(user.company._id, {
-          page: 1,
-          limit: 10000,
+          page: pagination.page,
+          limit: pagination.limit,
           approvalStatus: "Approved",
           sort: "-createdAt",
+          ...advancedFilters,
         });
-        setAllInvoices(response?.data || []);
+        let invoicesData = response?.data || [];
+        // Explicit sort by createdAt descending
+        invoicesData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        setInvoices(invoicesData);
       } catch (error) {
         console.error(error);
         toast.error(error?.response?.data?.message);
@@ -180,7 +184,7 @@ const InvoiceData = () => {
       setLoading(false);
     }
   };
-useEffect(() => {
+  useEffect(() => {
     fetchInvoices();
   }, [pagination.page, pagination.limit, advancedFilters]);
 
@@ -225,7 +229,7 @@ useEffect(() => {
   };
   useEffect(() => { if (showAdvancedSearch) fetchUsers(); }, [showAdvancedSearch]);
 
-  const formatDate   = (date) => (date ? dayjs(date).format("DD-MMM-YYYY") : "-");
+  const formatDate = (date) => (date ? dayjs(date).format("DD-MMM-YYYY") : "-");
   const formatAmount = (amount) => new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
   const getPaymentReceivedAmount = (payment = {}) => Number(payment.receivedAmount ?? payment.amountReceived ?? payment.amountPaid ?? 0);
   const getPaymentTdsAmount = (payment = {}) => Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0);
@@ -286,14 +290,14 @@ useEffect(() => {
   };
 
   const toggleRowExpand = (id, e) => { e.stopPropagation(); setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] })); };
-  const handlePageChange  = (page) => setPagination((prev) => ({ ...prev, page }));
+  const handlePageChange = (page) => setPagination((prev) => ({ ...prev, page }));
   const handleAdvancedSearch = (filters) => { setAdvancedFilters(filters); setAppliedFilters(filters); setPagination((prev) => ({ ...prev, page: 1 })); setShowAdvancedSearch(false); };
-  const handleRowClick    = (invoice) => {
+  const handleRowClick = (invoice) => {
     const isExpanding = !expandedRows[invoice._id];
     setExpandedRows((prev) => ({ ...prev, [invoice._id]: !prev[invoice._id] }));
     if (isExpanding) fetchAuditLogCount(invoice._id);
   };
-  const getItemSummary    = (items) => !items?.length ? "No items" : `${items.length} item${items.length > 1 ? "s" : ""}`;
+  const getItemSummary = (items) => !items?.length ? "No items" : `${items.length} item${items.length > 1 ? "s" : ""}`;
   const calculateTotalTax = (invoice) => ((invoice.totalCGSTAmount || 0) + (invoice.totalSGSTAmount || 0) + (invoice.totalIGSTAmount || 0)).toFixed(2);
   const calculatePaymentInfo = (invoice) => {
     const invoiceAmount = invoice.netPayable || invoice.amountDue || 0;
@@ -302,14 +306,14 @@ useEffect(() => {
       (sum, payment) => sum + getPaymentSettledAmount(payment),
       0,
     );
-    const totalTDSAdjusted  = payments.reduce((s, p) => s + getPaymentTdsAmount(p), 0);
+    const totalTDSAdjusted = payments.reduce((s, p) => s + getPaymentTdsAmount(p), 0);
     const totalReceived =
       payments.length > 0
         ? paymentsTotal
         : Number(
-            invoice.paidAmount ??
-              Math.max(0, invoiceAmount - Number(invoice.remainingAmount ?? invoiceAmount)),
-          );
+          invoice.paidAmount ??
+          Math.max(0, invoiceAmount - Number(invoice.remainingAmount ?? invoiceAmount)),
+        );
     const pendingAmount = Math.max(
       0,
       payments.length > 0
@@ -327,9 +331,9 @@ useEffect(() => {
   };
   const getPaymentStatusBadge = (paymentStatus, pendingAmount) => {
     switch (paymentStatus) {
-      case "fully_paid":    return { text: "Paid",                          pill: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: CheckCircle2 };
-      case "partially_paid":return { text: `₹${formatAmount(pendingAmount)} Pending`, pill: "bg-amber-100 text-amber-700 border-amber-200",   dot: "bg-amber-400",   icon: Clock        };
-      default:              return { text: "Unpaid",                        pill: "bg-red-100 text-red-700 border-red-200",             dot: "bg-red-500",     icon: AlertTriangle };
+      case "fully_paid": return { text: "Paid", pill: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: CheckCircle2 };
+      case "partially_paid": return { text: `₹${formatAmount(pendingAmount)} Pending`, pill: "bg-amber-100 text-amber-700 border-amber-200", dot: "bg-amber-400", icon: Clock };
+      default: return { text: "Unpaid", pill: "bg-red-100 text-red-700 border-red-200", dot: "bg-red-500", icon: AlertTriangle };
     }
   };
   const getInvoiceLifecycleBadge = (status) => ({
@@ -338,7 +342,7 @@ useEffect(() => {
     RECONCILED: { text: "Reconciled", pill: "bg-green-100 text-green-800 border-green-200" },
     POSTED: { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" },
   }[status] || { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" });
-  const handleDownloadWord   = async (invoiceId, invoiceNo, e) => {
+  const handleDownloadWord = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
       const response = await downloadInvoiceWordApi(invoiceId);
@@ -358,8 +362,8 @@ useEffect(() => {
       toast.success("PDF downloaded");
     } catch { toast.error("Failed to download PDF"); }
   };
-  const handleEditClick       = (invoiceId, e) => { e.stopPropagation(); };
-  const getStatusColor        = (status) => ({ active: "border-emerald-500 text-emerald-600 bg-emerald-100", inprogress: "border-amber-500 text-amber-600 bg-amber-100", completed: "border-slate-400 text-slate-600 bg-slate-200" }[status] || "border-slate-300 text-slate-500");
+  const handleEditClick = (invoiceId, e) => { e.stopPropagation(); };
+  const getStatusColor = (status) => ({ active: "border-emerald-500 text-emerald-600 bg-emerald-100", inprogress: "border-amber-500 text-amber-600 bg-amber-100", completed: "border-slate-400 text-slate-600 bg-slate-200" }[status] || "border-slate-300 text-slate-500");
   const handleCreateLedgerClick = async (invoice, e) => {
     e.stopPropagation();
     if (invoice.salesJournalId) { toast.info("Sales journal already posted for this invoice"); return; }
@@ -368,22 +372,22 @@ useEffect(() => {
       setCreateLedgerModal({ open: true, invoiceNo: invoice.invoiceNo, invoiceData: response?.data || invoice });
     } catch { toast.error("Failed to load invoice details"); }
   };
-  const handleLedgerCreated   = () => { toast.success("Journal posted successfully!"); fetchInvoices(); setCreateLedgerModal({ open: false, invoiceNo: null, invoiceData: null }); };
-  const getInvoiceSummary     = () => {
+  const handleLedgerCreated = () => { toast.success("Journal posted successfully!"); fetchInvoices(); setCreateLedgerModal({ open: false, invoiceNo: null, invoiceData: null }); };
+  const getInvoiceSummary = () => {
     const f = filteredAllInvoices;
     if (!f.length) return { totalAmount: 0, totalPendingAmount: 0, totalReceivedAmount: 0, pendingInvoices: 0, overdueInvoices: 0, totalInvoices: 0, totalTDS: 0 };
     let totalPendingAmount = 0, totalReceivedAmount = 0;
     f.forEach((inv) => { const pi = calculatePaymentInfo(inv); totalPendingAmount += pi.pendingAmount; totalReceivedAmount += pi.totalReceived; });
     return {
-      totalAmount:        f.reduce((s, inv) => s + (inv.amountDue || 0), 0),
+      totalAmount: f.reduce((s, inv) => s + (inv.amountDue || 0), 0),
       totalPendingAmount, totalReceivedAmount,
-      pendingInvoices:    f.filter((inv) => { const pi = calculatePaymentInfo(inv); return pi.pendingAmount > 0 && ["active","inprogress"].includes(inv.status) && dayjs(inv.dueDate).isAfter(dayjs()); }).length,
-      overdueInvoices:    f.filter((inv) => { const pi = calculatePaymentInfo(inv); return pi.pendingAmount > 0 && ["active","inprogress"].includes(inv.status) && dayjs(inv.dueDate).isBefore(dayjs()); }).length,
-      totalInvoices:      f.length,
-      totalTDS:           tdsDetailRows.reduce((s, row) => s + row.tdsAmount, 0),
+      pendingInvoices: f.filter((inv) => { const pi = calculatePaymentInfo(inv); return pi.pendingAmount > 0 && ["active", "inprogress"].includes(inv.status) && dayjs(inv.dueDate).isAfter(dayjs()); }).length,
+      overdueInvoices: f.filter((inv) => { const pi = calculatePaymentInfo(inv); return pi.pendingAmount > 0 && ["active", "inprogress"].includes(inv.status) && dayjs(inv.dueDate).isBefore(dayjs()); }).length,
+      totalInvoices: f.length,
+      totalTDS: tdsDetailRows.reduce((s, row) => s + row.tdsAmount, 0),
     };
   };
-  const summary            = getInvoiceSummary();
+  const summary = getInvoiceSummary();
   const handleRecordPayment = (invoice, e) => {
     e.stopPropagation();
     if (!invoice.salesJournalId) { toast.error("Please post the sales journal first before recording payments"); return; }
@@ -509,10 +513,10 @@ useEffect(() => {
         {Object.keys(appliedFilters).length > 0 && (
           <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-2xl">
             <span className="text-[10px] font-black text-blue-700 uppercase tracking-widest">Filtering by:</span>
-            {appliedFilters.invoiceNo     && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Invoice: {appliedFilters.invoiceNo}</span>}
-            {appliedFilters.clientName    && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Client: {appliedFilters.clientName}</span>}
+            {appliedFilters.invoiceNo && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Invoice: {appliedFilters.invoiceNo}</span>}
+            {appliedFilters.clientName && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Client: {appliedFilters.clientName}</span>}
             {appliedFilters.paymentStatus && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Status: {appliedFilters.paymentStatus.replace("_", " ")}</span>}
-            {appliedFilters.createdBy     && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Created by: {createdByUsers.find((u) => u._id === appliedFilters.createdBy)?.name || appliedFilters.createdBy}</span>}
+            {appliedFilters.createdBy && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Created by: {createdByUsers.find((u) => u._id === appliedFilters.createdBy)?.name || appliedFilters.createdBy}</span>}
             {appliedFilters.invoiceDateFrom && <span className="flex items-center gap-1 text-[10px] font-bold bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-xl">Date: {appliedFilters.invoiceDateFrom} → {appliedFilters.invoiceDateTo}</span>}
             <button onClick={handleRefreshAndClear} className="ml-auto flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-red-500 transition-colors">
               <X size={10} /> Clear
@@ -574,12 +578,12 @@ useEffect(() => {
             <>
               <div className="divide-y divide-slate-50">
                 {invoices.map((invoice, i) => {
-                  const paymentInfo  = calculatePaymentInfo(invoice);
-                  const badge        = getPaymentStatusBadge(paymentInfo.paymentStatus, paymentInfo.pendingAmount);
+                  const paymentInfo = calculatePaymentInfo(invoice);
+                  const badge = getPaymentStatusBadge(paymentInfo.paymentStatus, paymentInfo.pendingAmount);
                   const lifecycleBadge = getInvoiceLifecycleBadge(invoice.status);
-                  const PayIcon      = badge.icon;
+                  const PayIcon = badge.icon;
                   const journalPosted = isJournalPosted(invoice);
-                  const isExpanded   = !!expandedRows[invoice._id];
+                  const isExpanded = !!expandedRows[invoice._id];
 
                   return (
                     <motion.div key={invoice._id}
@@ -701,10 +705,10 @@ useEffect(() => {
                                   </div>
                                   <div className="p-4 grid grid-cols-2 gap-3">
                                     <InfoCell label="Invoice Number" value={invoice.invoiceNo} />
-                                    <InfoCell label="Invoice Date"   value={formatDate(invoice.invoiceDate)} />
-                                    <InfoCell label="Due Date"       value={formatDate(invoice.dueDate)} />
-                                    <InfoCell label="Payment Terms"  value={invoice.paymentTerms || "Net 30 Days"} />
-                                    <InfoCell label="Currency"       value={invoice.currency || "INR"} />
+                                    <InfoCell label="Invoice Date" value={formatDate(invoice.invoiceDate)} />
+                                    <InfoCell label="Due Date" value={formatDate(invoice.dueDate)} />
+                                    <InfoCell label="Payment Terms" value={invoice.paymentTerms || "Net 30 Days"} />
+                                    <InfoCell label="Currency" value={invoice.currency || "INR"} />
                                   </div>
                                 </div>
 
@@ -726,7 +730,7 @@ useEffect(() => {
                                       invoice.totalCGSTAmount > 0 && { label: "CGST", value: invoice.totalCGSTAmount, color: "text-slate-600" },
                                       invoice.totalSGSTAmount > 0 && { label: "SGST", value: invoice.totalSGSTAmount, color: "text-slate-600" },
                                       invoice.totalIGSTAmount > 0 && { label: "IGST", value: invoice.totalIGSTAmount, color: "text-slate-600" },
-                                      invoice.tdsAmount > 0      && { label: "TDS Deduction", value: `-${formatAmount(invoice.tdsAmount)}`, color: "text-violet-600", raw: true },
+                                      invoice.tdsAmount > 0 && { label: "TDS Deduction", value: `-${formatAmount(invoice.tdsAmount)}`, color: "text-violet-600", raw: true },
                                     ].filter(Boolean).map((row, idx) => (
                                       <div key={idx} className="flex items-center justify-between">
                                         <span className="text-slate-500 font-medium">{row.label}</span>
@@ -762,9 +766,9 @@ useEffect(() => {
                                   <div className="p-4 grid grid-cols-1 gap-2.5 text-xs">
                                     {[
                                       { label: "Client Name", value: invoice.billTo?.name },
-                                      { label: "Address",     value: invoice.billTo?.address },
+                                      { label: "Address", value: invoice.billTo?.address },
                                       invoice.billTo?.GSTIN && { label: "GSTIN", value: invoice.billTo.GSTIN, mono: true },
-                                      { label: "Ship To",     value: invoice.shipTo?.name },
+                                      { label: "Ship To", value: invoice.shipTo?.name },
                                     ].filter(Boolean).map((row, idx) => (
                                       <div key={idx} className="flex items-start justify-between gap-3">
                                         <span className="text-slate-400 font-medium shrink-0">{row.label}</span>
@@ -783,10 +787,10 @@ useEffect(() => {
                                   </div>
                                   <div className="p-4 space-y-2 text-xs">
                                     {[
-                                      { label: "Total Invoice",   value: paymentInfo.invoiceAmount,   color: "text-emerald-700" },
-                                      { label: "Total Received",  value: paymentInfo.totalReceived,   color: "text-blue-700"    },
-                                      { label: "Pending Amount",  value: paymentInfo.pendingAmount,   color: "text-amber-700"   },
-                                      { label: "TDS Adjusted",    value: paymentInfo.totalTDSAdjusted,color: "text-violet-700"  },
+                                      { label: "Total Invoice", value: paymentInfo.invoiceAmount, color: "text-emerald-700" },
+                                      { label: "Total Received", value: paymentInfo.totalReceived, color: "text-blue-700" },
+                                      { label: "Pending Amount", value: paymentInfo.pendingAmount, color: "text-amber-700" },
+                                      { label: "TDS Adjusted", value: paymentInfo.totalTDSAdjusted, color: "text-violet-700" },
                                     ].map((row, idx) => (
                                       <div key={idx} className="flex items-center justify-between">
                                         <span className="text-slate-500 font-medium">{row.label}</span>
@@ -821,7 +825,7 @@ useEffect(() => {
                                     <table className="w-full text-xs">
                                       <thead>
                                         <tr style={{ background: "linear-gradient(90deg,#f1f5f9,#fef9c3)" }}>
-                                          {["Date","Mode","Reference","Amount","TDS","Status"].map((h, idx) => (
+                                          {["Date", "Mode", "Reference", "Amount", "TDS", "Status"].map((h, idx) => (
                                             <th key={h} className={`px-4 py-2.5 text-[10px] font-black text-slate-500 uppercase tracking-widest ${idx > 2 ? "text-right" : "text-left"}`}>{h}</th>
                                           ))}
                                         </tr>
@@ -861,7 +865,7 @@ useEffect(() => {
                                 {checkAuthorization(user, "INVOICE", "EDIT") && !invoice.salesJournalId && (
                                   <ActionBtn to={`/master-data/manual-invoice?edit=${invoice._id}`} onClick={(e) => handleEditClick(invoice._id, e)} icon={Edit} label="Edit Invoice" color="blue" />
                                 )}
-                                <ActionBtn onClick={(e) => handleDownloadPdf(invoice._id, invoice.invoiceNo, e)}  icon={Download} label="Download PDF"  color="slate" />
+                                <ActionBtn onClick={(e) => handleDownloadPdf(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download PDF" color="slate" />
                                 <ActionBtn onClick={(e) => handleDownloadWord(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download Word" color="slate" />
                                 {!invoice.salesJournalId && (
                                   <ActionBtn onClick={(e) => handleCreateLedgerClick(invoice, e)} icon={BookOpen} label="Post Sales Journal" color="purple" />
@@ -883,7 +887,7 @@ useEffect(() => {
                                   <ActionBtn onClick={(e) => { e.stopPropagation(); setSelectedInvoice(invoice); setPaymentHistoryModal(true); }}
                                     icon={History} label={`Payment History (${invoice.payments.length})`} color="amber" />
                                 )}
-                                <ActionBtn onClick={() => {}} icon={Mail} label="Email Invoice" color="indigo" />
+                                <ActionBtn onClick={() => { }} icon={Mail} label="Email Invoice" color="indigo" />
                               </div>
 
                             </div>
@@ -1026,7 +1030,7 @@ useEffect(() => {
         </div>
       )}
       <InvoiceAuditLogModal open={auditModal.open} onClose={() => setAuditModal({ open: false, invoiceId: null, invoiceNo: null })} invoiceId={auditModal.invoiceId} invoiceNo={auditModal.invoiceNo} companyId={user?.company?._id} />
-      <AuditLogSidebar isOpen={openLogs} onClose={() => setOpenLogs(false)} companyId={user?.company?._id} modules={["INVOICE","INVOICE_ACCOUNTING","PAYMENT"]} title="Invoice Audit Trail" subtitle="Tracking invoice, accounting, and payment activities" />
+      <AuditLogSidebar isOpen={openLogs} onClose={() => setOpenLogs(false)} companyId={user?.company?._id} modules={["INVOICE", "INVOICE_ACCOUNTING", "PAYMENT"]} title="Invoice Audit Trail" subtitle="Tracking invoice, accounting, and payment activities" />
     </div>
   );
 };

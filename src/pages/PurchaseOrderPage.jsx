@@ -16,9 +16,7 @@ import {
   Plus,
   Trash2,
   Building,
-  CreditCard,
   FileText,
-  Users,
   Target,
   Calendar,
   Clock,
@@ -27,6 +25,8 @@ import {
   AlertCircle,
   ChevronRight,
   Briefcase,
+  ArrowDownCircle,
+  ArrowUpCircle,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 
@@ -34,117 +34,67 @@ import { useNavigate, useLocation } from "react-router-dom";
 //  CONSTANTS
 // ─────────────────────────────────────────────────────────────────
 
-const PO_CATEGORIES = [
+// PO Direction: Receivable = we are seller/vendor, Payable = we are buyer
+const PO_DIRECTIONS = [
   {
-    key: "staffing",
-    label: "Staffing",
-    icon: Users,
-    description:
-      "Deploy people at client site. Bill by working day, hour, or month.",
-    color: "teal",
-    billingModels: [
-      {
-        key: "daily",
-        label: "Daily Rate",
-        hint: "Rate per working day × actual days worked",
-      },
-      {
-        key: "monthly",
-        label: "Monthly Rate",
-        hint: "Fixed monthly rate, deduct unpaid leave",
-      },
-      {
-        key: "hourly",
-        label: "Hourly Rate",
-        hint: "Rate per hour × hours logged",
-      },
-    ],
-  },
-  {
-    key: "project",
-    label: "Project",
-    icon: Target,
-    description: "Deliver a defined scope. Bill on milestones or headcount.",
+    key: "receivable",
+    label: "Receivable",
+    icon: ArrowDownCircle,
+    description: "We are providing services/goods. Invoice will be raised on the client.",
     color: "blue",
-    billingModels: [
-      {
-        key: "milestone",
-        label: "Milestone Based",
-        hint: "Invoice raised when milestone is completed",
-      },
-      {
-        key: "headcount",
-        label: "Headcount Based",
-        hint: "People × days × rate, tracked per sprint/period",
-      },
-      {
-        key: "fixed",
-        label: "Fixed Price",
-        hint: "One or more line items, no time tracking needed",
-      },
-    ],
   },
   {
-    key: "retainer",
-    label: "Retainer / AMC",
-    icon: Calendar,
-    description: "Ongoing fixed engagement. Auto-bill on a set schedule.",
+    key: "payable",
+    label: "Payable",
+    icon: ArrowUpCircle,
+    description: "We are receiving services/goods. We will pay the vendor.",
     color: "amber",
-    billingModels: [
-      {
-        key: "fixed",
-        label: "Fixed Periodic",
-        hint: "Same amount billed every month/quarter/half-year",
-      },
-    ],
   },
 ];
 
-const PAYMENT_TERMS = [
-  { value: "advance", label: "Advance" },
-  { value: "immediate", label: "Immediate" },
-  { value: "net-15", label: "Net 15 days" },
-  { value: "net-30", label: "Net 30 days" },
-  { value: "net-45", label: "Net 45 days" },
-  { value: "net-60", label: "Net 60 days" },
-  { value: "net-90", label: "Net 90 days" },
-  { value: "on_milestone", label: "On Milestone" },
-  { value: "on_delivery", label: "On Delivery" },
-  { value: "cod", label: "Cash on Delivery" },
-];
-
-const PAYMENT_SCHEDULES = [
-  { value: "monthly", label: "Monthly" },
-  { value: "quarterly", label: "Quarterly" },
-  { value: "half-yearly", label: "Half-yearly" },
-  { value: "yearly", label: "Yearly" },
-  { value: "on_completion", label: "On Completion" },
-];
-
-const LEAVE_POLICIES = [
-  { value: "deduct_unpaid", label: "Deduct only unpaid leaves" },
-  { value: "include_paid", label: "Include paid leaves (client pays)" },
-  { value: "client_specific", label: "Client specific rules" },
+// Payment Terms (billing model)
+const PAYMENT_TERMS_OPTIONS = [
+  {
+    key: "milestone",
+    label: "Milestone Based",
+    icon: Target,
+    hint: "Invoice raised when each milestone is completed",
+  },
+  {
+    key: "monthly",
+    label: "Monthly",
+    icon: Calendar,
+    hint: "Fixed monthly invoice raised at the start/end of each month",
+  },
+  {
+    key: "hourly",
+    label: "Hourly",
+    icon: Clock,
+    hint: "Rate per hour × total hours logged",
+  },
 ];
 
 const colorMap = {
-  teal: {
-    bg: "bg-teal-50",
-    border: "border-teal-200",
-    text: "text-teal-700",
-    ring: "ring-teal-400",
-  },
   blue: {
     bg: "bg-blue-50",
     border: "border-blue-200",
     text: "text-blue-700",
     ring: "ring-blue-400",
+    dashed: "hover:border-blue-300 hover:text-blue-500",
   },
   amber: {
     bg: "bg-amber-50",
     border: "border-amber-200",
     text: "text-amber-700",
     ring: "ring-amber-400",
+    dashed: "hover:border-amber-300 hover:text-amber-500",
+  },
+  teal: {
+    bg: "bg-teal-50",
+    border: "border-teal-200",
+    text: "text-teal-700",
+    ring: "ring-teal-400",
+    dashed: "hover:border-teal-300 hover:text-teal-500",
   },
 };
 
@@ -172,9 +122,10 @@ export default function PurchaseOrderPage() {
   const location = useLocation();
   const searchParams = new URLSearchParams(location.search);
   const editId = searchParams.get("edit");
-  const selectedCompany = JSON.parse(
-    localStorage.getItem("selectedCompany") || "{}",
-  );
+  // clientId passed from ClientPurchaseOrders page: /purchase-order?clientId=xxx
+  const prefilledClientId = searchParams.get("clientId");
+
+  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
   const companyId =
     localStorage.getItem("selectedCompanyId") ||
     user?.company?._id ||
@@ -197,24 +148,17 @@ export default function PurchaseOrderPage() {
   // Form state
   const [form, setForm] = useState({
     companyId,
+    // NEW: direction + paymentTerms (billing model)
+    direction: "",          // "receivable" | "payable"
+    paymentTerms: "",       // "milestone" | "monthly" | "hourly"
+    // legacy fields kept for backend compatibility
     poCategory: "project",
     billingModel: "fixed",
     poDate: today(),
     deliveryDate: today(),
-    referenceDate: today(),
     poreferencevalue: "",
     currency: "INR",
-    paymentTerms: "net-30",
-    paymentSchedule: "monthly",
-    staffingConfig: {
-      defaultWorkingDaysPerMonth: 22,
-      billingUnit: "day",
-      overtimeRateMultiplier: 1.5,
-      holidayRateMultiplier: 2.0,
-      countPublicHolidaysAsWorking: false,
-      leavePolicy: "deduct_unpaid",
-    },
-    client: {_id: "" , name: "", address: "", stateCode: "", GSTIN: "" },
+    client: { _id: "", name: "", address: "", stateCode: "", GSTIN: "" },
     deliverTo: { name: "", address: "", stateCode: "", GSTIN: "" },
     items: [
       {
@@ -230,7 +174,6 @@ export default function PurchaseOrderPage() {
       },
     ],
     milestones: [],
-    resources: [],
     totalAmount: 0,
     totalTaxableValue: 0,
     totalCGSTAmount: 0,
@@ -243,71 +186,62 @@ export default function PurchaseOrderPage() {
 
   const [sameAsClient, setSameAsClient] = useState(false);
 
-  // ─── Derived ────
-  const selectedCategory =
-    PO_CATEGORIES.find((c) => c.key === form.poCategory) || PO_CATEGORIES[1];
-  const colors = colorMap[selectedCategory.color];
+  // ─── Derived colors based on direction ───
+  const directionColor = form.direction === "payable" ? "amber" : "blue";
+  const colors = colorMap[directionColor];
 
   // ─────────────────────────────────────────────────────────────
   //  DATA LOADING
   // ─────────────────────────────────────────────────────────────
 
-useEffect(() => {
-  if (!companyId) return;
+  useEffect(() => {
+    if (!companyId) return;
+    (async () => {
+      try {
+        const clientsRes = await getClientsPaginatedApi({ companyId, limit: 1000, page: 1 });
+        let clientsArray = [];
+        if (clientsRes?.data?.clients) clientsArray = clientsRes.data.clients;
+        else if (clientsRes?.clients) clientsArray = clientsRes.clients;
+        else if (Array.isArray(clientsRes)) clientsArray = clientsRes;
 
-  (async () => {
-    try {
-      // Use paginated API instead
-      const clientsRes = await getClientsPaginatedApi({
-        companyId,
-        limit: 1000,   // get all clients
-        page: 1,
-      });
-      
-      console.log("Clients paginated response:", clientsRes);
+        const normalized = clientsArray.map((c) => ({
+          _id: c._id,
+          name: c.name || c.clientName || c.contactPerson || "",
+          address: c.address || c.clientAddress || c.billingAddress?.line1 || "",
+          stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
+          GSTIN: c.GSTIN || c.gstNumber || "",
+          taxNumber: c.taxNumber || c.gstNumber || "",
+          clientName: c.clientName || c.name,
+        }));
+        setClients(normalized);
 
-      // Extract clients array (structure: data.data.clients)
-      let clientsArray = [];
-      if (clientsRes?.data?.clients) {
-        clientsArray = clientsRes.data.clients;
-      } else if (clientsRes?.clients) {
-        clientsArray = clientsRes.clients;
-      } else if (Array.isArray(clientsRes)) {
-        clientsArray = clientsRes;
+        // Auto-fill client if navigated from a client's PO page
+        if (prefilledClientId && !editId) {
+          const found = normalized.find((c) => c._id === prefilledClientId);
+          if (found) {
+            setForm((prev) => ({
+              ...prev,
+              client: found,
+              deliverTo: found, // default deliverTo same as client
+            }));
+            setSameAsClient(true);
+          }
+        }
+
+        // Fetch HSN
+        const hsnRes = await getallhsn(companyId);
+        let hsnArray = [];
+        if (hsnRes?.data?.data) hsnArray = hsnRes.data.data;
+        else if (hsnRes?.data) hsnArray = hsnRes.data;
+        else if (Array.isArray(hsnRes)) hsnArray = hsnRes;
+        setHsnList(hsnArray);
+      } catch (e) {
+        console.error("Failed to load clients or HSN:", e);
+        setError("Could not load clients. Please refresh the page.");
       }
+    })();
+  }, [companyId]);
 
-      // Normalize client data (same as before)
-      const normalized = clientsArray.map((c) => ({
-        _id: c._id,
-        name: c.name || c.clientName || c.contactPerson || "",
-        address: c.address || c.clientAddress || (c.billingAddress?.line1) || "",
-        stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
-        GSTIN: c.GSTIN || c.gstNumber || "",
-        taxNumber: c.taxNumber || c.gstNumber || "",
-        clientName: c.clientName || c.name,
-      }));
-
-      setClients(normalized);
-      console.log("Normalized clients:", normalized);
-
-      // Fetch HSN (unchanged)
-      const hsnRes = await getallhsn(companyId);
-      let hsnArray = [];
-      if (hsnRes?.data?.data) {
-        hsnArray = hsnRes.data.data;
-      } else if (hsnRes?.data) {
-        hsnArray = hsnRes.data;
-      } else if (Array.isArray(hsnRes)) {
-        hsnArray = hsnRes;
-      }
-      setHsnList(hsnArray);
-      
-    } catch (e) {
-      console.error("Failed to load clients or HSN:", e);
-      setError("Could not load clients. Please refresh the page.");
-    }
-  })();
-}, [companyId]);
   const filteredClients = clients.filter((c) => {
     if (!clientSearch?.trim()) return true;
     const q = clientSearch.toLowerCase();
@@ -326,30 +260,31 @@ useEffect(() => {
   }, [companyId]);
 
   useEffect(() => {
-  if (editId) {
-    setIsEditing(true);
-    getPurchaseOrderApi(editId)
-      .then((res) => {
-        const d = res.data?.data || res.data;
-        const fmt = (date) => (date ? new Date(date).toISOString().split("T")[0] : "");
-        
-        setForm((prev) => ({
-          ...prev,
-          ...d,
-          client: d.vendor || d.client || prev.client,   // ✅ map vendor → client
-          deliverTo: d.deliverTo || prev.deliverTo,
-          poDate: fmt(d.poDate),
-          deliveryDate: fmt(d.deliveryDate),
-          referenceDate: fmt(d.referenceDate),
-          items: d.items?.map(item => ({ ...item, total: item.totalAmount })) || prev.items,
-        }));
-      })
-      .catch((err) => {
-        console.error("Failed to load PO for editing:", err);
-        setError("Could not load purchase order details.");
-      });
-  }
-}, [editId]);
+    if (editId) {
+      setIsEditing(true);
+      getPurchaseOrderApi(editId)
+        .then((res) => {
+          const d = res.data?.data || res.data;
+          const fmt = (date) => (date ? new Date(date).toISOString().split("T")[0] : "");
+          setForm((prev) => ({
+            ...prev,
+            ...d,
+            // map stored billingModel back to paymentTerms
+            paymentTerms: d.paymentTerms || d.billingModel || prev.paymentTerms,
+            direction: d.direction || prev.direction,
+            client: d.vendor || d.client || prev.client,
+            deliverTo: d.deliverTo || prev.deliverTo,
+            poDate: fmt(d.poDate),
+            deliveryDate: fmt(d.deliveryDate),
+            items: d.items?.map((item) => ({ ...item, total: item.totalAmount })) || prev.items,
+          }));
+        })
+        .catch((err) => {
+          console.error("Failed to load PO for editing:", err);
+          setError("Could not load purchase order details.");
+        });
+    }
+  }, [editId]);
 
   // ─────────────────────────────────────────────────────────────
   //  FORM HELPERS
@@ -370,21 +305,15 @@ useEffect(() => {
     });
   };
 
-  const selectCategory = (categoryKey) => {
-    const cat = PO_CATEGORIES.find((c) => c.key === categoryKey);
-    set("poCategory", categoryKey);
-    set("billingModel", cat?.billingModels[0]?.key || "fixed");
-  };
-
   const selectClient = (client) => {
-  setForm((prev) => ({
-    ...prev,
-    client: client,                    // store the whole client object (includes _id)
-    deliverTo: sameAsClient ? client : prev.deliverTo,
-  }));
-  setClientDropdownOpen(false);
-  setClientSearch("");
-};
+    setForm((prev) => ({
+      ...prev,
+      client,
+      deliverTo: sameAsClient ? client : prev.deliverTo,
+    }));
+    setClientDropdownOpen(false);
+    setClientSearch("");
+  };
 
   // ─── Item calculations ───
 
@@ -400,17 +329,14 @@ useEffect(() => {
 
   const hasMeaningfulLineItem = (item) => {
     if (!item) return false;
-    const description =
-      typeof item.description === "string" ? item.description.trim() : "";
+    const description = typeof item.description === "string" ? item.description.trim() : "";
     const hsnSac = typeof item.hsnSac === "string" ? item.hsnSac.trim() : "";
-
     return (
       description.length > 0 ||
       hsnSac.length > 0 ||
       Number(item.rate || 0) > 0 ||
       Number(item.taxableValue || 0) > 0 ||
-      Number(item.total || item.totalAmount || 0) > 0 ||
-      Number(item.gstAmount || 0) > 0
+      Number(item.total || item.totalAmount || 0) > 0
     );
   };
 
@@ -427,17 +353,7 @@ useEffect(() => {
       ...prev,
       items: [
         ...prev.items,
-        {
-          description: "",
-          hsnSac: "",
-          hsnId: null,
-          quantity: 1,
-          rate: 0,
-          taxableValue: 0,
-          gstRate: 18,
-          gstAmount: 0,
-          total: 0,
-        },
+        { description: "", hsnSac: "", hsnId: null, quantity: 1, rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, total: 0 },
       ],
     }));
   };
@@ -448,19 +364,16 @@ useEffect(() => {
       return { ...prev, items, ...recalcTotals(items) };
     });
   };
+
   const getTotalGstRate = (hsn) => {
-  // If IGST is defined and non-zero, use it; otherwise sum CGST+SGST
-  if (hsn.igst && hsn.igst > 0) return Number(hsn.igst);
-  return (Number(hsn.cgst) || 0) + (Number(hsn.sgst) || 0);
-};
+    if (hsn.igst && hsn.igst > 0) return Number(hsn.igst);
+    return (Number(hsn.cgst) || 0) + (Number(hsn.sgst) || 0);
+  };
+
   const recalcTotals = (items) => {
-    const totalTaxableValue = items.reduce(
-      (s, i) => s + (Number(i.taxableValue) || 0),
-      0,
-    );
+    const totalTaxableValue = items.reduce((s, i) => s + (Number(i.taxableValue) || 0), 0);
     const totalGST = items.reduce((s, i) => s + (Number(i.gstAmount) || 0), 0);
     const totalAmount = items.reduce((s, i) => s + (Number(i.total) || 0), 0);
-    // Simplified: split GST evenly CGST/SGST (intra-state); for IGST set both to 0
     const cgst = Math.round((totalGST / 2) * 100) / 100;
     const sgst = Math.round((totalGST / 2) * 100) / 100;
     return {
@@ -480,14 +393,7 @@ useEffect(() => {
       ...prev,
       milestones: [
         ...prev.milestones,
-        {
-          title: "",
-          description: "",
-          percentage: 0,
-          amount: 0,
-          dueDate: "",
-          status: "pending",
-        },
+        { title: "", description: "", percentage: 0, amount: 0, dueDate: "", status: "pending" },
       ],
     }));
   };
@@ -496,7 +402,6 @@ useEffect(() => {
     setForm((prev) => {
       const milestones = [...prev.milestones];
       milestones[index] = { ...milestones[index], [field]: value };
-      // auto-compute amount from percentage
       if (field === "percentage") {
         milestones[index].amount =
           Math.round(((prev.totalAmount * Number(value)) / 100) * 100) / 100;
@@ -518,121 +423,87 @@ useEffect(() => {
     }));
   };
 
-  // ─── Resource helpers ───
-
-  const addResource = () => {
-    setForm((prev) => ({
-      ...prev,
-      resources: [
-        ...prev.resources,
-        {
-          name: "",
-          role: "",
-          ratePerDay: 0,
-          ratePerHour: 0,
-          ratePerMonth: 0,
-          startDate: "",
-          endDate: "",
-        },
-      ],
-    }));
-  };
-
-  const updateResource = (index, field, value) => {
-    setForm((prev) => {
-      const resources = [...prev.resources];
-      resources[index] = { ...resources[index], [field]: value };
-      return { ...prev, resources };
-    });
-  };
-
-  const removeResource = (index) => {
-    setForm((prev) => ({
-      ...prev,
-      resources: prev.resources.filter((_, i) => i !== index),
-    }));
-  };
-
   // ─────────────────────────────────────────────────────────────
   //  SUBMIT
   // ─────────────────────────────────────────────────────────────
 
-const handleSubmit = async () => {
-  setLoading(true);
-  setError(null);
-  try {
-    const sanitizedItems = Array.isArray(form.items)
-      ? form.items.map(recalcItem).filter(hasMeaningfulLineItem)
-      : [];
+  const handleSubmit = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const sanitizedItems = Array.isArray(form.items)
+        ? form.items.map(recalcItem).filter(hasMeaningfulLineItem)
+        : [];
 
-    // Build payload matching backend expectations
-    const payload = {
-      companyId,
-      poNumber: form.poNumber, // will be auto-generated if not present
-      poDate: form.poDate,
-      deliveryDate: form.deliveryDate,
-      poCategory: form.poCategory,
-      billingModel: form.billingModel,
-      paymentTerms: form.paymentTerms,
-      vendor: form.client,        // ✅ map client → vendor
-      deliverTo: form.deliverTo,
-      items: sanitizedItems.map(item => ({
-        description: item.description,
-        hsnSac: item.hsnSac,
-        hsnId: item.hsnId,
-        quantity: item.quantity,
-        rate: item.rate,
-        taxableValue: item.taxableValue,
-        gstRate: item.gstRate,
-        gstAmount: item.gstAmount,
-        totalAmount: item.total,   // ✅ backend expects totalAmount
-      })),
-      totalTaxableValue: form.totalTaxableValue,
-      totalGSTAmount: (form.totalCGSTAmount || 0) + (form.totalSGSTAmount || 0),
-      totalAmount: form.totalAmount,
-      valueInWords: form.valueInWords,
-      notes: form.notes,
-      ...(form.poreferencevalue && { poreferencevalue: form.poreferencevalue }),
-      ...(form.paymentSchedule && { paymentSchedule: form.paymentSchedule }),
-      ...(form.staffingConfig && { staffingConfig: form.staffingConfig }),
-      ...(form.milestones?.length && { milestones: form.milestones }),
-      ...(form.resources?.length && { resources: form.resources }),
-    };
+      // Map paymentTerms to billingModel for backend compatibility
+      const billingModelMap = {
+        milestone: "milestone",
+        monthly: "fixed",   // monthly invoicing = fixed periodic
+        hourly: "hourly",
+      };
 
-    let res;
-    if (isEditing && editId) {
-      res = await updatePurchaseOrderApi(editId, payload);
-    } else {
-      res = await createPurchaseOrderApi(payload);
+      const payload = {
+        companyId,
+        poNumber: form.poNumber,
+        poDate: form.poDate,
+        deliveryDate: form.deliveryDate,
+        // Store new fields
+        direction: form.direction,
+        paymentTerms: form.paymentTerms,
+        // Legacy fields for backward compatibility
+        poCategory: form.poCategory || "project",
+        billingModel: billingModelMap[form.paymentTerms] || "fixed",
+        vendor: form.client,
+        deliverTo: form.deliverTo,
+        items: sanitizedItems.map((item) => ({
+          description: item.description,
+          hsnSac: item.hsnSac,
+          hsnId: item.hsnId,
+          quantity: item.quantity,
+          rate: item.rate,
+          taxableValue: item.taxableValue,
+          gstRate: item.gstRate,
+          gstAmount: item.gstAmount,
+          totalAmount: item.total,
+        })),
+        totalTaxableValue: form.totalTaxableValue,
+        totalGSTAmount: (form.totalCGSTAmount || 0) + (form.totalSGSTAmount || 0),
+        totalAmount: form.totalAmount,
+        valueInWords: form.valueInWords,
+        notes: form.notes,
+        ...(form.poreferencevalue && { poreferencevalue: form.poreferencevalue }),
+        ...(form.paymentTerms === "monthly" && { paymentSchedule: "monthly" }),
+        ...(form.milestones?.length && { milestones: form.milestones }),
+      };
+
+      let res;
+      if (isEditing && editId) {
+        res = await updatePurchaseOrderApi(editId, payload);
+      } else {
+        res = await createPurchaseOrderApi(payload);
+      }
+
+      const createdId = res.data?.data?._id || res.data?._id;
+      setCreatedPOId(createdId);
+      setSuccess(true);
+    } catch (e) {
+      console.error("PO submission error:", e);
+      setError(e.response?.data?.message || e.message || "Failed to save Purchase Order");
+    } finally {
+      setLoading(false);
     }
-
-    const createdId = res.data?.data?._id || res.data?._id;
-    setCreatedPOId(createdId);
-    setSuccess(true);
-  } catch (e) {
-    console.error("PO submission error:", e);
-    setError(e.response?.data?.message || e.message || "Failed to save Purchase Order");
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   // ─────────────────────────────────────────────────────────────
   //  STEP VALIDATION
   // ─────────────────────────────────────────────────────────────
 
   const canProceed = () => {
-    if (step === 1) return !!form.poCategory && !!form.billingModel;
+    if (step === 1) return !!form.direction && !!form.paymentTerms;
     if (step === 2) return !!form.client?.name;
     if (step === 3) return !!form.poDate && !!form.deliveryDate;
     if (step === 4) {
-      if (form.billingModel === "milestone") return form.milestones.length > 0;
-      if (
-        ["staffing", "headcount"].includes(form.billingModel) ||
-        form.poCategory === "staffing"
-      ) {
-        return form.resources.length > 0;
-      }
+      if (form.paymentTerms === "milestone") return form.milestones.length > 0;
       return form.items.length > 0 && form.items[0].description.trim() !== "";
     }
     return true;
@@ -653,34 +524,48 @@ const handleSubmit = async () => {
             Purchase Order {isEditing ? "Updated" : "Created"}
           </h2>
           <p className="text-slate-500 text-sm mb-6">
-            Your {selectedCategory.label} PO has been saved successfully.
+            Your {form.direction === "receivable" ? "Receivable" : "Payable"} PO (
+            {PAYMENT_TERMS_OPTIONS.find((t) => t.key === form.paymentTerms)?.label}) has been saved successfully.
           </p>
           <div className="flex gap-3 justify-center flex-wrap">
-  <button
-    onClick={() => navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)}
-    className="px-5 py-2 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition"
-  >
-    View All POs
-  </button>
-  {createdPOId && (
-    <button
-      onClick={() => navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)}
-      className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-    >
-      View This PO
-    </button>
-  )}
-  <button
-    onClick={() => {
-      setSuccess(false);
-      setStep(1);
-      // reset form as before...
-    }}
-    className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-  >
-    New PO
-  </button>
-</div>
+            <button
+              onClick={() =>
+                navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)
+              }
+              className="px-5 py-2 text-sm font-medium bg-slate-800 text-white rounded-lg hover:bg-slate-700 transition"
+            >
+              View All POs
+            </button>
+            {createdPOId && (
+              <button
+                onClick={() =>
+                  navigate(`/purchaseorder-data/client/${form.client._id}?openPOId=${createdPOId}`)
+                }
+                className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
+              >
+                View This PO
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSuccess(false);
+                setStep(1);
+                setForm((prev) => ({
+                  ...prev,
+                  direction: "",
+                  paymentTerms: "",
+                  items: [{ description: "", hsnSac: "", hsnId: null, quantity: 1, rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, total: 0 }],
+                  milestones: [],
+                  totalAmount: 0,
+                  totalTaxableValue: 0,
+                  notes: "",
+                }));
+              }}
+              className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition"
+            >
+              New PO
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -716,12 +601,7 @@ const handleSubmit = async () => {
                   <span className="hidden sm:inline">{s.label}</span>
                 </button>
                 {i < STEPS.length - 1 && (
-                  <ChevronRight
-                    size={12}
-                    className={
-                      step > s.id ? "text-green-400" : "text-slate-300"
-                    }
-                  />
+                  <ChevronRight size={12} className={step > s.id ? "text-green-400" : "text-slate-300"} />
                 )}
               </React.Fragment>
             ))}
@@ -744,160 +624,75 @@ const handleSubmit = async () => {
               What kind of Purchase Order is this?
             </h2>
             <p className="text-sm text-slate-500 mb-6">
-              This determines how invoices are calculated and raised.
+              Select the PO direction and payment terms to get started.
             </p>
 
-            <div className="grid sm:grid-cols-3 gap-4 mb-8">
-              {PO_CATEGORIES.map((cat) => {
-                const c = colorMap[cat.color];
-                const isSelected = form.poCategory === cat.key;
-                return (
-                  <button
-                    key={cat.key}
-                    onClick={() => selectCategory(cat.key)}
-                    className={`text-left p-5 rounded-xl border-2 transition-all
-                      ${isSelected ? `${c.bg} ${c.border} ring-2 ${c.ring} ring-offset-1` : "bg-white border-slate-200 hover:border-slate-300"}`}
-                  >
-                    <div
-                      className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${isSelected ? c.bg : "bg-slate-100"}`}
-                    >
-                      <cat.icon
-                        size={18}
-                        className={isSelected ? c.text : "text-slate-400"}
-                      />
-                    </div>
-                    <p
-                      className={`text-sm font-semibold mb-1 ${isSelected ? c.text : "text-slate-700"}`}
-                    >
-                      {cat.label}
-                    </p>
-                    <p className="text-xs text-slate-500 leading-relaxed">
-                      {cat.description}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Billing model selector */}
-            <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                How should invoices be calculated?
+            {/* Direction Selection */}
+            <div className="mb-6">
+              <p className="text-sm font-semibold text-slate-700 mb-3">
+                1. Select PO Direction
               </p>
-              <div className="grid sm:grid-cols-3 gap-3">
-                {selectedCategory.billingModels.map((bm) => {
-                  const isSelected = form.billingModel === bm.key;
-                  const c = colorMap[selectedCategory.color];
+              <div className="grid sm:grid-cols-2 gap-4">
+                {PO_DIRECTIONS.map((dir) => {
+                  const c = colorMap[dir.color];
+                  const isSelected = form.direction === dir.key;
                   return (
                     <button
-                      key={bm.key}
-                      onClick={() => set("billingModel", bm.key)}
-                      className={`text-left p-4 rounded-lg border transition-all
-                        ${isSelected ? `${c.bg} ${c.border}` : "border-slate-200 hover:border-slate-300"}`}
+                      key={dir.key}
+                      onClick={() => set("direction", dir.key)}
+                      className={`text-left p-5 rounded-xl border-2 transition-all
+                        ${isSelected ? `${c.bg} ${c.border} ring-2 ${c.ring} ring-offset-1` : "bg-white border-slate-200 hover:border-slate-300"}`}
                     >
-                      <p
-                        className={`text-sm font-medium mb-1 ${isSelected ? c.text : "text-slate-700"}`}
+                      <div
+                        className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${isSelected ? c.bg : "bg-slate-100"}`}
                       >
-                        {bm.label}
+                        <dir.icon size={20} className={isSelected ? c.text : "text-slate-400"} />
+                      </div>
+                      <p className={`text-sm font-semibold mb-1 ${isSelected ? c.text : "text-slate-700"}`}>
+                        {dir.label}
                       </p>
-                      <p className="text-xs text-slate-400 leading-relaxed">
-                        {bm.hint}
-                      </p>
+                      <p className="text-xs text-slate-500 leading-relaxed">{dir.description}</p>
                     </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Staffing-specific config */}
-            {form.poCategory === "staffing" && (
-              <div className="mt-4 bg-teal-50 border border-teal-200 rounded-xl p-5">
-                <p className="text-sm font-medium text-teal-800 mb-4 flex items-center gap-2">
-                  <Info size={14} /> Staffing Configuration
+            {/* Payment Terms Selection — only visible after direction is chosen */}
+            {form.direction && (
+              <div>
+                <p className="text-sm font-semibold text-slate-700 mb-3">
+                  2. Select Payment Terms
                 </p>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Default Working Days / Month
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="31"
-                      value={form.staffingConfig.defaultWorkingDaysPerMonth}
-                      onChange={(e) =>
-                        set(
-                          "staffingConfig.defaultWorkingDaysPerMonth",
-                          Number(e.target.value),
-                        )
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 focus:border-teal-400 outline-none"
-                    />
-                    <p className="text-xs text-slate-400 mt-1">
-                      Standard agreement (e.g. 22 or 26)
-                    </p>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Leave Policy
-                    </label>
-                    <select
-                      value={form.staffingConfig.leavePolicy}
-                      onChange={(e) =>
-                        set("staffingConfig.leavePolicy", e.target.value)
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 focus:border-teal-400 outline-none"
-                    >
-                      {LEAVE_POLICIES.map((p) => (
-                        <option key={p.value} value={p.value}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Holiday Work Rate
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.5"
-                        value={form.staffingConfig.holidayRateMultiplier}
-                        onChange={(e) =>
-                          set(
-                            "staffingConfig.holidayRateMultiplier",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="w-24 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                      />
-                      <span className="text-xs text-slate-400">× day rate</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Overtime Rate
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.5"
-                        value={form.staffingConfig.overtimeRateMultiplier}
-                        onChange={(e) =>
-                          set(
-                            "staffingConfig.overtimeRateMultiplier",
-                            Number(e.target.value),
-                          )
-                        }
-                        className="w-24 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                      />
-                      <span className="text-xs text-slate-400">× day rate</span>
-                    </div>
-                  </div>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  {PAYMENT_TERMS_OPTIONS.map((pt) => {
+                    const c = colors;
+                    const isSelected = form.paymentTerms === pt.key;
+                    return (
+                      <button
+                        key={pt.key}
+                        onClick={() => set("paymentTerms", pt.key)}
+                        className={`text-left p-5 rounded-xl border-2 transition-all
+                          ${isSelected ? `${c.bg} ${c.border} ring-2 ${c.ring} ring-offset-1` : "bg-white border-slate-200 hover:border-slate-300"}`}
+                      >
+                        <div
+                          className={`w-9 h-9 rounded-lg flex items-center justify-center mb-3 ${isSelected ? c.bg : "bg-slate-100"}`}
+                        >
+                          <pt.icon size={18} className={isSelected ? c.text : "text-slate-400"} />
+                        </div>
+                        <p className={`text-sm font-semibold mb-1 ${isSelected ? c.text : "text-slate-700"}`}>
+                          {pt.label}
+                        </p>
+                        <p className="text-xs text-slate-500 leading-relaxed">{pt.hint}</p>
+                      </button>
+                    );
+                  })}
                 </div>
+                {!form.paymentTerms && (
+                  <p className="text-xs text-slate-400 mt-3 flex items-center gap-1">
+                    <Info size={12} /> You must select a payment term to proceed.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -906,27 +701,23 @@ const handleSubmit = async () => {
         {/* ── STEP 2: Client ── */}
         {step === 2 && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              Client Details
-            </h2>
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Client Details</h2>
             <p className="text-sm text-slate-500 mb-6">
-              Who is this PO raised for?
+              {prefilledClientId
+                ? "Client details have been pre-filled. You can update them if needed."
+                : "Who is this PO raised for?"}
             </p>
 
             <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                Bill To (Client)
-              </p>
-              {/* Client search */}
+              <p className="text-sm font-medium text-slate-700 mb-3">Bill To (Client)</p>
+
+              {/* Client search — only shown if not prefilled or user wants to change */}
               <div className="relative mb-4">
                 <input
                   type="text"
                   placeholder="Search existing clients..."
                   value={clientSearch}
-                  onChange={(e) => {
-                    setClientSearch(e.target.value);
-                    setClientDropdownOpen(true);
-                  }}
+                  onChange={(e) => { setClientSearch(e.target.value); setClientDropdownOpen(true); }}
                   onFocus={() => setClientDropdownOpen(true)}
                   className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400 outline-none"
                 />
@@ -941,54 +732,37 @@ const handleSubmit = async () => {
                         <Building size={13} className="text-slate-400" />
                         <span>{c.name}</span>
                         {c.taxNumber && (
-                          <span className="text-xs text-slate-400 ml-auto">
-                            {c.taxNumber}
-                          </span>
+                          <span className="text-xs text-slate-400 ml-auto">{c.taxNumber}</span>
                         )}
                       </button>
                     ))}
-                    {clients.filter((c) =>
-                      c.name
-                        ?.toLowerCase()
-                        .includes(clientSearch.toLowerCase()),
-                    ).length === 0 && (
-                      <p className="px-4 py-3 text-sm text-slate-400">
-                        No clients found. Fill in manually below.
-                      </p>
+                    {filteredClients.length === 0 && (
+                      <p className="px-4 py-3 text-sm text-slate-400">No clients found. Fill in manually below.</p>
                     )}
                   </div>
                 )}
               </div>
 
+              {/* Auto-fill notice */}
+              {prefilledClientId && form.client?.name && (
+                <div className={`flex items-center gap-2 ${colors.bg} ${colors.border} border rounded-lg px-3 py-2 mb-4 text-xs ${colors.text}`}>
+                  <Check size={12} />
+                  Client auto-filled from context. Select a different client above if needed.
+                </div>
+              )}
+
               <div className="grid sm:grid-cols-2 gap-4">
                 {[
-                  {
-                    field: "client.name",
-                    label: "Client Name *",
-                    required: true,
-                  },
+                  { field: "client.name", label: "Client Name *", required: true },
                   { field: "client.GSTIN", label: "GSTIN", required: false },
-                  {
-                    field: "client.address",
-                    label: "Billing Address",
-                    required: false,
-                    span: true,
-                  },
-                  {
-                    field: "client.stateCode",
-                    label: "State Code",
-                    required: false,
-                  },
+                  { field: "client.address", label: "Billing Address", required: false, span: true },
+                  { field: "client.stateCode", label: "State Code", required: false },
                 ].map(({ field, label, required, span }) => (
                   <div key={field} className={span ? "sm:col-span-2" : ""}>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      {label}
-                    </label>
+                    <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
                     <input
                       type="text"
-                      value={
-                        field.split(".").reduce((o, k) => o?.[k], form) || ""
-                      }
+                      value={field.split(".").reduce((o, k) => o?.[k], form) || ""}
                       onChange={(e) => set(field, e.target.value)}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 focus:border-blue-400 outline-none"
                     />
@@ -1000,17 +774,14 @@ const handleSubmit = async () => {
             {/* Deliver To */}
             <div className="bg-white border border-slate-200 rounded-xl p-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-slate-700">
-                  Deliver To / Ship To
-                </p>
+                <p className="text-sm font-medium text-slate-700">Deliver To / Ship To</p>
                 <label className="flex items-center gap-2 text-xs text-slate-500 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={sameAsClient}
                     onChange={(e) => {
                       setSameAsClient(e.target.checked);
-                      if (e.target.checked)
-                        set("deliverTo", { ...form.client });
+                      if (e.target.checked) set("deliverTo", { ...form.client });
                     }}
                     className="rounded border-slate-300"
                   />
@@ -1022,22 +793,14 @@ const handleSubmit = async () => {
                   {[
                     { field: "deliverTo.name", label: "Name *" },
                     { field: "deliverTo.GSTIN", label: "GSTIN" },
-                    {
-                      field: "deliverTo.address",
-                      label: "Address",
-                      span: true,
-                    },
+                    { field: "deliverTo.address", label: "Address", span: true },
                     { field: "deliverTo.stateCode", label: "State Code" },
                   ].map(({ field, label, span }) => (
                     <div key={field} className={span ? "sm:col-span-2" : ""}>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        {label}
-                      </label>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
                       <input
                         type="text"
-                        value={
-                          field.split(".").reduce((o, k) => o?.[k], form) || ""
-                        }
+                        value={field.split(".").reduce((o, k) => o?.[k], form) || ""}
                         onChange={(e) => set(field, e.target.value)}
                         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                       />
@@ -1057,19 +820,13 @@ const handleSubmit = async () => {
         {/* ── STEP 3: PO Details ── */}
         {step === 3 && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              PO Details
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Dates, payment terms, and other administrative details.
-            </p>
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">PO Details</h2>
+            <p className="text-sm text-slate-500 mb-6">Dates, reference, and internal notes.</p>
 
             <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
               <div className="grid sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    PO Date *
-                  </label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">PO Date *</label>
                   <input
                     type="date"
                     value={form.poDate}
@@ -1079,10 +836,7 @@ const handleSubmit = async () => {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">
-                    {form.poCategory === "staffing"
-                      ? "Contract End Date"
-                      : "Delivery Date"}{" "}
-                    *
+                    {form.paymentTerms === "milestone" ? "Project End Date" : "Contract End Date"} *
                   </label>
                   <input
                     type="date"
@@ -1092,9 +846,7 @@ const handleSubmit = async () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Reference #
-                  </label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Reference #</label>
                   <input
                     type="text"
                     value={form.poreferencevalue}
@@ -1106,53 +858,39 @@ const handleSubmit = async () => {
               </div>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-              <p className="text-sm font-medium text-slate-700 mb-3">
-                Payment Settings
-              </p>
-              <div className="grid sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">
-                    Payment Terms
-                  </label>
-                  <select
-                    value={form.paymentTerms}
-                    onChange={(e) => set("paymentTerms", e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                  >
-                    {PAYMENT_TERMS.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {(form.poCategory === "retainer" ||
-                  form.billingModel === "milestone") && (
-                  <div>
-                    <label className="block text-xs font-medium text-slate-600 mb-1">
-                      Invoice Schedule
-                    </label>
-                    <select
-                      value={form.paymentSchedule}
-                      onChange={(e) => set("paymentSchedule", e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                    >
-                      {PAYMENT_SCHEDULES.map((s) => (
-                        <option key={s.value} value={s.value}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+            {/* Summary badge showing selected type */}
+            <div className={`${colors.bg} ${colors.border} border rounded-xl p-4 mb-4 flex items-center gap-3`}>
+              <div>
+                <p className={`text-xs font-semibold ${colors.text} mb-0.5`}>Selected PO Type</p>
+                <p className="text-sm text-slate-700">
+                  <span className="font-medium">
+                    {PO_DIRECTIONS.find((d) => d.key === form.direction)?.label}
+                  </span>{" "}
+                  ·{" "}
+                  <span className="font-medium">
+                    {PAYMENT_TERMS_OPTIONS.find((t) => t.key === form.paymentTerms)?.label}
+                  </span>
+                </p>
+                {form.paymentTerms === "monthly" && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Invoices will be generated automatically every month.
+                  </p>
+                )}
+                {form.paymentTerms === "hourly" && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Line items use Rate/Hour × Total Hours to calculate amounts.
+                  </p>
+                )}
+                {form.paymentTerms === "milestone" && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Invoice is raised when you mark each milestone as complete.
+                  </p>
                 )}
               </div>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl p-5">
-              <label className="block text-xs font-medium text-slate-600 mb-1">
-                Internal Notes
-              </label>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Internal Notes</label>
               <textarea
                 value={form.notes}
                 onChange={(e) => set("notes", e.target.value)}
@@ -1164,25 +902,20 @@ const handleSubmit = async () => {
           </div>
         )}
 
-        {/* ── STEP 4: Line Items / Milestones / Resources ── */}
+        {/* ── STEP 4: Line Items / Milestones ── */}
         {step === 4 && (
           <div>
-            {/* MILESTONE-based */}
-            {form.billingModel === "milestone" && (
+            {/* ─── MILESTONE ─── */}
+            {form.paymentTerms === "milestone" && (
               <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Project Milestones
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-800 mb-1">Project Milestones</h2>
                 <p className="text-sm text-slate-500 mb-4">
-                  Define milestones. An invoice will be raised when you mark
-                  each milestone as complete.
+                  Define milestones. An invoice will be raised when you mark each milestone as complete.
                 </p>
 
-                {/* First set the total PO value */}
+                {/* Total Contract Value */}
                 <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
-                  <p className="text-sm font-medium text-slate-700 mb-3">
-                    Total Contract Value
-                  </p>
+                  <p className="text-sm font-medium text-slate-700 mb-3">Total Contract Value</p>
                   <div className="grid sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-600 mb-1">
@@ -1190,7 +923,6 @@ const handleSubmit = async () => {
                       </label>
                       <input
                         type="number"
-                        // min=""
                         value={form.totalTaxableValue}
                         onChange={(e) => {
                           const v = Number(e.target.value);
@@ -1201,18 +933,14 @@ const handleSubmit = async () => {
                             totalCGSTAmount: Math.round((gst / 2) * 100) / 100,
                             totalSGSTAmount: Math.round((gst / 2) * 100) / 100,
                             totalAmount: Math.round((v + gst) * 100) / 100,
-                            valueInWords: numberToWords(
-                              Math.round((v + gst) * 100) / 100,
-                            ),
+                            valueInWords: numberToWords(Math.round((v + gst) * 100) / 100),
                           }));
                         }}
                         className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 mb-1">
-                        GST (18%)
-                      </label>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">GST (18%)</label>
                       <input
                         type="text"
                         readOnly
@@ -1234,30 +962,27 @@ const handleSubmit = async () => {
                   </div>
                 </div>
 
-                {/* Milestones */}
+                {/* Milestone cards */}
                 <div className="space-y-3">
                   {form.milestones.map((m, i) => (
-                    <div
-                      key={i}
-                      className="bg-white border border-slate-200 rounded-xl p-4"
-                    >
+                    <div key={i} className="bg-white border border-slate-200 rounded-xl p-4">
                       <div className="flex items-start gap-3">
                         <span className="mt-1 w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-semibold flex-shrink-0">
                           {i + 1}
                         </span>
                         <div className="flex-1 grid sm:grid-cols-4 gap-3">
                           <div className="sm:col-span-2">
+                            <label className="block text-xs text-slate-500 mb-1">Milestone Title *</label>
                             <input
                               type="text"
                               placeholder="Milestone title"
                               value={m.title}
-                              onChange={(e) =>
-                                updateMilestone(i, "title", e.target.value)
-                              }
+                              onChange={(e) => updateMilestone(i, "title", e.target.value)}
                               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                             />
                           </div>
                           <div>
+                            <label className="block text-xs text-slate-500 mb-1">% of Total</label>
                             <div className="flex items-center gap-1">
                               <input
                                 type="number"
@@ -1265,60 +990,49 @@ const handleSubmit = async () => {
                                 min="0"
                                 max="100"
                                 value={m.percentage}
-                                onChange={(e) =>
-                                  updateMilestone(
-                                    i,
-                                    "percentage",
-                                    e.target.value,
-                                  )
-                                }
+                                onChange={(e) => updateMilestone(i, "percentage", e.target.value)}
                                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                               />
                               <span className="text-slate-400 text-sm">%</span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-end gap-2">
                             <div className="flex-1">
+                              <label className="block text-xs text-slate-500 mb-1">Amount (₹)</label>
                               <input
                                 type="number"
                                 placeholder="Amount ₹"
                                 min="0"
                                 value={m.amount}
-                                onChange={(e) =>
-                                  updateMilestone(i, "amount", e.target.value)
-                                }
+                                onChange={(e) => updateMilestone(i, "amount", e.target.value)}
                                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                               />
                             </div>
                             <button
                               onClick={() => removeMilestone(i)}
-                              className="text-slate-400 hover:text-red-500 transition"
+                              className="text-slate-400 hover:text-red-500 transition pb-2"
                             >
                               <Trash2 size={15} />
                             </button>
                           </div>
                           <div className="sm:col-span-2">
+                            <label className="block text-xs text-slate-500 mb-1">
+                              Description (optional)
+                            </label>
                             <input
                               type="text"
-                              placeholder="Description (optional)"
+                              placeholder="Description"
                               value={m.description}
-                              onChange={(e) =>
-                                updateMilestone(
-                                  i,
-                                  "description",
-                                  e.target.value,
-                                )
-                              }
+                              onChange={(e) => updateMilestone(i, "description", e.target.value)}
                               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                             />
                           </div>
                           <div>
+                            <label className="block text-xs text-slate-500 mb-1">Due Date</label>
                             <input
                               type="date"
                               value={m.dueDate}
-                              onChange={(e) =>
-                                updateMilestone(i, "dueDate", e.target.value)
-                              }
+                              onChange={(e) => updateMilestone(i, "dueDate", e.target.value)}
                               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
                             />
                           </div>
@@ -1326,26 +1040,21 @@ const handleSubmit = async () => {
                       </div>
                     </div>
                   ))}
+
                   <button
                     onClick={addMilestone}
-                    className="w-full py-3 border-2 border-dashed border-slate-200 hover:border-blue-300 rounded-xl text-sm text-slate-400 hover:text-blue-500 transition flex items-center justify-center gap-2"
+                    className={`w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-sm text-slate-400 transition flex items-center justify-center gap-2 ${colors.dashed}`}
                   >
                     <Plus size={15} /> Add Milestone
                   </button>
+
                   {form.milestones.length > 0 && (
                     <div className="bg-blue-50 rounded-xl px-4 py-3 flex justify-between text-sm">
-                      <span className="text-blue-600">
-                        Total milestone allocation:
-                      </span>
+                      <span className="text-blue-600">Total milestone allocation:</span>
                       <span className="font-medium text-blue-700">
-                        {form.milestones
-                          .reduce((s, m) => s + Number(m.percentage || 0), 0)
-                          .toFixed(1)}
-                        % (₹{" "}
-                        {form.milestones
-                          .reduce((s, m) => s + Number(m.amount || 0), 0)
-                          .toLocaleString()}
-                        )
+                        {form.milestones.reduce((s, m) => s + Number(m.percentage || 0), 0).toFixed(1)}%
+                        {" "}(₹{" "}
+                        {form.milestones.reduce((s, m) => s + Number(m.amount || 0), 0).toLocaleString()})
                       </span>
                     </div>
                   )}
@@ -1353,372 +1062,56 @@ const handleSubmit = async () => {
               </>
             )}
 
-            {/* STAFFING / HEADCOUNT — resource roster */}
-            {(form.poCategory === "staffing" ||
-              form.billingModel === "headcount") && (
+            {/* ─── MONTHLY Line Items ─── */}
+            {form.paymentTerms === "monthly" && (
               <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Resources / Headcount
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-800 mb-1">Monthly Line Items</h2>
                 <p className="text-sm text-slate-500 mb-4">
-                  Add the people who will be deployed. Rates here are used when
-                  attendance is submitted.
+                  Define the services covered under this PO. An invoice will be automatically generated each month.
                 </p>
 
-                <div className="space-y-3">
-                  {form.resources.map((r, i) => (
-                    <div
-                      key={i}
-                      className="bg-white border border-slate-200 rounded-xl p-4"
-                    >
-                      <div className="grid sm:grid-cols-3 gap-3">
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Full Name *
-                          </label>
-                          <input
-                            type="text"
-                            value={r.name}
-                            onChange={(e) =>
-                              updateResource(i, "name", e.target.value)
-                            }
-                            placeholder="Resource name"
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Role / Designation
-                          </label>
-                          <input
-                            type="text"
-                            value={r.role}
-                            onChange={(e) =>
-                              updateResource(i, "role", e.target.value)
-                            }
-                            placeholder="e.g. Senior Developer"
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          {form.billingModel === "daily" ||
-                          form.staffingConfig?.billingUnit === "day" ? (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Day (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerDay}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerDay",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                              />
-                            </div>
-                          ) : form.billingModel === "hourly" ||
-                            form.staffingConfig?.billingUnit === "hour" ? (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Hour (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerHour}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerHour",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                              />
-                            </div>
-                          ) : (
-                            <div className="flex-1">
-                              <label className="block text-xs text-slate-500 mb-1">
-                                Rate / Month (₹)
-                              </label>
-                              <input
-                                type="number"
-                                min="0"
-                                value={r.ratePerMonth}
-                                onChange={(e) =>
-                                  updateResource(
-                                    i,
-                                    "ratePerMonth",
-                                    Number(e.target.value),
-                                  )
-                                }
-                                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                              />
-                            </div>
-                          )}
-                          <button
-                            onClick={() => removeResource(i)}
-                            className="text-slate-400 hover:text-red-500 transition pb-2"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            Start Date
-                          </label>
-                          <input
-                            type="date"
-                            value={r.startDate || ""}
-                            onChange={(e) =>
-                              updateResource(i, "startDate", e.target.value)
-                            }
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-slate-500 mb-1">
-                            End Date
-                          </label>
-                          <input
-                            type="date"
-                            value={r.endDate || ""}
-                            onChange={(e) =>
-                              updateResource(i, "endDate", e.target.value)
-                            }
-                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-400/30 outline-none"
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  <button
-                    onClick={addResource}
-                    className="w-full py-3 border-2 border-dashed border-slate-200 hover:border-teal-300 rounded-xl text-sm text-slate-400 hover:text-teal-500 transition flex items-center justify-center gap-2"
-                  >
-                    <Plus size={15} /> Add Resource
-                  </button>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2 text-xs text-amber-700">
+                  <Info size={14} className="mt-0.5 flex-shrink-0" />
+                  Monthly invoices will be raised based on these line items. The same items and amounts will recur each billing cycle.
                 </div>
 
-                {/* Also show total PO value for staffing */}
-                <div className="mt-4 bg-white border border-slate-200 rounded-xl p-5">
-                  <p className="text-sm font-medium text-slate-700 mb-3">
-                    PO Ceiling Value (optional but recommended)
-                  </p>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        Total PO Value (₹ incl. GST)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={form.totalAmount}
-                        onChange={(e) => {
-                          const v = Number(e.target.value);
-                          setForm((prev) => ({
-                            ...prev,
-                            totalAmount: v,
-                            totalTaxableValue:
-                              Math.round((v / 1.18) * 100) / 100,
-                            valueInWords: numberToWords(v),
-                          }));
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                      />
-                      <p className="text-xs text-slate-400 mt-1">
-                        Sets the maximum invoiceable limit for this PO
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                <LineItemsTable
+                  items={form.items}
+                  hsnList={hsnList}
+                  updateItem={updateItem}
+                  addItem={addItem}
+                  removeItem={removeItem}
+                  getTotalGstRate={getTotalGstRate}
+                  colors={colors}
+                  qtyLabel="Quantity"
+                  rateLabel="Rate (₹)"
+                />
+
+                <TotalsBar form={form} />
               </>
             )}
 
-            {/* FIXED / RETAINER — standard line items */}
-            {(form.billingModel === "fixed" ||
-              (form.poCategory !== "staffing" &&
-                form.billingModel !== "milestone" &&
-                form.billingModel !== "headcount")) && (
+            {/* ─── HOURLY Line Items ─── */}
+            {form.paymentTerms === "hourly" && (
               <>
-                <h2 className="text-lg font-semibold text-slate-800 mb-1">
-                  Line Items
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-800 mb-1">Hourly Line Items</h2>
                 <p className="text-sm text-slate-500 mb-4">
-                  Services or deliverables covered under this PO.
+                  Enter the rate per hour and total hours for each service. The total amount is calculated automatically.
                 </p>
 
-                <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-                  {/* Header */}
-                  <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs font-medium text-slate-500">
-                    <div className="col-span-4">Description</div>
-                    <div className="col-span-1">HSN/SAC</div>
-                    <div className="col-span-1">Qty</div>
-                    <div className="col-span-2">Rate (₹)</div>
-                    <div className="col-span-1">GST %</div>
-                    <div className="col-span-2">Total (₹)</div>
-                    <div className="col-span-1"></div>
-                  </div>
+                <LineItemsTable
+                  items={form.items}
+                  hsnList={hsnList}
+                  updateItem={updateItem}
+                  addItem={addItem}
+                  removeItem={removeItem}
+                  getTotalGstRate={getTotalGstRate}
+                  colors={colors}
+                  qtyLabel="Total Hours"
+                  rateLabel="Rate/Hour (₹)"
+                />
 
-                  {form.items.map((item, i) => (
-                    <div
-                      key={i}
-                      className="grid sm:grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 items-center"
-                    >
-                      <div className="sm:col-span-4">
-                        <input
-                          type="text"
-                          placeholder="Service description"
-                          value={item.description}
-                          onChange={(e) =>
-                            updateItem(i, "description", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-1 relative z-50">
-  <select
-    value={item.hsnId || ""}
-    onChange={(e) => {
-      const selectedId = e.target.value;
-      if (!selectedId) {
-        // User cleared the selection
-        updateItem(i, "hsnId", null);
-        updateItem(i, "hsnSac", "");
-        updateItem(i, "gstRate", 18);
-        return;
-      }
-      const selectedHsn = hsnList.find((h) => h._id === selectedId);
-      if (selectedHsn) {
-        updateItem(i, "hsnId", selectedId);
-        updateItem(i, "hsnSac", selectedHsn.hsnCode);
-        // Auto-fill description only if it's currently empty
-        if (!item.description.trim()) {
-          updateItem(i, "description", selectedHsn.serviceType);
-        }
-        const totalGst = getTotalGstRate(selectedHsn);
-        updateItem(i, "gstRate", totalGst);
-      }
-    }}
-    className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-  >
-    <option value="">Select HSN</option>
-    {hsnList.map((hsn) => (
-      <option key={hsn._id} value={hsn._id}>
-        {hsn.hsnCode} – {hsn.serviceType}
-      </option>
-    ))}
-  </select>
-</div>
-                      <div className="sm:col-span-1">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.quantity}
-                          onChange={(e) =>
-                            updateItem(i, "quantity", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.rate}
-                          onChange={(e) =>
-                            updateItem(i, "rate", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-1">
-                        <input
-                          type="number"
-                          min="0"
-                          max="28"
-                          value={item.gstRate}
-                          onChange={(e) =>
-                            updateItem(i, "gstRate", e.target.value)
-                          }
-                          className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <span className="text-sm font-medium text-slate-700">
-                          ₹{" "}
-                          {item.total?.toLocaleString("en-IN", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </span>
-                      </div>
-                      <div className="sm:col-span-1 flex justify-end">
-                        {form.items.length > 1 && (
-                          <button
-                            onClick={() => removeItem(i)}
-                            className="text-slate-300 hover:text-red-500 transition"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  <div className="px-4 py-3 border-b border-slate-100">
-                    <button
-                      onClick={addItem}
-                      className="flex items-center gap-1.5 text-sm text-blue-500 hover:text-blue-700 transition"
-                    >
-                      <Plus size={14} /> Add Line Item
-                    </button>
-                  </div>
-
-                  {/* Totals */}
-                  <div className="px-4 py-4 bg-slate-50 space-y-1.5 text-sm">
-                    <div className="flex justify-between text-slate-600">
-                      <span>Subtotal (taxable)</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalTaxableValue?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>CGST</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalCGSTAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-slate-600">
-                      <span>SGST</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalSGSTAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                    <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200">
-                      <span>Total</span>
-                      <span>
-                        ₹{" "}
-                        {form.totalAmount?.toLocaleString("en-IN", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
+                <TotalsBar form={form} />
               </>
             )}
           </div>
@@ -1727,67 +1120,39 @@ const handleSubmit = async () => {
         {/* ── STEP 5: Review ── */}
         {step === 5 && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-800 mb-1">
-              Review & Submit
-            </h2>
-            <p className="text-sm text-slate-500 mb-6">
-              Check everything before creating the PO.
-            </p>
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Review & Submit</h2>
+            <p className="text-sm text-slate-500 mb-6">Check everything before creating the PO.</p>
 
             <div className="space-y-4">
-              {/* Summary card */}
               <div className="bg-white border border-slate-200 rounded-xl p-5">
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div>
-                    <p className="text-xs text-slate-400 mb-1">PO Type</p>
+                    <p className="text-xs text-slate-400 mb-1">PO Direction</p>
                     <p className="text-sm font-medium text-slate-700">
-                      {selectedCategory.label} —{" "}
-                      {
-                        PO_CATEGORIES.flatMap((c) => c.billingModels).find(
-                          (b) => b.key === form.billingModel,
-                        )?.label
-                      }
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">Client</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {form.client.name || "—"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">PO Date</p>
-                    <p className="text-sm font-medium text-slate-700">
-                      {form.poDate}
+                      {PO_DIRECTIONS.find((d) => d.key === form.direction)?.label || "—"}
                     </p>
                   </div>
                   <div>
                     <p className="text-xs text-slate-400 mb-1">Payment Terms</p>
                     <p className="text-sm font-medium text-slate-700">
-                      {PAYMENT_TERMS.find((t) => t.value === form.paymentTerms)
-                        ?.label || form.paymentTerms}
+                      {PAYMENT_TERMS_OPTIONS.find((t) => t.key === form.paymentTerms)?.label || "—"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-xs text-slate-400 mb-1">
-                      Total PO Value
-                    </p>
+                    <p className="text-xs text-slate-400 mb-1">Client</p>
+                    <p className="text-sm font-medium text-slate-700">{form.client.name || "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 mb-1">PO Date</p>
+                    <p className="text-sm font-medium text-slate-700">{form.poDate}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-400 mb-1">Total PO Value</p>
                     <p className="text-xl font-bold text-slate-800">
-                      ₹{" "}
-                      {form.totalAmount?.toLocaleString("en-IN", {
-                        minimumFractionDigits: 2,
-                      })}
+                      ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
                     </p>
                   </div>
-                  {form.poCategory === "staffing" && (
-                    <div>
-                      <p className="text-xs text-slate-400 mb-1">Resources</p>
-                      <p className="text-sm font-medium text-slate-700">
-                        {form.resources.length} person(s) rostered
-                      </p>
-                    </div>
-                  )}
-                  {form.billingModel === "milestone" && (
+                  {form.paymentTerms === "milestone" && (
                     <div>
                       <p className="text-xs text-slate-400 mb-1">Milestones</p>
                       <p className="text-sm font-medium text-slate-700">
@@ -1798,13 +1163,10 @@ const handleSubmit = async () => {
                 </div>
               </div>
 
-              {/* Amount in words */}
               {form.valueInWords && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-3">
                   <p className="text-xs text-slate-400 mb-1">Amount in Words</p>
-                  <p className="text-sm text-slate-600 italic">
-                    {form.valueInWords}
-                  </p>
+                  <p className="text-sm text-slate-600 italic">{form.valueInWords}</p>
                 </div>
               )}
 
@@ -1815,9 +1177,7 @@ const handleSubmit = async () => {
                   onChange={(e) => set("withSignature", e.target.checked)}
                   className="rounded border-slate-300 text-blue-500"
                 />
-                <span className="text-sm text-slate-600">
-                  Include digital signature in document
-                </span>
+                <span className="text-sm text-slate-600">Include digital signature in document</span>
               </label>
             </div>
           </div>
@@ -1836,10 +1196,9 @@ const handleSubmit = async () => {
               onClick={() => canProceed() && setStep(step + 1)}
               disabled={!canProceed()}
               className={`px-6 py-2.5 text-sm font-medium rounded-xl transition flex items-center gap-2
-                ${
-                  canProceed()
-                    ? `${colors.bg} ${colors.text} hover:opacity-90`
-                    : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                ${canProceed()
+                  ? `${colors.bg} ${colors.text} hover:opacity-90`
+                  : "bg-slate-100 text-slate-400 cursor-not-allowed"
                 }`}
             >
               Continue <ChevronRight size={15} />
@@ -1850,15 +1209,153 @@ const handleSubmit = async () => {
               disabled={loading}
               className="px-6 py-2.5 text-sm font-semibold rounded-xl bg-slate-800 text-white hover:bg-slate-700 transition flex items-center gap-2 disabled:opacity-60"
             >
-              {loading ? (
-                <Loader2 size={15} className="animate-spin" />
-              ) : (
-                <Check size={15} />
-              )}
+              {loading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
               {isEditing ? "Update PO" : "Create PO"}
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  LINE ITEMS TABLE (reused for Monthly and Hourly)
+// ─────────────────────────────────────────────────────────────────
+
+function LineItemsTable({ items, hsnList, updateItem, addItem, removeItem, getTotalGstRate, colors, qtyLabel, rateLabel }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
+      {/* Header */}
+      <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs font-medium text-slate-500">
+        <div className="col-span-4">Description</div>
+        <div className="col-span-1">HSN/SAC</div>
+        <div className="col-span-1">{qtyLabel}</div>
+        <div className="col-span-2">{rateLabel}</div>
+        <div className="col-span-1">GST %</div>
+        <div className="col-span-2">Total (₹)</div>
+        <div className="col-span-1"></div>
+      </div>
+
+      {items.map((item, i) => (
+        <div key={i} className="grid sm:grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 items-center">
+          <div className="sm:col-span-4">
+            <input
+              type="text"
+              placeholder="Service description"
+              value={item.description}
+              onChange={(e) => updateItem(i, "description", e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+            />
+          </div>
+          <div className="sm:col-span-1 relative z-50">
+            <select
+              value={item.hsnId || ""}
+              onChange={(e) => {
+                const selectedId = e.target.value;
+                if (!selectedId) {
+                  updateItem(i, "hsnId", null);
+                  updateItem(i, "hsnSac", "");
+                  updateItem(i, "gstRate", 18);
+                  return;
+                }
+                const selectedHsn = hsnList.find((h) => h._id === selectedId);
+                if (selectedHsn) {
+                  updateItem(i, "hsnId", selectedId);
+                  updateItem(i, "hsnSac", selectedHsn.hsnCode);
+                  if (!item.description.trim()) updateItem(i, "description", selectedHsn.serviceType);
+                  updateItem(i, "gstRate", getTotalGstRate(selectedHsn));
+                }
+              }}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+            >
+              <option value="">HSN</option>
+              {hsnList.map((hsn) => (
+                <option key={hsn._id} value={hsn._id}>
+                  {hsn.hsnCode} – {hsn.serviceType}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="sm:col-span-1">
+            <input
+              type="number"
+              min="0"
+              value={item.quantity}
+              onChange={(e) => updateItem(i, "quantity", e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+              title={qtyLabel}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <input
+              type="number"
+              min="0"
+              value={item.rate}
+              onChange={(e) => updateItem(i, "rate", e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+              title={rateLabel}
+            />
+          </div>
+          <div className="sm:col-span-1">
+            <input
+              type="number"
+              min="0"
+              max="28"
+              value={item.gstRate}
+              onChange={(e) => updateItem(i, "gstRate", e.target.value)}
+              className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none"
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <span className="text-sm font-medium text-slate-700">
+              ₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div className="sm:col-span-1 flex justify-end">
+            {items.length > 1 && (
+              <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 transition">
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <div className="px-4 py-3 border-b border-slate-100">
+        <button
+          onClick={addItem}
+          className={`flex items-center gap-1.5 text-sm text-slate-400 transition ${colors.dashed.replace("hover:border-", "hover:text-").split(" ")[1]}`}
+        >
+          <Plus size={14} /> Add Line Item
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  TOTALS BAR
+// ─────────────────────────────────────────────────────────────────
+
+function TotalsBar({ form }) {
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl px-4 py-4 space-y-1.5 text-sm">
+      <div className="flex justify-between text-slate-600">
+        <span>Subtotal (taxable)</span>
+        <span>₹ {form.totalTaxableValue?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div className="flex justify-between text-slate-600">
+        <span>CGST</span>
+        <span>₹ {form.totalCGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div className="flex justify-between text-slate-600">
+        <span>SGST</span>
+        <span>₹ {form.totalSGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+      </div>
+      <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200">
+        <span>Total</span>
+        <span>₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
       </div>
     </div>
   );
@@ -1870,67 +1367,17 @@ const handleSubmit = async () => {
 
 function numberToWords(num) {
   if (!num || num === 0) return "Zero Rupees Only";
-  const a = [
-    "",
-    "One",
-    "Two",
-    "Three",
-    "Four",
-    "Five",
-    "Six",
-    "Seven",
-    "Eight",
-    "Nine",
-    "Ten",
-    "Eleven",
-    "Twelve",
-    "Thirteen",
-    "Fourteen",
-    "Fifteen",
-    "Sixteen",
-    "Seventeen",
-    "Eighteen",
-    "Nineteen",
-  ];
-  const b = [
-    "",
-    "",
-    "Twenty",
-    "Thirty",
-    "Forty",
-    "Fifty",
-    "Sixty",
-    "Seventy",
-    "Eighty",
-    "Ninety",
-  ];
+  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+    "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
 
   const inWords = (n) => {
     if (n < 20) return a[n];
     if (n < 100) return b[Math.floor(n / 10)] + (n % 10 ? " " + a[n % 10] : "");
-    if (n < 1000)
-      return (
-        a[Math.floor(n / 100)] +
-        " Hundred" +
-        (n % 100 ? " " + inWords(n % 100) : "")
-      );
-    if (n < 100000)
-      return (
-        inWords(Math.floor(n / 1000)) +
-        " Thousand" +
-        (n % 1000 ? " " + inWords(n % 1000) : "")
-      );
-    if (n < 10000000)
-      return (
-        inWords(Math.floor(n / 100000)) +
-        " Lakh" +
-        (n % 100000 ? " " + inWords(n % 100000) : "")
-      );
-    return (
-      inWords(Math.floor(n / 10000000)) +
-      " Crore" +
-      (n % 10000000 ? " " + inWords(n % 10000000) : "")
-    );
+    if (n < 1000) return a[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " + inWords(n % 100) : "");
+    if (n < 100000) return inWords(Math.floor(n / 1000)) + " Thousand" + (n % 1000 ? " " + inWords(n % 1000) : "");
+    if (n < 10000000) return inWords(Math.floor(n / 100000)) + " Lakh" + (n % 100000 ? " " + inWords(n % 100000) : "");
+    return inWords(Math.floor(n / 10000000)) + " Crore" + (n % 10000000 ? " " + inWords(n % 10000000) : "");
   };
 
   const rupees = Math.floor(num);
