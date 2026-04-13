@@ -15,6 +15,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import { useFinancialYear } from "../contexts/FinancialYearContext";
 import { getClientsApi } from "../apis/clientApi";
 import { getAllPurchaseOrdersApi } from "../apis/purchaseOrderApi";
 import { getBusinessInsightsReportApi } from "../apis/reportApi";
@@ -39,20 +40,6 @@ const MONTH_OPTIONS = [
   { label: "February", value: "2" },
   { label: "March", value: "3" },
 ];
-
-const getCurrentFinancialYear = () => {
-  const today = new Date();
-  const startYear = today.getMonth() >= 3 ? today.getFullYear() : today.getFullYear() - 1;
-  return `${startYear}-${String(startYear + 1).slice(-2)}`;
-};
-
-const buildFinancialYearOptions = () => {
-  const currentStartYear = Number(getCurrentFinancialYear().slice(0, 4));
-  return Array.from({ length: 5 }, (_, index) => {
-    const year = currentStartYear - index;
-    return `${year}-${String(year + 1).slice(-2)}`;
-  });
-};
 
 const amount = (value) =>
   `₹${Number(value || 0).toLocaleString("en-IN", {
@@ -493,8 +480,14 @@ const mergeClientRowsByName = (rows = []) => {
 
 export default function TaxFlowReportPage() {
   const { user } = useAuth();
+  const {
+    currentFinancialYearEnding,
+    financialYearOptions,
+    selectedFinancialYear,
+    setSelectedFinancialYearEnding,
+  } = useFinancialYear();
   const [filters, setFilters] = useState({
-    financialYear: getCurrentFinancialYear(),
+    financialYear: selectedFinancialYear,
     fromDate: "",
     toDate: "",
     month: "",
@@ -518,11 +511,27 @@ export default function TaxFlowReportPage() {
   const [loading, setLoading] = useState(true);
   const [expandedRows, setExpandedRows] = useState({});
 
-  const fyOptions = useMemo(() => buildFinancialYearOptions(), []);
+  const fyOptions = useMemo(
+    () => financialYearOptions.map((endingYear) => `${endingYear - 1}-${String(endingYear).slice(-2)}`),
+    [financialYearOptions]
+  );
   const selectedClient = useMemo(
     () => clients.find((client) => client._id === filters.clientId) || null,
     [clients, filters.clientId]
   );
+
+  useEffect(() => {
+    setFilters((current) => {
+      if (current.financialYear === selectedFinancialYear) {
+        return current;
+      }
+
+      return {
+        ...current,
+        financialYear: selectedFinancialYear,
+      };
+    });
+  }, [selectedFinancialYear]);
 
   const queryParams = useMemo(() => {
     const params = {
@@ -602,6 +611,13 @@ export default function TaxFlowReportPage() {
   }, [queryParams]);
 
   const handleFilterChange = (key, value) => {
+    if (key === "financialYear") {
+      const endingYear = Number.parseInt(String(value).split("-")[0], 10) + 1;
+      if (Number.isInteger(endingYear)) {
+        setSelectedFinancialYearEnding(endingYear);
+      }
+    }
+
     setFilters((current) => ({
       ...current,
       [key]: value,
@@ -750,7 +766,7 @@ export default function TaxFlowReportPage() {
               <SelectInput value={filters.financialYear} onChange={(e) => handleFilterChange("financialYear", e.target.value)}>
                 {fyOptions.map((option) => (
                   <option key={option} value={option}>
-                    {`FY ${option}`}
+                    {`FY ${option}`} {Number.parseInt(option.slice(0, 4), 10) + 1 === currentFinancialYearEnding ? "(Current)" : ""}
                   </option>
                 ))}
               </SelectInput>

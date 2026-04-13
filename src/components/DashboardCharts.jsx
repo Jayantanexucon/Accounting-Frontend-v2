@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { getMonthlyFinancialSummaryFYApi } from "../apis/accountApi";
 import Chart from "../modals/Chart";
+import { useFinancialYear } from "../contexts/FinancialYearContext";
 
 export default function DashboardCharts({ companyId }) {
   const [monthlyFinance, setMonthlyFinance] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { selectedFinancialYearEnding } = useFinancialYear();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -15,7 +17,7 @@ export default function DashboardCharts({ companyId }) {
 
         const res = await getMonthlyFinancialSummaryFYApi(
           companyId,
-          2026,
+          selectedFinancialYearEnding,
           controller.signal
         );
 
@@ -32,7 +34,7 @@ export default function DashboardCharts({ companyId }) {
     fetchMonthlyFinance();
 
     return () => controller.abort();
-  }, [companyId]);
+  }, [companyId, selectedFinancialYearEnding]);
 
   if (loading) {
     return <p className="text-gray-500">Loading charts...</p>;

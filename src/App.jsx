@@ -7,6 +7,7 @@ import ScrollToTop from "./modals/ScrollToTop";
 import { useForceLogout } from "./utils/useForceLogout";
 import { SocketProvider } from "./context/SocketContext";
 import { NotificationProvider } from "./modules/notification/notification.slice.jsx";
+import { FinancialYearProvider } from "./contexts/FinancialYearContext";
 
 export default function App() {
   useForceLogout();
@@ -27,11 +28,13 @@ export default function App() {
       <Router>
         <ScrollToTop />
         <AuthProvider>
-          <SocketProvider>
-            <NotificationProvider>
-              <AppRoutes />
-            </NotificationProvider>
-          </SocketProvider>
+          <FinancialYearProvider>
+            <SocketProvider>
+              <NotificationProvider>
+                <AppRoutes />
+              </NotificationProvider>
+            </SocketProvider>
+          </FinancialYearProvider>
         </AuthProvider>
       </Router>
     </>
