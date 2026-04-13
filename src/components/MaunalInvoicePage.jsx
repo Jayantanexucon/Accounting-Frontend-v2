@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { getClientsApi } from "../apis/clientApi";
@@ -595,6 +595,18 @@ const [companyDetails, setCompanyDetails] = useState({
   const [poDropdownOpen, setPoDropdownOpen] = useState(false);
   const [poSearch, setPoSearch] = useState("");
   const [filteredPOs, setFilteredPOs] = useState([]);
+  const poDropdownRef = useRef(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (poDropdownRef.current && !poDropdownRef.current.contains(event.target)) {
+        setPoDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
         // Get company ID from localStorage or user context
         const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
@@ -2279,26 +2291,31 @@ useEffect(() => {
                       </div>
 
                       {/* Buyer's Order Reference - Now with PO Dropdown */}
-                      <div className="relative">
+                      <div className="relative" ref={poDropdownRef}>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Reference Purchase Order</label>
 
                         <div className="relative">
                           <input
                             type="text"
                             name="linkedPORef"
-                            value={poDropdownOpen ? poSearch : invoice.linkedPORef || poSearch}
+                            value={poDropdownOpen ? poSearch : invoice.linkedPORef || poSearch || ""}
                             onChange={(e) => {
                               setPoSearch(e.target.value);
                               setPoDropdownOpen(true);
                             }}
-                            onFocus={() => setPoDropdownOpen(true)}
+                            onFocus={() => {
+                              setPoDropdownOpen(true);
+                              if (!poSearch && invoice.linkedPORef) {
+                                setPoSearch(invoice.linkedPORef);
+                              }
+                            }}
                             placeholder="Search or select PO..."
                             className="w-full px-3 py-2 border border-gray-300 rounded-md pr-10"
                           />
                           <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
                             {loadingPOs ? (
                               <Loader2 className="animate-spin text-gray-400" size={20} />
-                            ) : invoice.poreferencevalue ? (
+                            ) : invoice.linkedPO ? (
                               <X size={20} className="text-gray-400 cursor-pointer hover:text-red-500" onClick={handleClearPO} />
                             ) : (
                               <ChevronDown className={`text-gray-400 cursor-pointer ${poDropdownOpen ? "transform rotate-180" : ""}`} size={20} onClick={() => setPoDropdownOpen(!poDropdownOpen)} />
@@ -2308,32 +2325,48 @@ useEffect(() => {
 
                         {/* PO Dropdown List */}
                         {poDropdownOpen && (
-                          <div className="absolute z-20 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                          <div className="absolute z-30 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto ring-1 ring-black ring-opacity-5">
                             {loadingPOs ? (
                               <div className="p-4 text-center">
-                                <Loader2 className="animate-spin mx-auto" size={20} />
+                                <Loader2 className="animate-spin mx-auto text-blue-600" size={24} />
+                                <p className="mt-2 text-xs text-gray-500 font-medium">Fetching purchase orders...</p>
                               </div>
                             ) : filteredPOs.length > 0 ? (
                               filteredPOs.map((po) => (
-                                <div key={po._id} className="px-4 py-3 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0" onClick={() => handleSelectPO(po)}>
-                                  <div className="font-medium text-blue-600">{po.poNumber}</div>
-                                  <div className="text-sm text-gray-500">
-                                    <div>Client: {po.client?.name}</div>
-                                    <div>
-                                      Amount: {po.currency} {po.totalAmount?.toFixed(2)}
+                                <div 
+                                  key={po._id} 
+                                  className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors" 
+                                  onClick={() => handleSelectPO(po)}
+                                >
+                                  <div className="flex justify-between items-start mb-1">
+                                    <div className="font-bold text-blue-700">{po.poNumber}</div>
+                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-blue-100 text-blue-700 border border-blue-200">{po.status}</span>
+                                  </div>
+                                  <div className="text-xs text-gray-600 space-y-1">
+                                    <div className="flex items-center gap-1.5"><Building size={12} className="text-gray-400" /> <span className="font-medium">{po.client?.name}</span></div>
+                                    <div className="flex justify-between items-center text-[11px]">
+                                      <span>Amount: <span className="font-bold text-slate-900">{po.currency} {po.totalAmount?.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></span>
+                                      <span className="text-emerald-600 font-bold">
+                                        Open: {po.currency} {Number(po.remainingInvoicableAmount ?? Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+                                      </span>
                                     </div>
-                                    <div className="text-red-600 font-semibold">
-                                      Open: {po.currency} {Number(po.remainingInvoicableAmount ?? Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0))).toFixed(2)} / {po.totalAmount?.toFixed(2)}
-                                    </div>
-                                    <div>Date: {new Date(po.poDate).toLocaleDateString()}</div>
-                                    <div>
-                                      Status: <span className="px-2 py-1 text-xs rounded bg-blue-100 text-blue-800">{po.status}</span>
-                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400"><Calendar size={12} /> {new Date(po.poDate).toLocaleDateString()}</div>
                                   </div>
                                 </div>
                               ))
                             ) : (
-                              <div className="p-4 text-center text-gray-500">No purchase orders found</div>
+                              <div className="p-6 text-center">
+                                <Search className="mx-auto text-gray-300 mb-2" size={32} />
+                                <p className="text-sm text-gray-500">No matching purchase orders found</p>
+                                {poSearch && (
+                                  <button 
+                                    className="mt-2 text-xs text-blue-600 font-bold hover:underline"
+                                    onClick={() => setPoSearch("")}
+                                  >
+                                    Clear search
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         )}
