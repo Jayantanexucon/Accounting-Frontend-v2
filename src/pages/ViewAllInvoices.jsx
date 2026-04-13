@@ -125,34 +125,15 @@ const InvoiceData = () => {
     } catch { setAuditLogCounts((prev) => ({ ...prev, [invoiceId]: 0 })); }
   };
 
+  /* ── useEffect to fetch invoices ───────── */
   useEffect(() => {
-    const fetchAllInvoices = async () => {
-      try {
-        // ✅ Changed: Use /invoices/ with query params
-        const response = await getInvoicesApi(user.company._id, {
-          page: pagination.page,
-          limit: pagination.limit,
-          approvalStatus: "Approved",
-          sort: "-createdAt",
-          ...advancedFilters,
-        });
-        let invoicesData = response?.data || [];
-        // Explicit sort by createdAt descending
-        invoicesData.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        setInvoices(invoicesData);
-      } catch (error) {
-        console.error(error);
-        toast.error(error?.response?.data?.message);
-      }
-    };
-    fetchAllInvoices();
-  }, [user?.company?._id]);
+    fetchInvoices();
+  }, [pagination.page, pagination.limit, advancedFilters]);
 
   const fetchInvoices = async () => {
     setLoading(true);
     setError(null);
     try {
-      // ✅ Changed: First API call
       const response = await getInvoicesApi(user.company._id, {
         page: pagination.page,
         limit: pagination.limit,
@@ -160,7 +141,20 @@ const InvoiceData = () => {
         sort: "-createdAt",
         ...advancedFilters,
       });
-      setInvoices(response?.data || []);
+
+      const invoicesData = response?.data || [];
+      setInvoices(invoicesData);
+
+      // Update pagination from meta
+      if (response?.meta) {
+        setPagination((prev) => ({
+          ...prev,
+          total: response.meta.total || 0,
+          totalPages: response.meta.totalPages || 0,
+        }));
+      }
+
+      // Fetch all invoices for filters and stats
       const allFiltered = await getInvoicesApi(user.company._id, {
         page: 1,
         limit: 10000,
@@ -169,6 +163,7 @@ const InvoiceData = () => {
         ...advancedFilters,
       });
       setFilteredAllInvoices(allFiltered?.data || []);
+
       const allInvoicesRes = await getInvoicesApi(user.company._id, {
         page: 1,
         limit: 10000,
