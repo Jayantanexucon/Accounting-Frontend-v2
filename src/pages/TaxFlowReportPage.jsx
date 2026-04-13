@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../contexts/AuthContext";
 import { getClientsApi } from "../apis/clientApi";
 import { getAllPurchaseOrdersApi } from "../apis/purchaseOrderApi";
+import { getBusinessInsightsReportApi } from "../apis/reportApi";
 import {
   getClientTaxReportApi,
   getPOTaxReportApi,
@@ -310,6 +311,13 @@ export default function TaxFlowReportPage() {
   const [clientReport, setClientReport] = useState({ items: [], summary: {} });
   const [summary, setSummary] = useState({});
   const [meta, setMeta] = useState(null);
+  const [businessInsights, setBusinessInsights] = useState({
+    summary: {},
+    expenseBreakdown: [],
+    monthlyPerformance: [],
+    ledgerImpactSummary: [],
+  });
+  const [businessMeta, setBusinessMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedRows, setExpandedRows] = useState({});
 
@@ -337,15 +345,28 @@ export default function TaxFlowReportPage() {
     if (!queryParams.companyId) return;
     setLoading(true);
     try {
-      const [poResponse, clientResponse, summaryResponse] = await Promise.all([
+      const [poResponse, clientResponse, summaryResponse, businessResponse] = await Promise.all([
         getPOTaxReportApi(queryParams),
         getClientTaxReportApi(queryParams),
         getTaxSummaryApi(queryParams),
+        getBusinessInsightsReportApi(queryParams.companyId, {
+          financialYear: queryParams.financialYear,
+          fromDate: queryParams.fromDate,
+          toDate: queryParams.toDate,
+          month: queryParams.month,
+        }),
       ]);
       setPoReport(poResponse?.data || { items: [], summary: {} });
       setClientReport(clientResponse?.data || { items: [], summary: {} });
       setSummary(summaryResponse?.data || {});
       setMeta(summaryResponse?.meta || poResponse?.meta || null);
+      setBusinessInsights(businessResponse?.data || {
+        summary: {},
+        expenseBreakdown: [],
+        monthlyPerformance: [],
+        ledgerImpactSummary: [],
+      });
+      setBusinessMeta(businessResponse?.meta || null);
     } catch (error) {
       console.error("Failed to load tax flow report", error);
       toast.error(error?.response?.data?.message || "Failed to load tax flow report");
@@ -427,33 +448,61 @@ export default function TaxFlowReportPage() {
   };
 
   const exportReport = () => {
-    const rows = activeTab === "po"
-      ? poRows.map((row) => ({
-          "PO Number": row.poNumber,
-          Type: row.poType,
-          Party: row.clientName,
-          "Invoice Amount": row.totalInvoiceAmount,
-          "GST Total": row.gstGenerated,
-          "GST Collected": row.gstPaid,
-          TDS: row.tdsDeducted,
-          Paid: row.totalPaid,
-          Pending: row.pendingAmount,
-        }))
-      : clientRows.map((row) => ({
-          "Client / Vendor": row.clientName,
-          "PO Count": row.poCount,
-          "Invoice Count": row.invoiceCount,
-          "Invoice Amount": row.totalInvoiceAmount,
-          "GST Total": row.totalGST,
-          "GST Collected": row.totalGSTCollected,
-          TDS: row.totalTDS,
-          Received: row.totalReceived,
-          Pending: row.pendingAmount,
-        }));
+    let rows = [];
+    if (activeTab === "po") {
+      rows = poRows.map((row) => ({
+        "PO Number": row.poNumber,
+        Type: row.poType,
+        Party: row.clientName,
+        "Invoice Amount": row.totalInvoiceAmount,
+        "GST Total": row.gstGenerated,
+        "GST Collected": row.gstPaid,
+        TDS: row.tdsDeducted,
+        Paid: row.totalPaid,
+        Pending: row.pendingAmount,
+      }));
+    } else if (activeTab === "client") {
+      rows = clientRows.map((row) => ({
+        "Client / Vendor": row.clientName,
+        "PO Count": row.poCount,
+        "Invoice Count": row.invoiceCount,
+        "Invoice Amount": row.totalInvoiceAmount,
+        "GST Total": row.totalGST,
+        "GST Collected": row.totalGSTCollected,
+        TDS: row.totalTDS,
+        Received: row.totalReceived,
+        Pending: row.pendingAmount,
+      }));
+    } else if (activeTab === "ledger") {
+      rows = (businessInsights.ledgerImpactSummary || []).map((row) => ({
+        Ledger: row.ledger,
+        Group: row.group,
+        Debit: row.debit,
+        Credit: row.credit,
+        "Closing Balance": row.closingBalance,
+      }));
+    } else {
+      rows = (businessInsights.monthlyPerformance || []).map((row) => ({
+        Month: row.label,
+        Income: row.income,
+        Expense: row.expense,
+        Profit: row.profit,
+      }));
+    }
 
     const workbook = XLSX.utils.book_new();
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    XLSX.utils.book_append_sheet(workbook, worksheet, activeTab === "po" ? "PO Tax Report" : "Client Tax Report");
+    XLSX.utils.book_append_sheet(
+      workbook,
+      worksheet,
+      activeTab === "po"
+        ? "PO Tax Report"
+        : activeTab === "client"
+          ? "Client Tax Report"
+          : activeTab === "ledger"
+            ? "Ledger Report"
+            : "Business Insights"
+    );
     XLSX.writeFile(workbook, `tax-flow-${activeTab}-${dayjs().format("YYYY-MM-DD")}.xlsx`);
   };
 
@@ -552,53 +601,76 @@ export default function TaxFlowReportPage() {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-3">
-          <SummaryCard
-            title="GST Summary"
-            icon={<IndianRupee />}
-            iconBg="bg-emerald-50"
-            iconColor="text-emerald-500"
-          >
-            <div className="grid grid-cols-3 gap-2">
-              <TinyMetric label="IGST" value={gstSummary.igst} />
-              <TinyMetric label="CGST" value={gstSummary.cgst} />
-              <TinyMetric label="SGST" value={gstSummary.sgst} />
-            </div>
-            <div className="mt-5 space-y-3">
-              <SummaryRow label="Total Generated" value={gstSummary.totalGenerated} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
-              <SummaryRow label="Collected" value={gstSummary.collected} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
-              <SummaryRow label="Pending" value={gstSummary.pending} tone="amber" icon={<CalendarDays size={12} className="text-amber-400" />} />
-            </div>
-          </SummaryCard>
+        {(activeTab === "po" || activeTab === "client") ? (
+          <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <SummaryCard
+              title="GST Summary"
+              icon={<IndianRupee />}
+              iconBg="bg-emerald-50"
+              iconColor="text-emerald-500"
+            >
+              <div className="grid grid-cols-3 gap-2">
+                <TinyMetric label="IGST" value={gstSummary.igst} />
+                <TinyMetric label="CGST" value={gstSummary.cgst} />
+                <TinyMetric label="SGST" value={gstSummary.sgst} />
+              </div>
+              <div className="mt-5 space-y-3">
+                <SummaryRow label="Total Generated" value={gstSummary.totalGenerated} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
+                <SummaryRow label="Collected" value={gstSummary.collected} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
+                <SummaryRow label="Pending" value={gstSummary.pending} tone="amber" icon={<CalendarDays size={12} className="text-amber-400" />} />
+              </div>
+            </SummaryCard>
 
-          <SummaryCard
-            title="TDS Summary"
-            icon={<FileText />}
-            iconBg="bg-sky-50"
-            iconColor="text-sky-500"
-          >
-            <div className="space-y-3">
-              <SummaryRow label="Total Deducted" value={tdsSummary.totalDeducted} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
-              <SummaryRow label="Settled" value={tdsSummary.settled} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
-              <SummaryRow label="Pending" value={tdsSummary.pending} tone="amber" icon={<CalendarDays size={12} className="text-amber-400" />} />
-            </div>
-            <ProgressBar value={tdsSettledPct} color="bg-emerald-500" label={`${tdsSettledPct}% Settled`} />
-          </SummaryCard>
+            <SummaryCard
+              title="TDS Summary"
+              icon={<FileText />}
+              iconBg="bg-sky-50"
+              iconColor="text-sky-500"
+            >
+              <div className="space-y-3">
+                <SummaryRow label="Total Deducted" value={tdsSummary.totalDeducted} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
+                <SummaryRow label="Settled" value={tdsSummary.settled} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
+                <SummaryRow label="Pending" value={tdsSummary.pending} tone="amber" icon={<CalendarDays size={12} className="text-amber-400" />} />
+              </div>
+              <ProgressBar value={tdsSettledPct} color="bg-emerald-500" label={`${tdsSettledPct}% Settled`} />
+            </SummaryCard>
 
-          <SummaryCard
-            title="Business Summary"
-            icon={<IndianRupee />}
-            iconBg="bg-amber-50"
-            iconColor="text-amber-500"
-          >
-            <div className="space-y-3">
-              <SummaryRow label="Total Invoiced" value={businessSummary.totalInvoiced} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
-              <SummaryRow label="Received" value={businessSummary.received} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
-              <SummaryRow label="Pending" value={businessSummary.pending} tone="red" icon={<CalendarDays size={12} className="text-rose-400" />} />
-            </div>
-            <ProgressBar value={collectionPct} color="bg-emerald-500" label={`${collectionPct}% Collected`} />
-          </SummaryCard>
-        </div>
+            <SummaryCard
+              title="Business Summary"
+              icon={<IndianRupee />}
+              iconBg="bg-amber-50"
+              iconColor="text-amber-500"
+            >
+              <div className="space-y-3">
+                <SummaryRow label="Total Invoiced" value={businessSummary.totalInvoiced} tone="slate" icon={<TrendingUp size={12} className="text-slate-400" />} />
+                <SummaryRow label="Received" value={businessSummary.received} tone="green" icon={<TrendingDown size={12} className="text-emerald-400" />} />
+                <SummaryRow label="Pending" value={businessSummary.pending} tone="red" icon={<CalendarDays size={12} className="text-rose-400" />} />
+              </div>
+              <ProgressBar value={collectionPct} color="bg-emerald-500" label={`${collectionPct}% Collected`} />
+            </SummaryCard>
+          </div>
+        ) : (
+          <div className="mt-5 grid gap-4 lg:grid-cols-4">
+            <SummaryCard title="Total Income" icon={<IndianRupee />} iconBg="bg-emerald-50" iconColor="text-emerald-500">
+              <div className="text-3xl font-bold text-slate-800">{amount(businessInsights.summary?.totalIncome)}</div>
+              <div className="mt-2 text-sm text-slate-500">Credit entries of income ledgers</div>
+            </SummaryCard>
+            <SummaryCard title="Total Expense" icon={<IndianRupee />} iconBg="bg-amber-50" iconColor="text-amber-500">
+              <div className="text-3xl font-bold text-slate-800">{amount(businessInsights.summary?.totalExpense)}</div>
+              <div className="mt-2 text-sm text-slate-500">Debit entries of expense ledgers</div>
+            </SummaryCard>
+            <SummaryCard title="Net Profit / Loss" icon={<IndianRupee />} iconBg="bg-sky-50" iconColor="text-sky-500">
+              <div className={`text-3xl font-bold ${Number(businessInsights.summary?.netProfit) >= 0 ? "text-emerald-600" : "text-rose-500"}`}>
+                {amount(businessInsights.summary?.netProfit)}
+              </div>
+              <div className="mt-2 text-sm text-slate-500">Income minus expense</div>
+            </SummaryCard>
+            <SummaryCard title="Cash / Bank Balance" icon={<IndianRupee />} iconBg="bg-violet-50" iconColor="text-violet-500">
+              <div className="text-3xl font-bold text-slate-800">{amount(businessInsights.summary?.cashBankBalance)}</div>
+              <div className="mt-2 text-sm text-slate-500">Optional cash and bank snapshot</div>
+            </SummaryCard>
+          </div>
+        )}
 
         <div className="mt-5 inline-flex rounded-xl border border-[#e7dccd] bg-white p-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
           <button
@@ -615,24 +687,53 @@ export default function TaxFlowReportPage() {
           >
             Client / Vendor Report
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("ledger")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "ledger" ? "bg-[#f3ece1] text-slate-800" : "text-slate-500"}`}
+          >
+            Ledger Report
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("insights")}
+            className={`rounded-lg px-4 py-2 text-sm font-medium ${activeTab === "insights" ? "bg-[#f3ece1] text-slate-800" : "text-slate-500"}`}
+          >
+            Business Insights
+          </button>
         </div>
 
         <div className="mt-4 flex items-end justify-between">
           <div>
             <h2 className="text-[30px] font-semibold tracking-[-0.02em] text-slate-800">
-              {activeTab === "po" ? "Purchase Order Tax Report" : "Client / Vendor Tax Report"}
+              {activeTab === "po"
+                ? "Purchase Order Tax Report"
+                : activeTab === "client"
+                  ? "Client / Vendor Tax Report"
+                  : activeTab === "ledger"
+                    ? "Ledger Impact Report"
+                    : "Business Insights"}
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               {activeTab === "po"
                 ? "View GST and TDS breakdown by purchase order with invoice drill-down"
-                : "View GST and TDS breakdown by client or vendor with PO consolidation"}
+                : activeTab === "client"
+                  ? "View GST and TDS breakdown by client or vendor with PO consolidation"
+                  : activeTab === "ledger"
+                    ? "Ledger-level debit, credit, and closing balance summary from accounting journals"
+                    : "Simple management summary derived only from journal and ledger data"}
             </p>
           </div>
           <div className="text-sm text-slate-500">
-            Showing {visibleRows.length} {activeTab === "po" ? "POs" : "Parties"}
+            {activeTab === "ledger"
+              ? `Showing ${(businessInsights.ledgerImpactSummary || []).length} Ledgers`
+              : activeTab === "insights"
+                ? `Showing ${(businessInsights.monthlyPerformance || []).length} Months`
+                : `Showing ${visibleRows.length} ${activeTab === "po" ? "POs" : "Parties"}`}
           </div>
         </div>
 
+        {(activeTab === "po" || activeTab === "client") && (
         <div className="mt-4 overflow-hidden rounded-2xl border border-[#e7dccd] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
           <table className="min-w-full">
             <thead className="bg-[#faf7f2] text-left text-[12px] font-semibold text-slate-600">
@@ -734,17 +835,146 @@ export default function TaxFlowReportPage() {
             </tbody>
           </table>
         </div>
+        )}
+
+        {activeTab === "ledger" && (
+          <div className="mt-4 overflow-hidden rounded-2xl border border-[#e7dccd] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <table className="min-w-full">
+              <thead className="bg-[#faf7f2] text-left text-[12px] font-semibold text-slate-600">
+                <tr>
+                  <th className="px-4 py-4">Ledger</th>
+                  <th className="px-4 py-4">Group</th>
+                  <th className="px-4 py-4 text-right">Debit</th>
+                  <th className="px-4 py-4 text-right">Credit</th>
+                  <th className="px-4 py-4 text-right">Closing Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-14 text-center text-sm text-slate-500">Loading ledger report...</td>
+                  </tr>
+                ) : (businessInsights.ledgerImpactSummary || []).length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-14 text-center text-sm text-slate-500">No ledger data found for the selected period.</td>
+                  </tr>
+                ) : (
+                  (businessInsights.ledgerImpactSummary || []).map((row) => (
+                    <tr key={row.ledgerId || `${row.ledger}-${row.group}`} className="border-t border-[#f0e8dc] text-sm">
+                      <td className="px-4 py-4">
+                        <div className="font-semibold text-slate-700">{row.ledger}</div>
+                        <div className="text-xs text-slate-400">{row.ledgerCode || "—"}</div>
+                      </td>
+                      <td className="px-4 py-4 text-slate-600">{row.group}</td>
+                      <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.debit)}</td>
+                      <td className="px-4 py-4 text-right font-semibold text-slate-700">{amount(row.credit)}</td>
+                      <td className={`px-4 py-4 text-right font-semibold ${Number(row.closingBalance) >= 0 ? "text-emerald-600" : "text-rose-500"}`}>
+                        {amount(row.closingBalance)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {activeTab === "insights" && (
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-4 lg:grid-cols-4">
+              <FooterStat title="Total Income" value={amount(businessInsights.summary?.totalIncome)} note="Credit entries of income ledgers" tone="green" />
+              <FooterStat title="Total Expense" value={amount(businessInsights.summary?.totalExpense)} note="Debit entries of expense ledgers" tone="amber" />
+              <FooterStat title="Net Profit / Loss" value={amount(businessInsights.summary?.netProfit)} note="Income minus expense" tone={Number(businessInsights.summary?.netProfit) >= 0 ? "green" : "red"} />
+              <FooterStat title="Cash / Bank Balance" value={amount(businessInsights.summary?.cashBankBalance)} note="Optional cash and bank snapshot" tone="green" />
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="overflow-hidden rounded-2xl border border-[#e7dccd] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                <div className="border-b border-[#f0e8dc] bg-[#faf7f2] px-5 py-4 text-sm font-semibold text-slate-700">Expense Breakdown</div>
+                <table className="min-w-full">
+                  <thead className="text-left text-[12px] font-semibold text-slate-500">
+                    <tr>
+                      <th className="px-5 py-3">Category</th>
+                      <th className="px-5 py-3 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(businessInsights.expenseBreakdown || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={2} className="px-5 py-10 text-center text-sm text-slate-500">No expense data found.</td>
+                      </tr>
+                    ) : (
+                      (businessInsights.expenseBreakdown || []).map((row) => (
+                        <tr key={row.category} className="border-t border-[#f0e8dc] text-sm">
+                          <td className="px-5 py-3 text-slate-700">{row.category}</td>
+                          <td className="px-5 py-3 text-right font-semibold text-slate-700">{amount(row.amount)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-[#e7dccd] bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+                <div className="border-b border-[#f0e8dc] bg-[#faf7f2] px-5 py-4 text-sm font-semibold text-slate-700">Monthly Performance</div>
+                <table className="min-w-full">
+                  <thead className="text-left text-[12px] font-semibold text-slate-500">
+                    <tr>
+                      <th className="px-5 py-3">Month</th>
+                      <th className="px-5 py-3 text-right">Income</th>
+                      <th className="px-5 py-3 text-right">Expense</th>
+                      <th className="px-5 py-3 text-right">Profit</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(businessInsights.monthlyPerformance || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-5 py-10 text-center text-sm text-slate-500">No monthly performance data found.</td>
+                      </tr>
+                    ) : (
+                      (businessInsights.monthlyPerformance || []).map((row) => (
+                        <tr key={row.month} className="border-t border-[#f0e8dc] text-sm">
+                          <td className="px-5 py-3 text-slate-700">{row.label}</td>
+                          <td className="px-5 py-3 text-right font-semibold text-emerald-600">{amount(row.income)}</td>
+                          <td className="px-5 py-3 text-right font-semibold text-amber-600">{amount(row.expense)}</td>
+                          <td className={`px-5 py-3 text-right font-semibold ${Number(row.profit) >= 0 ? "text-emerald-600" : "text-rose-500"}`}>{amount(row.profit)}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-7 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          <FooterStat title="Pending GST" value={amount(summary.totalGSTPending)} note="GST yet to be collected" tone="amber" />
-          <FooterStat title="Pending TDS" value={amount(summary.totalTDSPending)} note="TDS yet to be settled" tone="amber" />
-          <FooterStat title="Receivables Pending" value={amount(summary.totalPendingAmount)} note="Amount yet to be received" tone="red" />
-          <FooterStat title="Collection Rate" value={`${collectionPct}%`} note="Of total invoiced amount" tone="green" />
+          {(activeTab === "insights" || activeTab === "ledger") ? (
+            <>
+              <FooterStat title="Top Expense Bucket" value={amount(businessInsights.expenseBreakdown?.[0]?.amount)} note={businessInsights.expenseBreakdown?.[0]?.category || "No expense category"} tone="amber" />
+              <FooterStat title="Total Expense Ledgers" value={`${(businessInsights.expenseBreakdown || []).length}`} note="Distinct expense ledgers in period" tone="amber" />
+              <FooterStat title="Loss Risk" value={amount(Math.max(0, -(Number(businessInsights.summary?.netProfit) || 0)))} note="Shown only when net result is negative" tone="red" />
+              <FooterStat title={activeTab === "ledger" ? "Cash / Bank Balance" : "Net Margin"} value={activeTab === "ledger" ? amount(businessInsights.summary?.cashBankBalance) : `${percent(businessInsights.summary?.netProfit, businessInsights.summary?.totalIncome)}%`} note={activeTab === "ledger" ? "From cash and bank ledgers" : "Profit as % of income"} tone="green" />
+            </>
+          ) : (
+            <>
+              <FooterStat title="Pending GST" value={amount(summary.totalGSTPending)} note="GST yet to be collected" tone="amber" />
+              <FooterStat title="Pending TDS" value={amount(summary.totalTDSPending)} note="TDS yet to be settled" tone="amber" />
+              <FooterStat title="Receivables Pending" value={amount(summary.totalPendingAmount)} note="Amount yet to be received" tone="red" />
+              <FooterStat title="Collection Rate" value={`${collectionPct}%`} note="Of total invoiced amount" tone="green" />
+            </>
+          )}
         </div>
 
-        {meta?.taxPaidMethod && (
+        {(activeTab === "po" || activeTab === "client") && meta?.taxPaidMethod && (
           <div className="mt-6 rounded-2xl border border-[#e7dccd] bg-white px-5 py-4 text-sm text-slate-500">
             {meta.taxPaidMethod}
+          </div>
+        )}
+
+        {(activeTab === "ledger" || activeTab === "insights") && businessMeta?.source && (
+          <div className="mt-6 rounded-2xl border border-[#e7dccd] bg-white px-5 py-4 text-sm text-slate-500">
+            Derived only from Accounting Module journals, ledgers, and ledger groups for {businessMeta.financialYear}.
           </div>
         )}
       </div>

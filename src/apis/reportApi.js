@@ -273,6 +273,14 @@ export const getScheduleIIIBalanceSheetApi = async (companyId, params, signal) =
   };
 };
 
+export const getBusinessInsightsReportApi = async (companyId, params = {}, signal) => {
+  const { data } = await API.get(`/accounting/reports/${companyId}/business-insights`, {
+    params,
+    signal,
+  });
+  return data;
+};
+
 export const getScheduleIIIProfitLossApi = async (companyId, params, signal) => {
   const { startDate, endDate } = getPeriodDates(params);
   const { data } = await API.get(`/accounting/report/${companyId}/profit-loss`, {
