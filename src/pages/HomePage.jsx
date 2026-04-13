@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
-import { API } from "../apis/api";
 import {
   Calendar, FileText, Package, CheckCircle, Clock,
   XCircle, AlertCircle, BookOpen, ShoppingCart,
@@ -16,18 +15,19 @@ import JournalDetailsModal from "../modals/JournalDetailsModal";
 import PurchaseOrderDetailsModal from "../modals/PurchaseOrderDetailsModal";
 import AuditLogSidebar from "../components/AuditLogSidebar";
 import { getPurchaseOrdersApi } from "../apis/purchaseOrderApi";
+import { getInvoicesApi } from "../apis/invoice.api";
 import NotificationBell from "../modules/notification/NotificationBell";
 import LatestJournals from "../components/LatestJournals";
 import JournalList from "../components/JournalListComponent";
 
 /* ─── data fetchers ───────────────────────────────────── */
 const fetchRecentInvoices = async (companyId) => {
-  const res = await API.get(`/invoices/getall/${companyId}`);
+  const res = await getInvoicesApi(companyId, { page: 1, limit: 1000 });
   const data =
-    res.data?.data ||
-    res.data?.invoices ||
-    res.data?.result ||
-    (Array.isArray(res.data) ? res.data : []);
+    res.data ||
+    res.invoices ||
+    res.result ||
+    (Array.isArray(res) ? res : []);
   return data
     .sort((a, b) => new Date(b.invoiceDate || b.createdAt) - new Date(a.invoiceDate || a.createdAt))
     .slice(0, 5);

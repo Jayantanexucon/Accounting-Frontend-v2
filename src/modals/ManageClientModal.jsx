@@ -85,6 +85,10 @@ export default function ManageClientModal({
   refreshClients = () => {},
 }) {
   const { user } = useAuth();
+  const selectedCompany = JSON.parse(
+    localStorage.getItem("selectedCompany") || "null",
+  );
+  const companyId = user?.company?._id || selectedCompany?._id;
   const [form, setForm] = useState(emptyForm);
   const [loading, setLoading] = useState(false);
   const [rule, setRule] = useState(countryRules["India"]);
@@ -92,11 +96,11 @@ export default function ManageClientModal({
 
   // ── Load HSN list ─────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!user?.company?._id) return;
-    getallhsn(user.company._id)
+    if (!companyId) return;
+    getallhsn(companyId)
       .then((res) => setHsmList(res.data || []))
       .catch(() => toast.error("Failed to load HSN list"));
-  }, [user]);
+  }, [companyId]);
 
   // ── Populate form on open ─────────────────────────────────────────────────
   useEffect(() => {
@@ -200,7 +204,7 @@ export default function ManageClientModal({
 
       const clientData = {
         ...form,
-        companyId: user?.company?._id,
+        companyId,
         // strip UI-only fields
         selectedHsn: undefined,
         poInput: undefined,

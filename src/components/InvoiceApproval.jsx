@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import { Calendar, Package, CreditCard, FileText, User, Banknote, Percent, ChevronDown, ChevronUp, Receipt, AlertCircle, Edit, X, Clock, CheckCircle2 } from "lucide-react";
-import { API } from "../apis/api";
-import { updateInvoiceApprovalApi } from "../apis/invoice.api";
+import { pendingApprovalInvoiceApi, updateInvoiceApprovalApi } from "../apis/invoice.api";
 import dayjs from "dayjs";
 import { Link } from "react-router-dom";
 
@@ -86,29 +85,18 @@ export default function InvoiceApproval({
       setLoading(true);
 
       // ✅ Changed: Use /invoices/ with query params (same as InvoiceData)
-      const res = await API.get(`/invoices/`, {
-        params: {
-          companyId: user.company._id,  // ✅ Pass as query param
-          approvalStatus: "Pending",     // ✅ Get pending approvals
-          limit: 1000,
-          page: 1,
-        },
-        signal: controller.signal,
-      });
+      const res = await pendingApprovalInvoiceApi(user.company._id, controller.signal);
 
-      if (res.data.success) {
-        // ✅ Map invoices to pending items
+      if (res.data) {
         const mapped = (res.data.data || [])
           .map((invoice) => {
-            if (!invoice.pendingVersion) return null;
-
             return {
               id: invoice._id,
-              versionNo: invoice.pendingVersion.versionNo,
-              actionType: invoice.pendingVersion.actionType,
-              snapshot: invoice.pendingVersion.snapshot,
+              versionNo: invoice.versionNo,
+              actionType: "update",
+              snapshot: invoice,
               invoiceData: invoice,
-              pendingCreatedAt: invoice.pendingVersion.createdAt || invoice.updatedAt,
+              pendingCreatedAt: invoice.updatedAt,
               createdAt: invoice.createdAt,
             };
           })

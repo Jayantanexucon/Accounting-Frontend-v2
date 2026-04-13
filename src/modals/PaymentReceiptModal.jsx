@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from "react";
-import { API } from "../apis/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import dayjs from "dayjs";
 import { getJournalByIdApi } from "../apis/journalApi";
 import JournalDetailsModal from "./JournalDetailsModal";
+import {
+  getInvoicePaymentsApi,
+  recordInvoicePaymentApi,
+  validateInvoiceAccountsApi,
+} from "../apis/invoice.api";
 
 // Lucide Icons
 import { X, Loader2, CheckCircle, AlertCircle, Calendar, CreditCard, Banknote, Calculator, Receipt, FileText, User, Percent, ChevronDown } from "lucide-react";
@@ -130,74 +134,44 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     setLoading(true);
     try {
       // Load payment history
-      const paymentRes = await API.get(`/payments/${invoiceData._id}/payment-status`);
-      // console.log("Payment API Response:", paymentRes.data);
+      const paymentRes = await getInvoicePaymentsApi(
+        user.company._id,
+        invoiceData._id,
+      );
 
-      // Handle the API response structure
-      if (paymentRes.data?.data) {
-        // The data might be structured differently
-        const paymentData = paymentRes.data.data;
-
-        // Set payment history - check if it's in paymentSummary.payments or directly in data
-        const payments = paymentData.payments || paymentData.paymentSummary?.payments || [];
+      if (paymentRes?.data) {
+        const payments = Array.isArray(paymentRes.data) ? paymentRes.data : [];
         setPaymentHistory(Array.isArray(payments) ? payments : []);
 
-        // Set payment summary
-        if (paymentData.paymentSummary) {
-          const pendingAmount = paymentData.paymentSummary.pendingAmount || 0;
-          const totalTdsUsed = payments.reduce((sum, payment) => sum + getPaymentTdsAmount(payment), 0);
-          const referenceTds = Math.max(
-            0,
-            Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0) - totalTdsUsed,
-          );
-          const autoTdsAmount = Math.min(pendingAmount, referenceTds);
-          setPaymentSummary({
-            totalAmount:
-              paymentData.paymentSummary.totalAmount ||
-              invoiceData.amountDue ||
-              invoiceData.invoiceAmount ||
-              0,
-            totalReceived: paymentData.paymentSummary.totalReceived || 0,
-            pendingAmount,
-          });
-          setFormData((prev) => ({
-            ...prev,
-            amountPaid: Math.max(0, pendingAmount - autoTdsAmount),
-            tdsAmount: autoTdsAmount,
-          }));
-        } else {
-          // Calculate from payments array
-          const totalReceived = payments.reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0);
-          const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
-          const pendingAmount = Math.max(0, totalAmount - totalReceived);
-          const totalTdsUsed = payments.reduce((sum, payment) => sum + getPaymentTdsAmount(payment), 0);
-          const referenceTds = Math.max(
-            0,
-            Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0) - totalTdsUsed,
-          );
-          const autoTdsAmount = Math.min(pendingAmount, referenceTds);
+        const totalReceived = payments.reduce(
+          (sum, payment) => sum + getPaymentSettledAmount(payment),
+          0,
+        );
+        const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
+        const pendingAmount = Math.max(0, totalAmount - totalReceived);
+        const totalTdsUsed = payments.reduce(
+          (sum, payment) => sum + getPaymentTdsAmount(payment),
+          0,
+        );
+        const referenceTds = Math.max(
+          0,
+          Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0) - totalTdsUsed,
+        );
+        const autoTdsAmount = Math.min(pendingAmount, referenceTds);
 
-          setPaymentSummary({
-            totalAmount,
-            totalReceived,
-            pendingAmount,
-          });
-          setFormData((prev) => ({
-            ...prev,
-            amountPaid: Math.max(0, pendingAmount - autoTdsAmount),
-            tdsAmount: autoTdsAmount,
-          }));
-        }
+        setPaymentSummary({
+          totalAmount,
+          totalReceived,
+          pendingAmount,
+        });
+        setFormData((prev) => ({
+          ...prev,
+          amountPaid: Math.max(0, pendingAmount - autoTdsAmount),
+          tdsAmount: autoTdsAmount,
+        }));
       }
-
-      // Validate accounts for payment journal
-      try {
-        const accountRes = await API.get(`/payments/validate-accounts/${user.company._id}`);
-        setAccountValidation(accountRes.data?.data);
-      } catch (accountError) {
-        console.warn("Account validation failed:", accountError);
-        // Continue without account validation if it fails
-      }
+      const accountRes = await validateInvoiceAccountsApi(user.company._id);
+      setAccountValidation(accountRes.data);
     } catch (error) {
       console.error("Error loading invoice data:", error);
       setError("Failed to load invoice details");
@@ -212,13 +186,13 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
 
     setLoading(true);
     try {
-      const response = await API.get(`/payments/validate-accounts/${user.company._id}`);
-      setAccountValidation(response.data?.data);
+      const response = await validateInvoiceAccountsApi(user.company._id);
+      setAccountValidation(response.data);
 
-      if (response.data?.data.allRequiredAccountsExist) {
+      if (response.data?.allRequiredAccountsExist) {
         toast.success("All payment accounts are configured");
       } else {
-        const missing = response.data?.data.missingAccounts?.filter((acc) => !acc.optional) || [];
+        const missing = response.data?.missingAccounts?.filter((acc) => !acc.optional) || [];
         if (missing.length > 0) {
           toast.error(`${missing.length} required accounts missing`);
           return false;
@@ -280,19 +254,26 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         }
       }
 
-      const response = await API.post(`/payments/${invoiceData._id}/record-payment`, {
-        ...formData,
-        paymentMode: Number(formData.amountPaid || 0) > 0 ? formData.paymentMode : "other",
-        receivedAmount: formData.amountPaid,
-        tdsAdjusted: formData.tdsAmount,
+      const response = await recordInvoicePaymentApi({
+        invoiceId: invoiceData._id,
         companyId: user.company._id,
-        createJournal: formData.createJournal,
+        clientId: invoiceData?.billTo?._id || invoiceData?.billTo?.clientId || "",
+        amountPaid: formData.amountPaid,
+        tdsAmount: formData.tdsAmount,
+        paymentDate: formData.paymentDate,
+        referenceNumber: formData.referenceNumber,
+        remarks: formData.remarks,
+        paymentMode: Number(formData.amountPaid || 0) > 0 ? formData.paymentMode : "other",
       });
 
       toast.success("Payment recorded successfully!");
 
       if (onSuccess) {
-        onSuccess(response.data?.data);
+        onSuccess({
+          ...(response?.payment?.data || {}),
+          receivedAmount: Number(formData.amountPaid || 0),
+          tdsAmount: Number(formData.tdsAmount || 0),
+        });
       }
 
       onClose();

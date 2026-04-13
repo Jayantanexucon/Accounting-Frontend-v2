@@ -1,7 +1,12 @@
 import { API } from "./api";
 
 export const addClientApi = async (clientData) => {
-  const { data } = await API.post(`/masterData/client/create`, clientData);
+  const companyId = clientData?.companyId;
+  if (!companyId) {
+    throw new Error("companyId is required to create a client");
+  }
+
+  const { data } = await API.post(`/masterData/client/create/${companyId}`, clientData);
   return data;
 };
 

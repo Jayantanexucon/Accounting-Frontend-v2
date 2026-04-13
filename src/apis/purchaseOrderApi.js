@@ -6,7 +6,7 @@ import { API } from "./api";
  * Create a new purchase order
  */
 export const createPurchaseOrderApi = async (poData) => {
-  const { data } = await API.post("/purchase-orders", poData);
+  const { data } = await API.post("/invoices/purchase-order", poData);
   return data;
 };
 
@@ -16,7 +16,7 @@ export const createPurchaseOrderApi = async (poData) => {
  * @param {Object} params - Query params (page, limit, search)
  */
 export const getPurchaseOrdersApi = async (companyId, params = {}) => {
-  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/company/{companyId}
+  const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Changed from /invoices/purchase-order/company/{companyId}
     params: {
       companyId,  // ✅ Pass companyId as query param
       ...params,
@@ -31,7 +31,7 @@ export const getPurchaseOrdersApi = async (companyId, params = {}) => {
  * @param {string} id - Purchase order ID
  */
 export const getPurchaseOrderApi = async (id) => {
-  const { data } = await API.get(`/purchase-orders/${id}`);
+  const { data } = await API.get(`/invoices/purchase-order/${id}`);
   return data;
 };
 
@@ -39,7 +39,7 @@ export const getPurchaseOrderApi = async (id) => {
  * Update an existing purchase order
  */
 export const updatePurchaseOrderApi = async (id, poData) => {
-  const { data } = await API.put(`/purchase-orders/${id}`, poData);
+  const { data } = await API.put(`/invoices/purchase-order/${id}`, poData);
   return data;
 };
 
@@ -47,7 +47,7 @@ export const updatePurchaseOrderApi = async (id, poData) => {
  * Delete a single purchase order
  */
 export const deletePurchaseOrderApi = async (id) => {
-  const { data } = await API.delete(`/purchase-orders/${id}`);
+  const { data } = await API.delete(`/invoices/purchase-order/${id}`);
   return data;
 };
 
@@ -55,7 +55,7 @@ export const deletePurchaseOrderApi = async (id) => {
  * Delete multiple purchase orders
  */
 export const deleteMultiplePurchaseOrdersApi = async (ids) => {
-  const { data } = await API.delete("/purchase-orders", {
+  const { data } = await API.delete("/invoices/purchase-order", {
     data: { ids },
   });
   return data;
@@ -64,7 +64,7 @@ export const deleteMultiplePurchaseOrdersApi = async (ids) => {
 // ==================== Document Downloads ====================
 
 export const downloadWordPurchaseOrderApi = async (id, config = {}) => {
-  const response = await API.get(`/purchase-orders/${id}/download/word`, {
+  const response = await API.get(`/invoices/purchase-order/${id}/download/word`, {
     responseType: "blob",
     ...config,
   });
@@ -72,7 +72,7 @@ export const downloadWordPurchaseOrderApi = async (id, config = {}) => {
 };
 
 export const downloadPdfPurchaseOrderApi = async (id, config = {}) => {
-  const response = await API.get(`/purchase-orders/${id}/download/pdf`, {
+  const response = await API.get(`/invoices/purchase-order/${id}/download/pdf`, {
     responseType: "blob",
     ...config,
   });
@@ -82,28 +82,28 @@ export const downloadPdfPurchaseOrderApi = async (id, config = {}) => {
 // ==================== Client / Vendor Data ====================
 
 export const getPurchaseOrderClientsApi = async () => {
-  const { data } = await API.get("/purchase-orders/clients");
+  const { data } = await API.get("/invoices/purchase-order/clients");
   return data;
 };
 
 // ==================== Status Management ====================
 
 export const updatePurchaseOrderStatusApi = async (id, status) => {
-  const { data } = await API.patch(`/purchase-orders/${id}/status`, { status });
+  const { data } = await API.patch(`/invoices/purchase-order/${id}/status`, { status });
   return data;
 };
 
 // ==================== Search & Lookup ====================
 
 export const searchPoReferencesApi = async (query) => {
-  const { data } = await API.get("/purchase-orders/search-numbers", {
+  const { data } = await API.get("/invoices/purchase-order/search-numbers", {
     params: { q: query },
   });
   return data;
 };
 
 export const searchPoNumbersApi = async (query, companyId) => {
-  const { data } = await API.get(`/purchase-orders/search/number`, {
+  const { data } = await API.get(`/invoices/purchase-order/search/number`, {
     params: {
       q: query,
       companyId,
@@ -115,28 +115,28 @@ export const searchPoNumbersApi = async (query, companyId) => {
 // ==================== Advanced Search ====================
 
 export const advancedSearchPurchaseOrdersApi = async (filters) => {
-  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/advanced/search
+  const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Changed from /invoices/purchase-order/advanced/search
     params: filters,
   });
   return data;
 };
 
 export const getPurchaseOrderFilterOptionsApi = async (companyId) => {
-  const { data } = await API.get("/purchase-orders/filter-options", {
+  const { data } = await API.get("/invoices/purchase-order/filter-options", {
     params: { companyId },
   });
   return data;
 };
 
 export const getPOProgressApi = async (id, companyId) => {
-  const { data } = await API.get(`/purchase-orders/${id}/progress`, {
+  const { data } = await API.get(`/invoices/purchase-order/${id}`, {
     params: companyId ? { companyId } : {},
   });
   return data;
 };
 
 export const getAllPurchaseOrdersApi = async (companyId, params = {}) => {
-  const { data } = await API.get(`/purchase-orders`, {  // ✅ Changed from /purchase-orders/all
+  const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Changed from /invoices/purchase-order/all
     params: {
       companyId,
       limit: 10000,
@@ -149,42 +149,42 @@ export const getAllPurchaseOrdersApi = async (companyId, params = {}) => {
 // ==================== Resources (Staffing/Headcount) ====================
 
 export const getResourcesApi = async (poId) => {
-  const { data } = await API.get(`/purchase-orders/${poId}/resources`);
+  const { data } = await API.get(`/invoices/purchase-order/${poId}/resources`);
   return data;
 };
 
 export const addResourceApi = async (poId, resourceData) => {
-  const { data } = await API.post(`/purchase-orders/${poId}/resources`, resourceData);
+  const { data } = await API.post(`/invoices/purchase-order/${poId}/resources`, resourceData);
   return data;
 };
 
 export const updateResourceApi = async (poId, resourceId, resourceData) => {
-  const { data } = await API.put(`/purchase-orders/${poId}/resources/${resourceId}`, resourceData);
+  const { data } = await API.put(`/invoices/purchase-order/${poId}/resources/${resourceId}`, resourceData);
   return data;
 };
 
 // ==================== Attendance (Staffing) ====================
 
 export const submitAttendanceApi = async (poId, attendanceInputs) => {
-  const { data } = await API.post(`/purchase-orders/${poId}/attendance`, { attendanceInputs });
+  const { data } = await API.post(`/invoices/purchase-order/${poId}/attendance`, { attendanceInputs });
   return data;
 };
 
 export const getAttendanceRecordsApi = async (poId, params = {}) => {
-  const { data } = await API.get(`/purchase-orders/${poId}/attendance`, { params });
+  const { data } = await API.get(`/invoices/purchase-order/${poId}/attendance`, { params });
   return data;
 };
 
 // ==================== Milestones (Project) ====================
 
 export const completeMilestoneApi = async (poId, milestoneId, completionData) => {
-  const { data } = await API.post(`/purchase-orders/${poId}/milestones/${milestoneId}/complete`, completionData);
+  const { data } = await API.post(`/invoices/purchase-order/${poId}/milestones/${milestoneId}/complete`, completionData);
   return data;
 };
 
 // ==================== Invoice Preview ====================
 
 export const getInvoicePreviewApi = async (poId, previewParams) => {
-  const { data } = await API.post(`/purchase-orders/${poId}/invoice-preview`, previewParams);
+  const { data } = await API.post(`/invoices/purchase-order/${poId}/invoice-preview`, previewParams);
   return data;
 };

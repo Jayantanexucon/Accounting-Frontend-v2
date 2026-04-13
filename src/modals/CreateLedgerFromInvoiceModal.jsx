@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from "react";
-import { API } from "../apis/api";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
+import {
+  completeInvoiceAccountingApi,
+  createClientLedgerFromInvoiceApi,
+  createJournalFromInvoiceApi,
+  validateInvoiceAccountsApi,
+} from "../apis/invoice.api";
 
 // Lucide Icons
 import {
@@ -57,18 +62,16 @@ const CreateLedgerFromInvoiceModal = ({
     setError(null);
 
     try {
-      const response = await API.get(
-        `/invoice-accounting/validate-accounts/${user.company._id}`,
-      );
+      const response = await validateInvoiceAccountsApi(user.company._id);
 
-      setValidationResult(response.data?.data);
+      setValidationResult(response.data);
 
-      if (response.data?.data.allRequiredAccountsExist) {
+      if (response.data?.allRequiredAccountsExist) {
         setStep(2);
         toast.success("All required accounts are configured");
       } else {
         const missingRequired =
-          response.data?.data.missingAccounts?.filter((acc) => !acc.optional) ||
+          response.data?.missingAccounts?.filter((acc) => !acc.optional) ||
           [];
         if (missingRequired.length > 0) {
           toast.error(`${missingRequired.length} required accounts missing`);
@@ -107,21 +110,16 @@ const CreateLedgerFromInvoiceModal = ({
       }
 
       // Use the complete accounting endpoint
-      const response = await API.post(
-        `/invoice-accounting/${user.company._id}/complete-accounting`,
-        {
-          invoiceId: invoiceData._id,
-        },
-      );
+      const response = await completeInvoiceAccountingApi(user.company._id, invoiceData._id);
 
-      setAccountingResult(response.data?.data);
-      setAccountingStatus(response.data?.data);
+      setAccountingResult(response?.data);
+      setAccountingStatus(response?.data);
 
       toast.success("Sales journal posted successfully!");
 
       // Call success callback
       if (onSuccess) {
-        onSuccess(response.data?.data);
+        onSuccess(response?.data);
       }
 
       setStep(3);
@@ -150,14 +148,9 @@ const CreateLedgerFromInvoiceModal = ({
         return;
       }
 
-      const response = await API.post(
-        `/invoice-accounting/${user.company._id}/create-ledger`,
-        {
-          invoiceId: invoiceData._id,
-        },
-      );
+      const response = await createClientLedgerFromInvoiceApi(user.company._id, invoiceData._id);
 
-      setAccountingResult(response.data?.data);
+      setAccountingResult(response?.data);
       toast.success("Client ledger created successfully");
 
       // Move to next step
@@ -185,21 +178,16 @@ const CreateLedgerFromInvoiceModal = ({
         return;
       }
 
-      const response = await API.post(
-        `/invoice-accounting/${user.company._id}/create-journal`,
-        {
-          invoiceId: invoiceData._id,
-        },
-      );
+      const response = await createJournalFromInvoiceApi(user.company._id, invoiceData._id);
 
-      setAccountingResult(response.data?.data);
-      setAccountingStatus(response.data?.data);
+      setAccountingResult(response?.data);
+      setAccountingStatus(response?.data);
 
       toast.success("Accounting journal created successfully");
 
       // Call success callback
       if (onSuccess) {
-        onSuccess(response.data?.data);
+        onSuccess(response?.data);
       }
 
       setStep(3);

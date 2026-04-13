@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from "react";
 import * as XLSX from "xlsx";
 import SideDialogBox from "../modals/SideDialogBox";
-import { API } from "../apis/api";
 import dayjs from "dayjs";
 import AdvancedInvoiceSearch from "./AdvancedInvoiceSearch";
 import CreateLedgerFromInvoiceModal from "../modals/CreateLedgerFromInvoiceModal";
@@ -37,6 +36,14 @@ import {
   Plus,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  deleteInvoiceApi,
+  downloadInvoicePdfApi,
+  downloadInvoiceWordApi,
+  getInvoiceByIdApi,
+  getInvoicesApi,
+  getInvoiceTdsReportApi,
+} from "../apis/invoice.api";
 
 export default function PreviousInvoicesComponent({ open, onClose }) {
   const { user } = useAuth();
@@ -83,15 +90,12 @@ export default function PreviousInvoicesComponent({ open, onClose }) {
   useEffect(() => {
     const fetchAllInvoices = async () => {
       try {
-        const response = await API.get(`/invoices/getall/${user.company._id}`, {
-          params: {
-            companyId: user.company._id,
-            approvalStatus: "Approved",
-            page: 1,
-            limit: 10000,
-          },
+        const response = await getInvoicesApi(user.company._id, {
+          approvalStatus: "Approved",
+          page: 1,
+          limit: 10000,
         });
-        setAllInvoices(response.data?.data || []);
+        setAllInvoices(response?.data || []);
       } catch (error) {
         console.error("Error fetching all invoices:", error);
       }
@@ -110,35 +114,26 @@ export default function PreviousInvoicesComponent({ open, onClose }) {
     setError(null);
 
     try {
-      const response = await API.get(`/invoices/getall/${user.company._id}`, {
-        params: {
-          companyId: user.company._id,
-          page: pagination.page,
-          limit: pagination.limit,
-          approvalStatus: "Approved",
-          sort: "-createdAt",
-          ...advancedFilters,
-        },
+      const response = await getInvoicesApi(user.company._id, {
+        page: pagination.page,
+        limit: pagination.limit,
+        approvalStatus: "Approved",
+        sort: "-createdAt",
+        ...advancedFilters,
       });
 
-      const invoicesData = response.data?.data || [];
+      const invoicesData = response?.data || [];
       setInvoices(invoicesData);
 
-      const allFilteredResponse = await API.get(
-  `/invoices/getall/${user.company._id}`,
-  {
-    params: {
-      companyId: user.company._id,
-      page: 1,
-      limit: 10000, // IMPORTANT
-      approvalStatus: "Approved",
-      sort: "-createdAt",
-      ...advancedFilters, // 🔥 SAME FILTERS
-    },
-  }
-);
+      const allFilteredResponse = await getInvoicesApi(user.company._id, {
+        page: 1,
+        limit: 10000,
+        approvalStatus: "Approved",
+        sort: "-createdAt",
+        ...advancedFilters,
+      });
 
-setFilteredAllInvoices(allFilteredResponse.data?.data || []);
+      setFilteredAllInvoices(allFilteredResponse?.data || []);
 
       if (response.data?.pagination) {
         setPagination((prev) => ({
@@ -254,15 +249,13 @@ setFilteredAllInvoices(allFilteredResponse.data?.data || []);
 
     setTdsDetailsLoading(true);
     try {
-      const response = await API.get("/tds-report", {
-        params: {
-          companyId: user.company._id,
-          fromDate: advancedFilters.invoiceDateFrom || advancedFilters.fromDate,
-          toDate: advancedFilters.invoiceDateTo || advancedFilters.toDate,
-        },
+      const response = await getInvoiceTdsReportApi({
+        companyId: user.company._id,
+        fromDate: advancedFilters.invoiceDateFrom || advancedFilters.fromDate,
+        toDate: advancedFilters.invoiceDateTo || advancedFilters.toDate,
       });
 
-      const rows = Array.isArray(response.data?.data) ? response.data.data : [];
+      const rows = Array.isArray(response?.data) ? response.data : [];
       const filteredRows = rows.filter((row) => {
         const matchesInvoice =
           !advancedFilters.invoiceNo ||
@@ -407,7 +400,7 @@ setFilteredAllInvoices(allFilteredResponse.data?.data || []);
     if (!invoiceToDelete) return;
 
     try {
-      await API.delete(`/invoices/delete/${invoiceToDelete._id}`);
+      await deleteInvoiceApi(invoiceToDelete._id);
       setDeleteDialogOpen(false);
       fetchInvoices();
       toast.success("Invoice deleted successfully");
@@ -421,9 +414,7 @@ setFilteredAllInvoices(allFilteredResponse.data?.data || []);
   const handleDownloadPdf = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/pdf`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoicePdfApi(invoiceId);
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -441,9 +432,7 @@ setFilteredAllInvoices(allFilteredResponse.data?.data || []);
   const handleDownloadWord = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
-      const response = await API.get(`/invoices/${invoiceId}/download/word`, {
-        responseType: "blob",
-      });
+      const response = await downloadInvoiceWordApi(invoiceId);
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -472,8 +461,8 @@ setFilteredAllInvoices(allFilteredResponse.data?.data || []);
     }
 
     try {
-      const response = await API.get(`/invoices/get/${invoice._id}`);
-      const fullInvoiceData = response.data?.data || invoice;
+      const response = await getInvoiceByIdApi(invoice._id);
+      const fullInvoiceData = response?.data || invoice;
 
       setCreateLedgerModal({
         open: true,

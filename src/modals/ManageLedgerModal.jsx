@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import { addAccountApi, updateAccountApi } from "../apis/accountApi";
 import { API } from "../apis/api";
+import { getInvoiceClientsApi } from "../apis/invoice.api";
 
 const GROUP_NATURE_DEFAULTS = {
   Asset: { accountType: "Balance Sheet", openingType: "Debit" },
@@ -114,8 +115,8 @@ export default function ManageLedgerModal({
     resetAuxiliaryState();
     if (isTradeReceivableGroup(group)) {
       try {
-        const res = await API.get("/invoices/invoice-clients");
-        setInvoiceClients(res.data.data || []);
+        const res = await getInvoiceClientsApi(user?.company?._id);
+        setInvoiceClients(res.data || []);
         setShowClients(true);
       } catch (error) {
         toast.error(error.message || "Failed to load clients");

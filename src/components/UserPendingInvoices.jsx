@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { toast } from "react-toastify";
 import { Calendar, Package, CreditCard, FileText, User, Banknote, Percent, ChevronDown, ChevronUp, Receipt, Clock, Edit, Trash2, X } from "lucide-react";
-import { API } from "../apis/api";
 import dayjs from "dayjs";
 import InvoiceDetailModal from "../modals/InvoiceDetailsModal";
 import { useNavigate } from "react-router-dom";
+import { deleteInvoiceApi, pendingApprovalInvoiceApi } from "../apis/invoice.api";
 
 // Premium SideDialogBox (matching admin approval style)
 const SideDialogBox = ({ open, onClose, title, subtitle, contents }) => {
@@ -82,19 +82,18 @@ export default function UserPendingInvoices({ open, onClose, user }) {
         if (!open || !user?.company?._id) return;
         setLoading(true);
 
-        const res = await API.get(`/invoices/pending-approval/${user.company._id}`);
+        const res = await pendingApprovalInvoiceApi(user.company._id, controller.signal);
 
-        if (res.data.success) {
-          const mapped = res.data.data
+        if (res.data) {
+          const mapped = (res.data.data || [])
             .map(invoice => {
-              if (!invoice.pendingVersion) return null;
               return {
                 id: invoice._id,
-                versionNo: invoice.pendingVersion.versionNo,
-                actionType: invoice.pendingVersion.actionType,
-                snapshot: invoice.pendingVersion.snapshot,
+                versionNo: invoice.versionNo,
+                actionType: "update",
+                snapshot: invoice,
                 invoiceData: invoice,
-                pendingCreatedAt: invoice.pendingVersion.createdAt || invoice.updatedAt,
+                pendingCreatedAt: invoice.updatedAt,
                 createdAt: invoice.createdAt
               };
             })
@@ -142,7 +141,7 @@ export default function UserPendingInvoices({ open, onClose, user }) {
     if (!window.confirm("Delete this pending invoice?")) return;
     try {
       setLoading(true);
-      await API.delete(`/invoices/pending/${item.id}`);
+      await deleteInvoiceApi(item.id);
       toast.success("Pending invoice deleted");
       setPendingItems(prev => prev.filter(i => i.id !== item.id));
     } catch (error) {

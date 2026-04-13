@@ -24,7 +24,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import dayjs from "dayjs";
-import { API } from "../apis/api";
+import { getPurchaseOrderApi, downloadPdfPurchaseOrderApi } from "../apis/purchaseOrderApi";
 import { motion, AnimatePresence } from "framer-motion";
 import InvoiceDetailsModal from "./InvoiceDetailsModal";
 import { useNavigate } from "react-router-dom";
@@ -350,9 +350,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await API.get(`/purchase-orders/${purchaseOrderId}`);
-      if (res.data.success) setPo(res.data.data);
-      else setError("Failed to load purchase order details");
+      const res = await getPurchaseOrderApi(purchaseOrderId);
+      const data = res?.data || res;
+      setPo(data);
     } catch {
       setError("Failed to load purchase order details");
     } finally {
@@ -363,7 +363,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const handleDownloadPDF = async () => {
     if (!po) return;
     try {
-      const res = await API.get(`/purchase-orders/${po._id}/download/pdf`, { responseType: "blob" });
+      const res = await downloadPdfPurchaseOrderApi(po._id);
       const url  = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href  = url;
