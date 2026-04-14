@@ -397,6 +397,8 @@ const PurchaseOrderData = () => {
         let address = v.address || v.vendorAddress || v.billingAddress?.line1 || v.registeredAddress || "";
         let stateCode = v.stateCode || v.gstStateCode || v.vendorState || "";
         let gstin = v.gstNumber || v.gstin || v.GSTIN || "";
+        // Try multiple possible code fields
+        let vendorCode = v.vendorCode || v.code || v.vendor_code || v.vendorId || "";
         return {
           _id: v._id,
           name: v.vendorName || v.name || "",
@@ -405,6 +407,7 @@ const PurchaseOrderData = () => {
           GSTIN: gstin,
           taxNumber: gstin || v.panNumber || "",
           vendorName: v.vendorName,
+          vendorCode: vendorCode,
           country: v.country || "",
           email: v.email || "",
         };

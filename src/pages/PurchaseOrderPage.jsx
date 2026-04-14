@@ -29,8 +29,13 @@ import {
   ArrowDownCircle,
   ArrowUpCircle,
   Building2,
+  CreditCard,
+  CalendarDays,
+  Receipt,
+  ListChecks,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
+import dayjs from "dayjs";
 
 // ─────────────────────────────────────────────────────────────────
 //  CONSTANTS
@@ -57,6 +62,11 @@ const PAYMENT_TERMS_OPTIONS = [
   },
 ];
 
+const HOURLY_DISTRIBUTION_OPTIONS = [
+  { key: "weekly", label: "Weekly", icon: CalendarDays, hint: "Invoice raised every week" },
+  { key: "monthly", label: "Monthly", icon: Calendar, hint: "Invoice raised every month" },
+];
+
 const colorMap = {
   blue: {
     bg: "bg-blue-50",
@@ -81,7 +91,8 @@ const STEPS = [
   { id: 2, label: "Entity", icon: Building },
   { id: 3, label: "Details", icon: FileText },
   { id: 4, label: "Line Items", icon: Target },
-  { id: 5, label: "Review", icon: Check },
+  { id: 5, label: "Distribution", icon: ListChecks },
+  { id: 6, label: "Review", icon: Check },
 ];
 
 // ─────────────────────────────────────────────────────────────────
@@ -124,6 +135,10 @@ export default function PurchaseOrderPage() {
   const [entitySearch, setEntitySearch] = useState("");
   const [entityDropdownOpen, setEntityDropdownOpen] = useState(false);
 
+  // Distribution state
+  const [hourlyDistribution, setHourlyDistribution] = useState("monthly"); // "weekly" or "monthly"
+  const [distributionBreakdown, setDistributionBreakdown] = useState([]);
+
   // Form state
   const [form, setForm] = useState({
     companyId,
@@ -160,6 +175,9 @@ export default function PurchaseOrderPage() {
     valueInWords: "",
     withSignature: false,
     notes: "",
+    // For storing distribution preferences
+    distributionType: null, // "weekly", "monthly", or null
+    invoiceSchedule: [], // array of { date, amount }
   });
 
   const [sameAsDeliverTo, setSameAsDeliverTo] = useState(false);
@@ -198,7 +216,6 @@ export default function PurchaseOrderPage() {
           const vendorRes = await getVendors(companyId);
           let vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
           const normalized = vendorList.map((v) => {
-            // Enhanced address mapping
             let address = v.address || v.vendorAddress || v.billingAddress?.line1 || v.registeredAddress || "";
             let stateCode = v.stateCode || v.gstStateCode || v.vendorState || "";
             let gstin = v.gstNumber || v.gstin || v.GSTIN || "";
@@ -300,7 +317,10 @@ export default function PurchaseOrderPage() {
             poDate: fmt(d.poDate),
             deliveryDate: fmt(d.deliveryDate),
             items: d.items?.map((item) => ({ ...item, total: item.totalAmount })) || prev.items,
+            milestones: d.milestones || prev.milestones,
+            distributionType: d.distributionType || null,
           }));
+          if (d.distributionType) setHourlyDistribution(d.distributionType);
         })
         .catch(err => {
           console.error(err);
@@ -308,6 +328,94 @@ export default function PurchaseOrderPage() {
         });
     }
   }, [editId, lockedDirection]);
+
+  // Recalculate distribution breakdown when relevant data changes
+  useEffect(() => {
+    if (form.paymentTerms === "monthly" && form.poDate && form.deliveryDate && form.totalAmount > 0) {
+      calculateMonthlyDistribution();
+    } else if (form.paymentTerms === "hourly" && form.poDate && form.deliveryDate && form.totalAmount > 0 && hourlyDistribution) {
+      calculateHourlyDistribution();
+    } else if (form.paymentTerms === "milestone" && form.milestones.length > 0) {
+      calculateMilestoneBreakdown();
+    } else {
+      setDistributionBreakdown([]);
+    }
+  }, [form.paymentTerms, form.poDate, form.deliveryDate, form.totalAmount, form.milestones, hourlyDistribution]);
+
+  const calculateMonthlyDistribution = () => {
+    const start = dayjs(form.poDate);
+    const end = dayjs(form.deliveryDate);
+    if (!start.isValid() || !end.isValid() || end.isBefore(start)) {
+      setDistributionBreakdown([]);
+      return;
+    }
+    const totalDays = end.diff(start, "day") + 1;
+    let numMonths = Math.ceil(totalDays / 30);
+    if (numMonths < 1) numMonths = 1;
+    const amountPerMonth = form.totalAmount / numMonths;
+    const breakdown = [];
+    let current = start.clone();
+    for (let i = 0; i < numMonths; i++) {
+      let monthEnd = current.add(1, "month").subtract(1, "day");
+      if (monthEnd.isAfter(end)) monthEnd = end;
+      breakdown.push({
+        period: `${current.format("MMM YYYY")} - ${monthEnd.format("MMM YYYY")}`,
+        amount: amountPerMonth,
+        date: current.format("YYYY-MM-DD"),
+      });
+      current = current.add(1, "month");
+    }
+    setDistributionBreakdown(breakdown);
+    setForm(prev => ({ ...prev, invoiceSchedule: breakdown, distributionType: "monthly" }));
+  };
+
+  const calculateHourlyDistribution = () => {
+    const start = dayjs(form.poDate);
+    const end = dayjs(form.deliveryDate);
+    if (!start.isValid() || !end.isValid() || end.isBefore(start)) {
+      setDistributionBreakdown([]);
+      return;
+    }
+    const totalDays = end.diff(start, "day") + 1;
+    let numPeriods = 0;
+    if (hourlyDistribution === "weekly") {
+      numPeriods = Math.ceil(totalDays / 7);
+    } else {
+      numPeriods = Math.ceil(totalDays / 30);
+    }
+    if (numPeriods < 1) numPeriods = 1;
+    const amountPerPeriod = form.totalAmount / numPeriods;
+    const breakdown = [];
+    let current = start.clone();
+    for (let i = 0; i < numPeriods; i++) {
+      let periodEnd;
+      if (hourlyDistribution === "weekly") {
+        periodEnd = current.add(6, "day");
+      } else {
+        periodEnd = current.add(1, "month").subtract(1, "day");
+      }
+      if (periodEnd.isAfter(end)) periodEnd = end;
+      breakdown.push({
+        period: `${current.format("DD MMM")} - ${periodEnd.format("DD MMM")}`,
+        amount: amountPerPeriod,
+        date: current.format("YYYY-MM-DD"),
+      });
+      current = periodEnd.add(1, "day");
+    }
+    setDistributionBreakdown(breakdown);
+    setForm(prev => ({ ...prev, invoiceSchedule: breakdown, distributionType: hourlyDistribution }));
+  };
+
+  const calculateMilestoneBreakdown = () => {
+    const breakdown = form.milestones.map((m, idx) => ({
+      period: m.title || `Milestone ${idx + 1}`,
+      amount: m.amount || 0,
+      percentage: m.percentage || 0,
+      dueDate: m.dueDate,
+    }));
+    setDistributionBreakdown(breakdown);
+    setForm(prev => ({ ...prev, invoiceSchedule: breakdown, distributionType: "milestone" }));
+  };
 
   // Filter entities based on search
   const filteredEntities = (mode === "client" ? clients : vendors).filter(e => {
@@ -432,6 +540,7 @@ export default function PurchaseOrderPage() {
       if (field === "amount") {
         milestones[index].percentage = prev.totalAmount > 0 ? Math.round((Number(value) / prev.totalAmount) * 10000) / 100 : 0;
       }
+      // Update totalAmount if needed? No, totalAmount is set separately.
       return { ...prev, milestones };
     });
   };
@@ -484,6 +593,9 @@ export default function PurchaseOrderPage() {
         ...(form.poreferencevalue && { poreferencevalue: form.poreferencevalue }),
         ...(form.paymentTerms === "monthly" && { paymentSchedule: "monthly" }),
         ...(form.milestones?.length && { milestones: form.milestones }),
+        // Store distribution info
+        distributionType: form.distributionType,
+        invoiceSchedule: form.invoiceSchedule,
       };
 
       let res;
@@ -518,6 +630,11 @@ export default function PurchaseOrderPage() {
     if (step === 4) {
       if (form.paymentTerms === "milestone") return form.milestones.length > 0;
       return form.items.length > 0 && form.items[0].description.trim() !== "";
+    }
+    if (step === 5) {
+      // Distribution step: for milestone and monthly it's auto, for hourly require distribution selection
+      if (form.paymentTerms === "hourly") return !!hourlyDistribution;
+      return true;
     }
     return true;
   };
@@ -575,8 +692,12 @@ export default function PurchaseOrderPage() {
                 valueInWords: "",
                 withSignature: false,
                 notes: "",
+                distributionType: null,
+                invoiceSchedule: [],
               });
               setSameAsDeliverTo(false);
+              setHourlyDistribution("monthly");
+              setDistributionBreakdown([]);
             }} className="px-5 py-2 text-sm font-medium border border-slate-200 rounded-lg hover:bg-slate-50 transition">
               New PO
             </button>
@@ -812,8 +933,120 @@ export default function PurchaseOrderPage() {
           </div>
         )}
 
-        {/* STEP 5: Review */}
+        {/* STEP 5: Distribution & Breakdown */}
         {step === 5 && (
+          <div>
+            <h2 className="text-lg font-semibold text-slate-800 mb-1">Invoice Distribution</h2>
+            <p className="text-sm text-slate-500 mb-6">Review how the total amount will be split across invoices.</p>
+
+            {form.paymentTerms === "monthly" && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5 mb-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar className="h-5 w-5 text-blue-500" />
+                  <h3 className="font-semibold text-slate-800">Monthly Invoice Schedule</h3>
+                </div>
+                <p className="text-sm text-slate-600 mb-3">
+                  Based on PO Date ({dayjs(form.poDate).format("DD MMM YYYY")}) and End Date ({dayjs(form.deliveryDate).format("DD MMM YYYY")}),
+                  a total of <strong>{distributionBreakdown.length}</strong> monthly invoices will be generated.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr><th className="px-4 py-2 text-left">Period</th><th className="px-4 py-2 text-right">Amount (₹)</th></tr>
+                    </thead>
+                    <tbody>
+                      {distributionBreakdown.map((item, idx) => (
+                        <tr key={idx} className="border-t"><td className="px-4 py-2">{item.period}</td><td className="px-4 py-2 text-right font-medium">₹ {item.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 text-right text-sm font-semibold">Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+              </div>
+            )}
+
+            {form.paymentTerms === "hourly" && (
+              <div className="space-y-4">
+                <div className="bg-white border border-slate-200 rounded-xl p-5">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Clock className="h-5 w-5 text-amber-500" />
+                    <h3 className="font-semibold text-slate-800">Invoice Frequency</h3>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    {HOURLY_DISTRIBUTION_OPTIONS.map(opt => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setHourlyDistribution(opt.key)}
+                        className={`p-4 rounded-xl border-2 transition-all text-left ${hourlyDistribution === opt.key ? `${colors.bg} ${colors.border} ring-2 ${colors.ring}` : "bg-white border-slate-200"}`}
+                      >
+                        <opt.icon size={20} className={hourlyDistribution === opt.key ? colors.text : "text-slate-400"} />
+                        <p className={`font-semibold mt-2 ${hourlyDistribution === opt.key ? colors.text : "text-slate-700"}`}>{opt.label}</p>
+                        <p className="text-xs text-slate-500">{opt.hint}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {distributionBreakdown.length > 0 && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-5">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Receipt className="h-5 w-5 text-green-500" />
+                      <h3 className="font-semibold text-slate-800">{hourlyDistribution === "weekly" ? "Weekly" : "Monthly"} Invoice Schedule</h3>
+                    </div>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Based on PO Date ({dayjs(form.poDate).format("DD MMM YYYY")}) and End Date ({dayjs(form.deliveryDate).format("DD MMM YYYY")}),
+                      a total of <strong>{distributionBreakdown.length}</strong> {hourlyDistribution === "weekly" ? "weekly" : "monthly"} invoices will be generated.
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50">
+                          <tr><th className="px-4 py-2 text-left">Period</th><th className="px-4 py-2 text-right">Amount (₹)</th></tr>
+                        </thead>
+                        <tbody>
+                          {distributionBreakdown.map((item, idx) => (
+                            <tr key={idx} className="border-t"><td className="px-4 py-2">{item.period}</td><td className="px-4 py-2 text-right font-medium">₹ {item.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-3 text-right text-sm font-semibold">Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {form.paymentTerms === "milestone" && (
+              <div className="bg-white border border-slate-200 rounded-xl p-5">
+                <div className="flex items-center gap-2 mb-4">
+                  <Target className="h-5 w-5 text-purple-500" />
+                  <h3 className="font-semibold text-slate-800">Milestone Breakdown</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr><th className="px-4 py-2 text-left">Milestone</th><th className="px-4 py-2 text-right">%</th><th className="px-4 py-2 text-right">Amount (₹)</th><th className="px-4 py-2 text-left">Due Date</th></tr>
+                    </thead>
+                    <tbody>
+                      {distributionBreakdown.map((item, idx) => (
+                        <tr key={idx} className="border-t"><td className="px-4 py-2">{item.period}</td><td className="px-4 py-2 text-right">{item.percentage}%</td><td className="px-4 py-2 text-right font-medium">₹ {item.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td><td className="px-4 py-2">{item.dueDate ? dayjs(item.dueDate).format("DD MMM YYYY") : "-"}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 text-right text-sm font-semibold">Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+              </div>
+            )}
+
+            {!form.paymentTerms && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center text-amber-700 text-sm">
+                Please complete previous steps first.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP 6: Review */}
+        {step === 6 && (
           <div>
             <h2 className="text-lg font-semibold text-slate-800 mb-1">Review & Submit</h2>
             <p className="text-sm text-slate-500 mb-6">Check everything before creating the PO.</p>
@@ -825,7 +1058,11 @@ export default function PurchaseOrderPage() {
                   <div><p className="text-xs text-slate-400 mb-1">{mode === "client" ? "Client" : "Vendor"}</p><p className="text-sm font-medium text-slate-700">{mode === "client" ? form.client?.name : form.vendor?.name}</p></div>
                   <div><p className="text-xs text-slate-400 mb-1">PO Date</p><p className="text-sm font-medium text-slate-700">{form.poDate}</p></div>
                   <div><p className="text-xs text-slate-400 mb-1">Total PO Value</p><p className="text-xl font-bold text-slate-800">₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</p></div>
-                  {form.paymentTerms === "milestone" && <div><p className="text-xs text-slate-400 mb-1">Milestones</p><p className="text-sm font-medium text-slate-700">{form.milestones.length} milestone(s) defined</p></div>}
+                  <div><p className="text-xs text-slate-400 mb-1">Distribution Schedule</p><p className="text-sm font-medium text-slate-700">
+                    {form.paymentTerms === "monthly" && `${distributionBreakdown.length} monthly invoices`}
+                    {form.paymentTerms === "hourly" && `${distributionBreakdown.length} ${hourlyDistribution} invoices`}
+                    {form.paymentTerms === "milestone" && `${form.milestones.length} milestone(s)`}
+                  </p></div>
                 </div>
               </div>
               {form.valueInWords && <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-3"><p className="text-xs text-slate-400 mb-1">Amount in Words</p><p className="text-sm text-slate-600 italic">{form.valueInWords}</p></div>}
@@ -837,7 +1074,7 @@ export default function PurchaseOrderPage() {
         {/* Navigation buttons */}
         <div className="flex justify-between mt-8">
           <button onClick={() => (step > 1 ? setStep(step - 1) : navigate(-1))} className="px-5 py-2.5 text-sm font-medium border border-slate-200 rounded-xl hover:bg-slate-50 transition flex items-center gap-2"><ArrowLeft size={15} /> Back</button>
-          {step < 5 ? (
+          {step < 6 ? (
             <button onClick={() => canProceed() && setStep(step + 1)} disabled={!canProceed()} className={`px-6 py-2.5 text-sm font-medium rounded-xl transition flex items-center gap-2 ${canProceed() ? `${colors.bg} ${colors.text} hover:opacity-90` : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}>Continue <ChevronRight size={15} /></button>
           ) : (
             <button onClick={handleSubmit} disabled={loading} className="px-6 py-2.5 text-sm font-semibold rounded-xl bg-slate-800 text-white hover:bg-slate-700 transition flex items-center gap-2 disabled:opacity-60">{loading ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}{isEditing ? "Update PO" : "Create PO"}</button>
