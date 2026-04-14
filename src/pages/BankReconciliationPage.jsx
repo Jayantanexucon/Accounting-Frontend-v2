@@ -25,6 +25,8 @@ import {
   unmatchApi,
   uploadBankStatementApi,
 } from "../apis/reconciliationApi";
+import { getAccountsApi } from "../apis/accountApi";
+import AccountSearchDropdown from "../components/AccountSearchDropdown";
 
 const statusStyles = {
   MATCHED: "bg-emerald-100 text-emerald-700 border-emerald-200",
@@ -60,7 +62,7 @@ const readWorkbookRows = async (file) => {
 };
 
 const getAvailablePaymentAmount = (payment) => {
-  const total = Number(payment.grossAmount || payment.amountPaid || 0);
+  const total = Math.abs(Number(payment.amount || 0));
   const allocated = (payment.reconciliationAllocations || []).reduce(
     (sum, item) => sum + Number(item.allocatedAmount || 0),
     0,
@@ -102,14 +104,31 @@ export default function BankReconciliationPage() {
     reference: "",
     notes: "",
   });
+  const [selectedLedgerId, setSelectedLedgerId] = useState("");
 
-  const queryKey = ["bank-reconciliation-v2", companyId, statusFilter, search];
+  const queryKey = ["bank-reconciliation-v2", companyId, statusFilter, search, selectedLedgerId];
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["bank-reconciliation-v2", companyId] });
+
+  const accountsQuery = useQuery({
+    queryKey: ["accounts", companyId],
+    queryFn: () => getAccountsApi(companyId),
+    enabled: Boolean(companyId),
+  });
+
+  const allAccounts = accountsQuery.data?.data || [];
+  const bankAccounts = allAccounts.filter(acc => 
+    (acc.groupName || "").toLowerCase().includes("bank") || 
+    (acc.groupName || "").toLowerCase().includes("cash")
+  );
 
   const overviewQuery = useQuery({
     queryKey,
-    queryFn: () => getReconciliationOverviewApi(companyId, { status: statusFilter, search }),
-    enabled: Boolean(companyId),
+    queryFn: () => getReconciliationOverviewApi(companyId, { 
+      status: statusFilter, 
+      search,
+      bankLedgerId: selectedLedgerId
+    }),
+    enabled: Boolean(companyId && selectedLedgerId),
   });
 
   const uploadMutation = useMutation({
@@ -202,6 +221,10 @@ export default function BankReconciliationPage() {
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !companyId) return;
+    if (!selectedLedgerId) {
+      toast.error("Please select a bank account first");
+      return;
+    }
 
     try {
       const rows = await readWorkbookRows(file);
@@ -214,6 +237,7 @@ export default function BankReconciliationPage() {
         description: row.description || row.Description || row.Remarks,
         balance: row.balance || row.Balance,
         fileName: file.name,
+        bankLedgerId: selectedLedgerId, // Added this
       }));
       await uploadMutation.mutateAsync({ companyId, transactions });
     } catch (error) {
@@ -299,7 +323,18 @@ export default function BankReconciliationPage() {
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Tally Style BRS</p>
             <h1 className="mt-1 text-2xl font-bold text-slate-900">Bank Reconciliation</h1>
-            <p className="mt-1 max-w-3xl text-sm text-slate-500">
+            <div className="mt-4 w-full max-w-sm">
+              <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Select Bank Account
+              </label>
+              <AccountSearchDropdown
+                value={selectedLedgerId}
+                onChange={setSelectedLedgerId}
+                options={bankAccounts}
+                placeholder="Choose bank ledger..."
+              />
+            </div>
+            <p className="mt-4 max-w-3xl text-sm text-slate-500">
               Match bank statement lines with posted payments, suggest exact and timing matches, allow partial allocation, and create missing payments without changing journals during reconciliation.
             </p>
           </div>
@@ -467,7 +502,7 @@ export default function BankReconciliationPage() {
             <table className="min-w-full divide-y divide-slate-100 text-xs">
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  {["Invoice", "Date", "Amount", "Free", "Suggestion", "Allocate"].map((label) => (
+                  {["Entry/Ref", "Date", "Amount", "Free", "Status", "Allocate"].map((label) => (
                     <th key={label} className="px-4 py-3 text-left font-semibold text-slate-500">
                       {label}
                     </th>
@@ -483,12 +518,14 @@ export default function BankReconciliationPage() {
                   return (
                     <tr key={payment._id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
-                        <div className="font-bold text-slate-800">{payment.invoiceId?.invoiceNo || "Manual"}</div>
-                        <div className="text-[11px] text-slate-500">{payment.reference || "No ref"}</div>
+                        <div className="font-bold text-slate-800">
+                          {payment.paymentDetails?.invoice?.invoiceNo || payment.reference || "Manual Entry"}
+                        </div>
+                        <div className="text-[11px] text-slate-500 line-clamp-1">{payment.description || "No description"}</div>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{fmtDate(payment.paymentDate)}</td>
+                      <td className="px-4 py-3 text-slate-600">{fmtDate(payment.date)}</td>
                       <td className="px-4 py-3 font-black text-slate-900">
-                        {fmtCurrency(payment.grossAmount || payment.amountPaid)}
+                        {fmtCurrency(payment.amount)}
                       </td>
                       <td className="px-4 py-3 text-slate-600">{fmtCurrency(freeAmount)}</td>
                       <td className="px-4 py-3">
@@ -537,7 +574,7 @@ export default function BankReconciliationPage() {
                 {!filteredPayments.length && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                      No payments available
+                      No book entries available
                     </td>
                   </tr>
                 )}
