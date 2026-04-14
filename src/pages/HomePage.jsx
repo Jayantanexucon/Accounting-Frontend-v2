@@ -19,6 +19,7 @@ import { getInvoicesApi } from "../apis/invoice.api";
 import NotificationBell from "../modules/notification/NotificationBell";
 import LatestJournals from "../components/LatestJournals";
 import JournalList from "../components/JournalListComponent";
+import { useFinancialYear } from "../contexts/FinancialYearContext";
 
 /* ─── data fetchers ───────────────────────────────────── */
 const fetchRecentInvoices = async (companyId) => {
@@ -45,8 +46,8 @@ const fetchRecentPOs = async (companyId) => {
     .slice(0, 5);
 };
 
-const fetchMonthlyFinance = async (companyId) => {
-  const res = await getMonthlyFinancialSummaryFYApi(companyId, new Date().getFullYear());
+const fetchMonthlyFinance = async (companyId, financialYearEnding) => {
+  const res = await getMonthlyFinancialSummaryFYApi(companyId, financialYearEnding);
   return res.data.summary || [];
 };
 
@@ -89,6 +90,7 @@ const fmtShort = (n) => {
 ══════════════════════════════════════════════════════════ */
 export default function HomePage() {
   const { user } = useAuth();
+  const { selectedFinancialYearEnding, selectedFinancialYearLabel } = useFinancialYear();
 
   const [journalDialogOpen, setJournalDialogOpen]   = useState(false);
   const [selectedInvoiceId, setSelectedInvoiceId]   = useState(null);
@@ -119,8 +121,8 @@ export default function HomePage() {
   });
 
   const { data: monthlyFinance = [], isLoading: loadingFinance } = useQuery({
-    queryKey: ["monthlyFinance", companyId],
-    queryFn: () => fetchMonthlyFinance(companyId),
+    queryKey: ["monthlyFinance", companyId, selectedFinancialYearEnding],
+    queryFn: () => fetchMonthlyFinance(companyId, selectedFinancialYearEnding),
     enabled: !!companyId,
     staleTime: 1000 * 60 * 5,
   });
@@ -137,7 +139,7 @@ export default function HomePage() {
       label: "Total Revenue",
       value: fmtShort(totalRevenue),
       fullValue: fmt(totalRevenue),
-      sub: `${monthlyFinance.length} months`,
+      sub: `${selectedFinancialYearLabel} • ${monthlyFinance.length} months`,
       icon: <TrendingUp size={22} className="text-white" />,
       gradient: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)",
       glow: "#93c5fd",
@@ -147,7 +149,7 @@ export default function HomePage() {
       label: "Total Expenses",
       value: fmtShort(totalExpense),
       fullValue: fmt(totalExpense),
-      sub: `${monthlyFinance.length} months`,
+      sub: `${selectedFinancialYearLabel} • ${monthlyFinance.length} months`,
       icon: <TrendingDown size={22} className="text-white" />,
       gradient: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#f87171 100%)",
       glow: "#fca5a5",
@@ -157,7 +159,7 @@ export default function HomePage() {
       label: isProfitable ? "Net Profit" : "Net Loss",
       value: fmtShort(Math.abs(totalProfit)),
       fullValue: fmt(Math.abs(totalProfit)),
-      sub: `Margin: ${totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : 0}%`,
+      sub: `${selectedFinancialYearLabel} • Margin: ${totalRevenue > 0 ? ((totalProfit / totalRevenue) * 100).toFixed(1) : 0}%`,
       icon: isProfitable
         ? <TrendingUp size={22} className="text-white" />
         : <TrendingDown size={22} className="text-white" />,

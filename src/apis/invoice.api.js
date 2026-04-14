@@ -177,6 +177,27 @@ export const getInvoicePaymentsApi = async (companyId, invoiceId) => {
   return data;
 };
 
+export const getPOTaxReportApi = async (params = {}) => {
+  const { data } = await API.get(`${INVOICE_BASE}/reports/po-tax`, {
+    params,
+  });
+  return data;
+};
+
+export const getClientTaxReportApi = async (params = {}) => {
+  const { data } = await API.get(`${INVOICE_BASE}/reports/client-tax`, {
+    params,
+  });
+  return data;
+};
+
+export const getTaxSummaryApi = async (params = {}) => {
+  const { data } = await API.get(`${INVOICE_BASE}/reports/tax-summary`, {
+    params,
+  });
+  return data;
+};
+
 export const recordInvoicePaymentApi = async ({
   invoiceId,
   companyId,
