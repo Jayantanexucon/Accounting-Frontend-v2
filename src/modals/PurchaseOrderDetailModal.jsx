@@ -1067,7 +1067,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-4 py-3">
                               <F label="Amount" value={fmtC(m.amount, currency)} />
                               <F label="Invoiced" value={fmtC(m.invoicedAmount || 0, currency)} />
-                              <F label="Remaining" value={fmtC(m.remainingAmount ?? m.amount ?? 0, currency)} />
+                              <F label="Remaining" value={fmtC(Math.max(0, (m.amount || 0) - (m.invoicedAmount || 0)), currency)} />
                               {m.dueDate && <F label="Due Date" value={fmt(m.dueDate)} />}
                               {m.completedDate && <F label="Completed" value={fmt(m.completedDate)} />}
                               {m.notes && <F label="Notes" value={m.notes} />}
@@ -1077,9 +1077,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       </div>
                       <div className="border-t border-slate-100 px-5 py-3 bg-slate-50/60 flex items-center justify-between">
                         <div className="flex gap-4 text-[10px] text-slate-500">
-                          <span>Completed / Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m) => m.status === "completed" || m.status === "invoiced").length}</strong></span>
-                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m) => m.status === "partially_invoiced").length}</strong></span>
-                          <span>Pending / In Progress: <strong className="text-amber-700">{po.milestones.filter((m) => m.status === "pending" || m.status === "in_progress").length}</strong></span>
+                          <span>Fully Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) >= (m.amount || 0) && (m.amount || 0) > 0).length}</strong></span>
+                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) > 0 && (m.invoicedAmount || 0) < (m.amount || 0)).length}</strong></span>
+                          <span>Pending: <strong className="text-amber-700">{po.milestones.filter((m) => !(m.invoicedAmount > 0)).length}</strong></span>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Total Milestone Value</p>

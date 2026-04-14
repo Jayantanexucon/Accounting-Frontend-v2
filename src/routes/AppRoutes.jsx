@@ -37,6 +37,9 @@ const ViewAllInvoices = lazy(() => import("../pages/ViewAllInvoices"));
 const ClientPurchaseOrders = lazy(
   () => import("../pages/ClientPurchaseOrders"),
 );
+const VendorPurchaseOrders = lazy(
+  () => import("../pages/VendorPurchaseOrders"),
+);
 const BulkPurchaseOrderPage = lazy(
   () => import("../pages/BulkPurchaseOrderPage"),
 );
@@ -128,6 +131,10 @@ export default function AppRoutes() {
               <Route
                 path="/purchaseorder-data/client/:clientId"
                 element={<ClientPurchaseOrders />}
+              />
+              <Route
+                path="/purchaseorder-data/vendor/:vendorId"
+                element={<VendorPurchaseOrders />}
               />
               <Route
                 path="purchase-order/bulk-po-upload"

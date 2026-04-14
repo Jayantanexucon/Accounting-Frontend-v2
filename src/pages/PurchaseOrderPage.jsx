@@ -8,6 +8,7 @@ import {
   updatePurchaseOrderApi,
 } from "../apis/purchaseOrderApi";
 import { getCompanyByIdApi } from "../apis/userApi";
+import { getVendorById } from "../apis/vendorApi";
 import {
   X,
   ChevronDown,
@@ -144,7 +145,8 @@ export default function PurchaseOrderPage() {
   const [companyInfo, setCompanyInfo] = useState(null);
   const [clientSearch, setClientSearch] = useState("");
   const [clientDropdownOpen, setClientDropdownOpen] = useState(false);
-
+  const prefilledVendorId = searchParams.get("vendorId");
+  const prefilledDirection = searchParams.get("direction");
   // Form state
   const [form, setForm] = useState({
     companyId,
@@ -285,6 +287,23 @@ export default function PurchaseOrderPage() {
         });
     }
   }, [editId]);
+
+  useEffect(() => {
+    if (prefilledVendorId && !editId) {
+      import("../apis/vendorApi").then(({ getVendorById }) => {
+        getVendorById(prefilledVendorId).then(res => {
+          const vendor = res.data?.data || res.data;
+          setForm(prev => ({
+            ...prev,
+            direction: prefilledDirection === "payable" ? "payable" : "payable",
+            client: { _id: vendor._id, name: vendor.vendorName, address: vendor.address, stateCode: vendor.stateCode, GSTIN: vendor.gstNumber },
+            deliverTo: { name: vendor.vendorName, address: vendor.address, stateCode: vendor.stateCode, GSTIN: vendor.gstNumber },
+          }));
+          setSameAsClient(true);
+        }).catch(console.error);
+      });
+    }
+  }, [prefilledVendorId, prefilledDirection, editId]);
 
   // ─────────────────────────────────────────────────────────────
   //  FORM HELPERS

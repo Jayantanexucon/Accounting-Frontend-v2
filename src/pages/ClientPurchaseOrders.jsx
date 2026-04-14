@@ -92,13 +92,19 @@ const ClientPurchaseOrders = () => {
   const getOpenAmount = (po) =>
     Math.max(
       0,
-      Number(
-        po.remainingInvoicableAmount ??
-        ((po.totalAmount || 0) - (po.totalInvoicedAmount || 0)),
-      ),
+      (po.totalAmount || 0) - (po.totalInvoicedAmount || 0),
     );
   const shouldShowClosedPaidAmount = (po, openAmount) =>
     po.status === "CLOSED" && openAmount === 0;
+
+  const getDerivedStatus = (po) => {
+    if (po.status === "CLOSED") return "CLOSED";
+    const invoiced = po.totalInvoicedAmount || 0;
+    const total = po.totalAmount || 0;
+    if (invoiced >= total && total > 0) return "FULLY_INVOICED";
+    if (invoiced > 0) return "PARTIALLY_INVOICED";
+    return "OPEN";
+  };
 
   // ---------- Helper: resolve client ID from PO (fallback by name) ----------
   const resolveClientId = (po, clientsList) => {
@@ -517,9 +523,9 @@ const ClientPurchaseOrders = () => {
                             {po.poNumber}
                           </span>
                           <span
-                            className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(po.status)}`}
+                            className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(getDerivedStatus(po))}`}
                           >
-                            {po.status}
+                            {getDerivedStatus(po)}
                           </span>
                           <Eye
                             className="h-3 w-3 text-blue-500 inline mr-1 cursor-pointer"

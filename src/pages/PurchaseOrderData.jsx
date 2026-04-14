@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { API } from "../apis/api";
 import { getClientsApi } from "../apis/clientApi";
+import { getVendors } from "../apis/vendorApi";
 import {
   getPurchaseOrdersApi,
   advancedSearchPurchaseOrdersApi,
@@ -37,6 +38,7 @@ import {
   Calendar,
   Hash,
   Globe,
+  Building2,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────
@@ -46,7 +48,7 @@ const PO_STATUS_OPTIONS = [
   { value: "", label: "All PO Statuses" },
   { value: "OPEN", label: "Open" },
   { value: "PARTIALLY_INVOICED", label: "Partially Invoiced" },
-  { value: "INVOICE_CREATED", label: "Invoice Created" },
+  { value: "FULLY_INVOICED", label: "Fully Invoiced" },
   { value: "CLOSED", label: "Closed / Fully Paid" },
 ];
 
@@ -54,7 +56,7 @@ const INVOICE_STATE_OPTIONS = [
   { value: "", label: "All Invoice States" },
   { value: "OPEN_NO_INVOICE", label: "Open / No Invoice" },
   { value: "PARTIALLY_INVOICED", label: "Partially Invoiced" },
-  { value: "INVOICE_CREATED", label: "Invoice Created" },
+  { value: "FULLY_INVOICED", label: "Fully Invoiced" },
   { value: "FULLY_PAID", label: "Fully Paid" },
 ];
 
@@ -92,8 +94,8 @@ const AdvancedSearchPanel = ({ isOpen, filters, onApply, onClear, isLoading, com
   useEffect(() => {
     const nextClients = clientSearchQuery.trim()
       ? clientOptions.filter((name) =>
-          name.toLowerCase().includes(clientSearchQuery.toLowerCase()),
-        )
+        name.toLowerCase().includes(clientSearchQuery.toLowerCase()),
+      )
       : clientOptions;
     setFilteredClients(nextClients);
   }, [clientOptions, clientSearchQuery]);
@@ -288,10 +290,7 @@ const ActivityBadge = ({ lastCreated }) => {
 const getOpenAmount = (po) =>
   Math.max(
     0,
-    Number(
-      po?.remainingInvoicableAmount ??
-        ((po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0)),
-      ),
+    (po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0),
   );
 
 const getInvoiceState = (po) => {
@@ -311,7 +310,7 @@ const getInvoiceState = (po) => {
   }
 
   if (totalInvoicedAmount >= totalAmount) {
-    return "INVOICE_CREATED";
+    return "FULLY_INVOICED";
   }
 
   return "PARTIALLY_INVOICED";
@@ -339,12 +338,13 @@ const PurchaseOrderData = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
-const companyId =
-  localStorage.getItem("selectedCompanyId") ||
-  user?.company?._id ||
-  selectedCompany?._id;
+  const companyId =
+    localStorage.getItem("selectedCompanyId") ||
+    user?.company?._id ||
+    selectedCompany?._id;
 
   const [clients, setClients] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -355,63 +355,69 @@ const companyId =
   const [openLogs, setOpenLogs] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [sort, setSort] = useState({ key: "clientName", dir: "asc" });
-  const [page, setPage]         = useState(1);
+  const [sort, setSort] = useState({ key: "name", dir: "asc" });
+  const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState("receivable"); // "receivable" or "payable"
+
   const openClientDetails = (clientId) => { setSelectedClientId(clientId); setModalOpen(true); };
 
   const getFirstTaxId = (client) => {
     const taxFields = [client.gstNumber, client.panNumber, client.vatNumber, client.einNumber, client.ssnNumber, client.companyNumber, client.nationalIdNumber, client.taxIdentificationNumber];
     return taxFields.find(Boolean) || "N/A";
   };
+
   useEffect(() => {
-  const timer = setTimeout(() => {
-    setDebouncedSearchQuery(searchQuery);
-  }, 300); // 300 ms delay
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-  return () => clearTimeout(timer);
-}, [searchQuery]);
   const fetchAllData = async () => {
-  setLoading(true);
-  setError(null);
+    setLoading(true);
+    setError(null);
 
-  if (!companyId) {
-  console.error("Company ID is missing");
-  setError("Company information not found. Please refresh the page.");
-  setLoading(false);
-  return;
-}
-  try {
-    const clientRes = await getClientsApi(companyId);
-    const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
-    setClients(clientsList.filter((c) => c.isActive !== false));
-
-    let poData;
-    if (Object.keys(activeFilters).length > 0) {
-      // ✅ Pass companyId in params
-      const res = await advancedSearchPurchaseOrdersApi({
-        ...activeFilters,
-        companyId: companyId,
-        limit: 1000,
-      });
-      poData = res.data || [];
-    } else {
-      // ✅ Already fixed in getPurchaseOrdersApi
-      const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
-      poData = res.data || [];
+    if (!companyId) {
+      console.error("Company ID is missing");
+      setError("Company information not found. Please refresh the page.");
+      setLoading(false);
+      return;
     }
-    setPurchaseOrders(poData);
-  } catch (err) {
-    console.error(err);
-    setError("Failed to fetch data");
-  } finally {
-    setLoading(false);
-    setLoadingAdvanced(false);
-  }
-};
+    try {
+      const clientRes = await getClientsApi(companyId);
+      const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
+      setClients(clientsList.filter((c) => c.isActive !== false));
 
-  useEffect(() => { if (user?.company?._id) fetchAllData(); }, [user, activeFilters]);
+      // Fetch vendors
+      const vendorRes = await getVendors(companyId);
+      const vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
+      setVendors(vendorList.filter((v) => v.isActive !== false));
+
+      let poData;
+      if (Object.keys(activeFilters).length > 0) {
+        const res = await advancedSearchPurchaseOrdersApi({
+          ...activeFilters,
+          companyId: companyId,
+          limit: 1000,
+        });
+        poData = res.data || [];
+      } else {
+        const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+        poData = res.data || [];
+      }
+      setPurchaseOrders(poData);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to fetch data");
+    } finally {
+      setLoading(false);
+      setLoadingAdvanced(false);
+    }
+  };
+
+  useEffect(() => { if (companyId) fetchAllData(); }, [companyId, activeFilters]);
 
   const resolveClientId = (po, clientsList) => {
     if (!po.client) return null;
@@ -424,23 +430,15 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
     return clientId || null;
   };
 
-  const visiblePurchaseOrders = useMemo(() => {
-    if (!activeFilters.invoiceState) {
-      return purchaseOrders;
-    }
+  // Filter POs by direction
+  const receivablePOs = purchaseOrders.filter(po => po.direction === "receivable");
+  const payablePOs = purchaseOrders.filter(po => po.direction === "payable");
+  const currentPOs = viewMode === "receivable" ? receivablePOs : payablePOs;
 
-    return purchaseOrders.filter((po) => getInvoiceState(po) === activeFilters.invoiceState);
-  }, [activeFilters.invoiceState, purchaseOrders]);
-
-  const clientIdsWithPOs = useMemo(() => {
-    const ids = new Set();
-    visiblePurchaseOrders.forEach((po) => { const id = resolveClientId(po, clients); if (id) ids.add(id); });
-    return ids;
-  }, [clients, visiblePurchaseOrders]);
-
+  // Client stats (receivable)
   const clientStats = useMemo(() => {
     const stats = {};
-    visiblePurchaseOrders.forEach((po) => {
+    currentPOs.forEach((po) => {
       const clientId = resolveClientId(po, clients);
       if (!clientId) return;
       if (!stats[clientId]) {
@@ -457,9 +455,7 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
       stats[clientId].totalPOs += 1;
       stats[clientId].totalValue += po.totalAmount || 0;
       stats[clientId].openAmount += getOpenAmount(po);
-      if (getOpenAmount(po) > 0) {
-        stats[clientId].openPOs += 1;
-      }
+      if (getOpenAmount(po) > 0) stats[clientId].openPOs += 1;
       const createdAt = dayjs(po.createdAt);
       if (createdAt.isSame(dayjs(), "month")) stats[clientId].thisMonth += 1;
       if (!stats[clientId].lastCreated || createdAt.isAfter(stats[clientId].lastCreated)) {
@@ -468,20 +464,51 @@ const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
       }
     });
     return stats;
-  }, [clients, visiblePurchaseOrders]);
+  }, [clients, currentPOs]);
 
-  const totalPOs = visiblePurchaseOrders.length;
-  const totalValue = visiblePurchaseOrders.reduce((s, po) => s + (po.totalAmount || 0), 0);
-  const pendingPOs = visiblePurchaseOrders.filter((po) => !["CLOSED", "INVOICE_CREATED"].includes(po.status)).length;
-  const completedPOs = visiblePurchaseOrders.filter((po) => po.status === "CLOSED").length;
+  // Vendor stats (payable)
+  const vendorStats = useMemo(() => {
+    const stats = {};
+    currentPOs.forEach((po) => {
+      const vendorId = po.vendor?._id;
+      if (!vendorId) return;
+      if (!stats[vendorId]) {
+        stats[vendorId] = {
+          totalPOs: 0,
+          thisMonth: 0,
+          totalValue: 0,
+          openAmount: 0,
+          openPOs: 0,
+          latestPO: null,
+          lastCreated: null,
+        };
+      }
+      stats[vendorId].totalPOs += 1;
+      stats[vendorId].totalValue += po.totalAmount || 0;
+      stats[vendorId].openAmount += getOpenAmount(po);
+      if (getOpenAmount(po) > 0) stats[vendorId].openPOs += 1;
+      const createdAt = dayjs(po.createdAt);
+      if (createdAt.isSame(dayjs(), "month")) stats[vendorId].thisMonth += 1;
+      if (!stats[vendorId].lastCreated || createdAt.isAfter(stats[vendorId].lastCreated)) {
+        stats[vendorId].lastCreated = createdAt;
+        stats[vendorId].latestPO = po.poNumber;
+      }
+    });
+    return stats;
+  }, [vendors, currentPOs]);
+
+  const totalPOs = currentPOs.length;
+  const totalValue = currentPOs.reduce((s, po) => s + (po.totalAmount || 0), 0);
+  const pendingPOs = currentPOs.filter((po) => !["CLOSED", "FULLY_INVOICED"].includes(po.status)).length;
+  const completedPOs = currentPOs.filter((po) => po.status === "CLOSED").length;
 
   const handleAdvancedSearch = (filters) => { setLoadingAdvanced(true); setActiveFilters(filters); setSearchQuery(""); setPage(1); };
-const handleClearSearch = () => {
-  setActiveFilters({});
-  setSearchQuery("");
-  setDebouncedSearchQuery("");
-  setPage(1);
-};
+  const handleClearSearch = () => {
+    setActiveFilters({});
+    setSearchQuery("");
+    setDebouncedSearchQuery("");
+    setPage(1);
+  };
   const handleSort = (key) => { setSort((p) => ({ key, dir: p.key === key && p.dir === "asc" ? "desc" : "asc" })); setPage(1); };
   const activeFilterEntries = Object.entries(activeFilters).filter(([key, value]) => {
     if (!value) return false;
@@ -490,45 +517,51 @@ const handleClearSearch = () => {
   });
   const activeFilterCount = activeFilterEntries.length;
 
+  // Table rows based on viewMode
   const tableRows = useMemo(() => {
-    const hasFilter = searchQuery || activeFilterCount > 0;
-    let list = hasFilter ? clients.filter((c) => clientIdsWithPOs.has(c._id)) : clients;
-
+    let list = viewMode === "receivable" ? clients : vendors;
     if (debouncedSearchQuery) {
-    const q = debouncedSearchQuery.toLowerCase();
-    list = list.filter(
-      (c) =>
-        c.clientName?.toLowerCase().includes(q) ||
-        c.clientCode?.toLowerCase().includes(q) ||
-        getFirstTaxId(c).toLowerCase().includes(q) ||
-        c.clientCountry?.toLowerCase().includes(q)
-    );
-  }
-
+      const q = debouncedSearchQuery.toLowerCase();
+      list = list.filter(item => {
+        const name = (viewMode === "receivable" ? item.clientName : item.vendorName)?.toLowerCase() || "";
+        const code = (viewMode === "receivable" ? item.clientCode : item.vendorCode)?.toLowerCase() || "";
+        const tax = viewMode === "receivable"
+          ? (getFirstTaxId(item).toLowerCase())
+          : (item.gstNumber || item.panNumber || item.taxNumber || "N/A").toLowerCase();
+        const country = (viewMode === "receivable" ? item.clientCountry : item.country)?.toLowerCase() || "";
+        return name.includes(q) || code.includes(q) || tax.includes(q) || country.includes(q);
+      });
+    }
     list = [...list].sort((a, b) => {
       let va, vb;
-      const sa = clientStats[a._id] || {};
-      const sb = clientStats[b._id] || {};
+      const statsMap = viewMode === "receivable" ? clientStats : vendorStats;
+      const sa = statsMap[a._id] || {};
+      const sb = statsMap[b._id] || {};
       switch (sort.key) {
-        case "clientName": va = a.clientName || ""; vb = b.clientName || ""; break;
+        case "name":
+          va = (viewMode === "receivable" ? a.clientName : a.vendorName) || "";
+          vb = (viewMode === "receivable" ? b.clientName : b.vendorName) || "";
+          break;
         case "totalPOs": va = sa.totalPOs || 0; vb = sb.totalPOs || 0; break;
         case "totalValue": va = sa.totalValue || 0; vb = sb.totalValue || 0; break;
         case "thisMonth": va = sa.thisMonth || 0; vb = sb.thisMonth || 0; break;
         case "lastCreated": va = sa.lastCreated ? sa.lastCreated.valueOf() : 0; vb = sb.lastCreated ? sb.lastCreated.valueOf() : 0; break;
         case "openAmount": va = sa.openAmount || 0; vb = sb.openAmount || 0; break;
-        case "country": va = a.clientCountry || ""; vb = b.clientCountry || ""; break;
+        case "country":
+          va = viewMode === "receivable" ? (a.clientCountry || "") : (a.country || "");
+          vb = viewMode === "receivable" ? (b.clientCountry || "") : (b.country || "");
+          break;
         default: va = ""; vb = "";
       }
       if (typeof va === "string") return sort.dir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       return sort.dir === "asc" ? va - vb : vb - va;
     });
-
     return list;
-  }, [clients, clientIdsWithPOs, clientStats, debouncedSearchQuery, activeFilters, sort]);
+  }, [viewMode, clients, vendors, debouncedSearchQuery, clientStats, vendorStats, sort]);
 
   const totalPages = Math.max(1, Math.ceil(tableRows.length / rowsPerPage));
-  const safeP      = Math.min(page, totalPages);
-  const pagedRows  = tableRows.slice((safeP - 1) * rowsPerPage, safeP * rowsPerPage);
+  const safeP = Math.min(page, totalPages);
+  const pagedRows = tableRows.slice((safeP - 1) * rowsPerPage, safeP * rowsPerPage);
 
   if (loading && !loadingAdvanced) {
     return (
@@ -543,15 +576,14 @@ const handleClearSearch = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-16">
-
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-4 gap-4">
             <div className="min-w-0">
               <h1 className="text-xl font-extrabold text-slate-900 tracking-tight truncate">Purchase Orders</h1>
               <p className="text-[11px] text-slate-400 font-medium mt-0.5 hidden sm:block">
-                Client-level overview · {clients.length} clients · {totalPOs} POs
+                {viewMode === "receivable" ? `${clients.length} clients` : `${vendors.length} vendors`} · {totalPOs} POs
               </p>
             </div>
 
@@ -560,7 +592,7 @@ const handleClearSearch = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search client, code, GST, country…"
+                placeholder={viewMode === "receivable" ? "Search client, code, GST, country…" : "Search vendor, code, GST, country…"}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-9 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
@@ -599,7 +631,10 @@ const handleClearSearch = () => {
                 <Upload size={13} className="text-emerald-500" />
                 Bulk
               </Link>
-              <Link to="/purchase-order" className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 transition-all">
+              <Link
+                to={viewMode === "receivable" ? "/purchase-order" : "/purchase-order?direction=payable"}
+                className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 transition-all"
+              >
                 <Plus size={14} />
                 New PO
               </Link>
@@ -610,7 +645,7 @@ const handleClearSearch = () => {
           <div className="pb-3 md:hidden">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input type="text" placeholder="Search client, GST…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
               />
             </div>
@@ -618,7 +653,7 @@ const handleClearSearch = () => {
         </div>
       </div>
 
-      {/* ── Advanced Search Panel ── */}
+      {/* Advanced Search Panel */}
       <div className="bg-white border-b border-slate-100">
         <AdvancedSearchPanel
           isOpen={showAdvancedSearch}
@@ -632,15 +667,38 @@ const handleClearSearch = () => {
       </div>
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Toggle Buttons */}
+        <div className="flex gap-2 border-b border-slate-200">
+          <button
+            onClick={() => setViewMode("receivable")}
+            className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-all flex items-center gap-2 ${viewMode === "receivable"
+                ? "bg-blue-600 text-white shadow-md"
+                : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
+              }`}
+          >
+            <User size={16} /> Receivable (Clients)
+          </button>
+          <button
+            onClick={() => setViewMode("payable")}
+            className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-all flex items-center gap-2 ${viewMode === "payable"
+                ? "bg-amber-600 text-white shadow-md"
+                : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
+              }`}
+          >
+            <Building2 size={16} /> Payable (Vendors)
+          </button>
+        </div>
 
-        {/* ── Stat Cards ── */}
+        {/* Stat Cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
             {
               label: "Total POs", value: totalPOs, icon: ShoppingCart,
-              bg: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)",
-              blob1: "#93c5fd", blob2: "#bfdbfe", shadow: "shadow-blue-500/25",
-              streak: true, ring: false,
+              bg: viewMode === "receivable" ? "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)",
+              blob1: viewMode === "receivable" ? "#93c5fd" : "#fde68a",
+              blob2: viewMode === "receivable" ? "#bfdbfe" : "#fef3c7",
+              shadow: viewMode === "receivable" ? "shadow-blue-500/25" : "shadow-amber-500/25",
+              streak: true,
             },
             {
               label: "Pending", value: pendingPOs, icon: Clock,
@@ -652,7 +710,7 @@ const handleClearSearch = () => {
               label: "Total Value", value: "₹" + totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 }), icon: TrendingUp,
               bg: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
               blob1: "#6ee7b7", blob2: "#a7f3d0", shadow: "shadow-emerald-500/25",
-              streak: true, ring: false,
+              streak: true,
             },
             {
               label: "Completed", value: completedPOs, icon: CheckCircle,
@@ -665,19 +723,15 @@ const handleClearSearch = () => {
               key={idx}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.07, type: "spring", stiffness: 200, damping: 20 }}
+              transition={{ delay: idx * 0.07 }}
               className={`relative overflow-hidden rounded-2xl p-5 shadow-xl ${card.shadow} group cursor-default`}
               style={{ background: card.bg }}
             >
-              {/* large oval blob top-right */}
               <div className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
                 style={{ background: `radial-gradient(ellipse,${card.blob1},transparent)` }} />
-              {/* small oval blob bottom-left */}
               <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-20 blur-xl"
                 style={{ background: `radial-gradient(ellipse,${card.blob2},transparent)` }} />
-              {/* diagonal streak */}
               {card.streak && <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />}
-              {/* concentric rings */}
               {card.ring && <>
                 <div className="absolute top-2 right-2 w-14 h-14 rounded-full border-2 border-white/15" />
                 <div className="absolute top-5 right-5 w-7 h-7 rounded-full border border-white/10" />
@@ -696,7 +750,7 @@ const handleClearSearch = () => {
           ))}
         </div>
 
-        {/* ── Active Filter Pills ── */}
+        {/* Active Filter Pills */}
         {activeFilterCount > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active filters:</span>
@@ -714,7 +768,7 @@ const handleClearSearch = () => {
           </div>
         )}
 
-        {/* ── Table ── */}
+        {/* Table */}
         {error ? (
           <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
             <AlertCircle className="mx-auto mb-2 h-8 w-8 text-red-400" />
@@ -725,7 +779,7 @@ const handleClearSearch = () => {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/50">
               <p className="text-xs font-bold text-slate-700">
-                Clients
+                {viewMode === "receivable" ? "Clients" : "Vendors"}
                 <span className="ml-2 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full text-[10px] font-black">{tableRows.length}</span>
               </p>
               {(searchQuery || activeFilterCount > 0) && (
@@ -739,7 +793,7 @@ const handleClearSearch = () => {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50/80">
-                    <TH label="Client" sortKey="clientName" currentSort={sort} onSort={handleSort} icon={User} />
+                    <TH label="Name" sortKey="name" currentSort={sort} onSort={handleSort} icon={viewMode === "receivable" ? User : Building2} />
                     <TH label="Tax / GST" sortKey="taxId" currentSort={sort} onSort={handleSort} icon={Hash} />
                     <TH label="Country" sortKey="country" currentSort={sort} onSort={handleSort} icon={Globe} />
                     <TH label="Total POs" sortKey="totalPOs" currentSort={sort} onSort={handleSort} icon={ShoppingCart} />
@@ -755,14 +809,14 @@ const handleClearSearch = () => {
                   {tableRows.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="py-16 text-center">
-                        <User className="mx-auto mb-3 h-10 w-10 text-slate-200" />
-                        <p className="text-sm font-semibold text-slate-400">No clients found</p>
+                        {viewMode === "receivable" ? <User className="mx-auto mb-3 h-10 w-10 text-slate-200" /> : <Building2 className="mx-auto mb-3 h-10 w-10 text-slate-200" />}
+                        <p className="text-sm font-semibold text-slate-400">No {viewMode === "receivable" ? "clients" : "vendors"} found</p>
                         <p className="text-xs text-slate-300 mt-1">Try adjusting your filters or search query</p>
                       </td>
                     </tr>
                   ) : (
-                    pagedRows.map((client, idx) => {
-                      const stats = clientStats[client._id] || {
+                    pagedRows.map((row, idx) => {
+                      const stats = (viewMode === "receivable" ? clientStats : vendorStats)[row._id] || {
                         totalPOs: 0,
                         thisMonth: 0,
                         totalValue: 0,
@@ -771,36 +825,44 @@ const handleClearSearch = () => {
                         latestPO: null,
                         lastCreated: null,
                       };
-                      const hasPOs = clientIdsWithPOs.has(client._id);
+                      const hasPOs = stats.totalPOs > 0;
+                      const name = viewMode === "receivable" ? row.clientName : row.vendorName;
+                      const code = viewMode === "receivable" ? row.clientCode : row.vendorCode;
+                      const tax = viewMode === "receivable" ? getFirstTaxId(row) : (row.gstNumber || row.panNumber || row.taxNumber || "N/A");
+                      const country = viewMode === "receivable" ? row.clientCountry : row.country;
+                      const gradient = viewMode === "receivable" ? "from-blue-500 to-indigo-600" : "from-amber-500 to-orange-600";
+                      const hoverColor = viewMode === "receivable" ? "group-hover:text-blue-600" : "group-hover:text-amber-600";
+                      const actionBg = viewMode === "receivable" ? "bg-blue-600 hover:bg-blue-700" : "bg-amber-600 hover:bg-amber-700";
+
                       return (
                         <motion.tr
-                          key={client._id}
+                          key={row._id}
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: idx * 0.02 }}
-                          onClick={() => navigate(`/purchaseorder-data/client/${client._id}`)}
-                          className="hover:bg-blue-50/40 cursor-pointer transition-colors group"
+                          onClick={() => navigate(viewMode === "receivable" ? `/purchaseorder-data/client/${row._id}` : `/purchaseorder-data/vendor/${row._id}`)}
+                          className="hover:bg-slate-50/80 cursor-pointer transition-colors group"
                         >
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-black text-[11px] shrink-0 shadow-sm shadow-blue-500/20">
-                                {(client.clientName || "?")[0].toUpperCase()}
+                              <div className={`w-8 h-8 rounded-xl bg-gradient-to-br ${gradient} flex items-center justify-center text-white font-black text-[11px] shrink-0 shadow-sm`}>
+                                {(name || "?")[0].toUpperCase()}
                               </div>
                               <div className="min-w-0">
-                                <p className="font-bold text-slate-800 truncate max-w-[140px] group-hover:text-blue-600 transition-colors">
-                                  {client.clientName || "Unnamed"}
+                                <p className={`font-bold text-slate-800 truncate max-w-[140px] transition-colors ${hoverColor}`}>
+                                  {name || "Unnamed"}
                                 </p>
-                                <p className="text-[10px] text-slate-400 font-medium">#{client.clientCode || "—"}</p>
+                                <p className="text-[10px] text-slate-400 font-medium">#{code || "—"}</p>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3.5">
-                            <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{getFirstTaxId(client)}</span>
+                            <span className="font-mono text-[10px] text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{tax}</span>
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-1 text-slate-500">
                               <MapPin size={11} className="shrink-0" />
-                              <span className="truncate max-w-[90px]">{client.clientCountry || "—"}</span>
+                              <span className="truncate max-w-[90px]">{country || "—"}</span>
                             </div>
                           </td>
                           <td className="px-4 py-3.5">
@@ -823,9 +885,7 @@ const handleClearSearch = () => {
                           <td className="px-4 py-3.5">
                             <div className="min-w-[110px]">
                               <p className={`font-bold ${stats.openAmount > 0 ? "text-red-600" : "text-emerald-600"}`}>
-                                ₹{stats.openAmount.toLocaleString("en-IN", {
-                                  maximumFractionDigits: 0,
-                                })}
+                                ₹{stats.openAmount.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
                               </p>
                               <p className="text-[10px] text-slate-400 font-medium">
                                 {stats.openPOs || 0} open PO{stats.openPOs === 1 ? "" : "s"}
@@ -834,13 +894,19 @@ const handleClearSearch = () => {
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
-                              <button onClick={() => openClientDetails(client._id)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all" title="View Client">
-                                <Eye size={14} />
-                              </button>
-                              <button onClick={() => navigate(`/purchaseorder-data/client/${client._id}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all" title="View POs">
+                              {viewMode === "receivable" && (
+                                <button onClick={() => openClientDetails(row._id)} className="p-1.5 rounded-lg text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-all" title="View Client">
+                                  <Eye size={14} />
+                                </button>
+                              )}
+                              <button onClick={() => navigate(viewMode === "receivable" ? `/purchaseorder-data/client/${row._id}` : `/purchaseorder-data/vendor/${row._id}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all" title="View POs">
                                 <FileText size={14} />
                               </button>
-                              <Link to={`/purchase-order?clientId=${client._id}`} className="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all shadow-sm shadow-blue-500/20" title="New PO">
+                              <Link
+                                to={viewMode === "receivable" ? `/purchase-order?clientId=${row._id}` : `/purchase-order?vendorId=${row._id}&direction=payable`}
+                                className={`p-1.5 rounded-lg ${actionBg} text-white transition-all shadow-sm`}
+                                title="New PO"
+                              >
                                 <Plus size={14} />
                               </Link>
                             </div>
@@ -855,19 +921,15 @@ const handleClearSearch = () => {
 
             {tableRows.length > 0 && (
               <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row items-center justify-between gap-3">
-                {/* Left: count */}
                 <p className="text-[10px] text-slate-400 shrink-0">
                   Showing{" "}
                   <span className="font-bold text-slate-600">{(safeP - 1) * rowsPerPage + 1}</span>
                   {" "}–{" "}
                   <span className="font-bold text-slate-600">{Math.min(safeP * rowsPerPage, tableRows.length)}</span>
                   {" "}of{" "}
-                  <span className="font-bold text-slate-600">{tableRows.length}</span> clients
+                  <span className="font-bold text-slate-600">{tableRows.length}</span> {viewMode === "receivable" ? "clients" : "vendors"}
                 </p>
-
-                {/* Centre: page buttons */}
                 <div className="flex items-center gap-1">
-                  {/* Prev */}
                   <button
                     onClick={() => setPage((p) => Math.max(1, p - 1))}
                     disabled={safeP === 1}
@@ -875,8 +937,6 @@ const handleClearSearch = () => {
                   >
                     <ChevronUp size={13} className="rotate-[-90deg]" />
                   </button>
-
-                  {/* Page numbers */}
                   {Array.from({ length: totalPages }, (_, i) => i + 1)
                     .filter((p) => p === 1 || p === totalPages || Math.abs(p - safeP) <= 1)
                     .reduce((acc, p, i, arr) => {
@@ -891,19 +951,16 @@ const handleClearSearch = () => {
                         <button
                           key={p}
                           onClick={() => setPage(p)}
-                          className={`min-w-[30px] h-[30px] rounded-lg text-[11px] font-bold transition-all border ${
-                            safeP === p
+                          className={`min-w-[30px] h-[30px] rounded-lg text-[11px] font-bold transition-all border ${safeP === p
                               ? "text-white border-blue-600 shadow-sm shadow-blue-500/20"
                               : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-                          }`}
+                            }`}
                           style={safeP === p ? { background: "linear-gradient(135deg,#1e3a8a,#2563eb)" } : {}}
                         >
                           {p}
                         </button>
                       )
                     )}
-
-                  {/* Next */}
                   <button
                     onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                     disabled={safeP === totalPages}
@@ -912,8 +969,6 @@ const handleClearSearch = () => {
                     <ChevronDown size={13} className="rotate-[-90deg]" />
                   </button>
                 </div>
-
-                {/* Right: rows per page */}
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rows</span>
                   <select
@@ -933,7 +988,7 @@ const handleClearSearch = () => {
       <AuditLogSidebar
         isOpen={openLogs}
         onClose={() => setOpenLogs(false)}
-        companyId={user?.company?._id}
+        companyId={companyId}
         modules={["PURCHASE_ORDER"]}
         title="Purchase Order Audit Trail"
         subtitle="Tracking purchase order creation, updates, approvals, and status changes"

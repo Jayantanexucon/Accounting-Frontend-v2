@@ -74,6 +74,124 @@ const getDateDiffInDays = (start, end) => {
   return Math.max(0, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
 };
 
+// ==================================================================================
+// GET MILESTONE ROWS FOR INVOICE CREATION
+// Returns: (1) all partially-invoiced milestones with remaining balance,
+//          (2) plus the NEXT fresh milestone (never invoiced)
+// This means on 2nd invoice: you see M1-remaining + M2-full together.
+// ==================================================================================
+const getMilestoneInvoiceRows = (po) => {
+  const milestones = Array.isArray(po.milestones) ? po.milestones : [];
+
+  const rows = [];
+
+  // Phase 1: collect partially-invoiced milestones (invoiced > 0 but not fully)
+  milestones.forEach((m, idx) => {
+    const originalAmount = Number(m.amount || 0);
+    const alreadyInvoiced = Number(m.invoicedAmount || 0);
+    const remaining = Math.max(0, originalAmount - alreadyInvoiced);
+    if (alreadyInvoiced > 0 && remaining > 0) {
+      rows.push({
+        ...m,
+        _milestoneIndex: idx,
+        _originalAmount: originalAmount,
+        _alreadyInvoiced: alreadyInvoiced,
+        _remaining: remaining,
+        _isCarryForward: true,
+      });
+    }
+  });
+
+  // Phase 2: find the NEXT fresh milestone (invoicedAmount === 0)
+  const nextFresh = milestones.findIndex((m) => Number(m.invoicedAmount || 0) === 0);
+  if (nextFresh !== -1) {
+    const m = milestones[nextFresh];
+    const originalAmount = Number(m.amount || 0);
+    rows.push({
+      ...m,
+      _milestoneIndex: nextFresh,
+      _originalAmount: originalAmount,
+      _alreadyInvoiced: 0,
+      _remaining: originalAmount,
+      _isCarryForward: false,
+    });
+  }
+
+  return rows;
+};
+
+// ==================================================================================
+// FIX 2: CALCULATE MONTHLY TERM SCHEDULE
+// ==================================================================================
+/**
+ * For monthly-based POs:
+ * - Calculates total months between PO date and due date
+ * - Determines current month based on linked invoices
+ * - Calculates monthly amount (total / months)
+ */
+const calculateMonthlyTermSchedule = (po = {}) => {
+  const startDate = new Date(po.poDate);
+  const endDate = new Date(po.deliveryDate || po.dueDate);
+
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return {
+      totalMonths: 1,
+      currentMonth: 1,
+      monthlyAmount: po.totalAmount || 0,
+      monthLabel: "Monthly",
+      termStartDate: new Date(),
+      termEndDate: new Date(),
+    };
+  }
+
+  // Calculate total months between dates (inclusive)
+  const totalMonths = Math.max(1, Math.ceil(
+    (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+    (endDate.getMonth() - startDate.getMonth()) + 1
+  ));
+
+  // Current month = number of linked invoices + 1, capped at totalMonths
+  const linkedInvoices = Array.isArray(po.linkedInvoices) ? po.linkedInvoices : [];
+  const currentMonth = Math.min(totalMonths, linkedInvoices.length + 1);
+
+  // Monthly amount is total amount divided by total months
+  const monthlyAmount = roundMoney(Number(po.totalAmount || 0) / Math.max(1, totalMonths));
+
+  return {
+    totalMonths,
+    currentMonth,
+    monthlyAmount,
+    monthLabel: `Monthly (Month ${currentMonth} of ${totalMonths})`,
+    termStartDate: startDate,
+    termEndDate: endDate,
+  };
+};
+
+// ==================================================================================
+// FIX 3: CHECK FOR PARTIAL MONTHLY INVOICE (carry-forward)
+// ==================================================================================
+/**
+ * For monthly POs, computes how much from previous months is still un-invoiced.
+ * Logic: expected invoiced = (completedMonths * monthlyAmount), actual = totalInvoicedAmount
+ * If actual < expected, there is carry-forward from previous incomplete months.
+ */
+const getPartialMonthlyCarryForward = (po = {}, monthlySchedule = {}) => {
+  const totalInvoiced = Number(po.totalInvoicedAmount || 0);
+  const completedMonths = Math.max(0, monthlySchedule.currentMonth - 1);
+  const expectedInvoiced = roundMoney(completedMonths * (monthlySchedule.monthlyAmount || 0));
+
+  const carryForwardAmount = roundMoney(Math.max(0, expectedInvoiced - totalInvoiced));
+
+  if (carryForwardAmount > 0) {
+    return {
+      remainingAmount: carryForwardAmount,
+      fromBillingMonth: completedMonths,
+    };
+  }
+
+  return null;
+};
+
 const buildPaymentTermSchedule = (po = {}) => {
   const termDays = getPaymentTermDays(po.paymentTerms);
   const scheduleStart = po.referenceDate || po.poDate;
@@ -229,10 +347,10 @@ const buildTypedInvoicePayload = ({
     contractWorklog:
       invoice.poType === "contract"
         ? {
-            paymentSchedule: invoice.contractPaymentSchedule || "monthly",
-            daysWorked: Number(invoice.contractDaysWorked || 0),
-            periodWorkingDays: Number(invoice.contractPeriodWorkingDays || 0),
-          }
+          paymentSchedule: invoice.contractPaymentSchedule || "monthly",
+          daysWorked: Number(invoice.contractDaysWorked || 0),
+          periodWorkingDays: Number(invoice.contractPeriodWorkingDays || 0),
+        }
         : undefined,
     billTo: {
       name: invoice.billTo.name,
@@ -261,6 +379,8 @@ const buildTypedInvoicePayload = ({
     milestones: [],
     resources: [],
     retainerDetails: null,
+    // ===== NEW: Add monthly billing info if present =====
+    monthlyBillingInfo: invoice.monthlyBillingInfo || undefined,
   };
 
   if (isMilestoneSection) {
@@ -268,6 +388,7 @@ const buildTypedInvoicePayload = ({
       .filter((row) => row.selected)
       .map((row) => ({
         milestoneId: row._id,
+        milestoneIndex: row.milestoneIndex || 0,
         title: row.title,
         description: row.description,
         dueDate: row.dueDate || null,
@@ -321,6 +442,7 @@ const buildTypedInvoicePayload = ({
       originalAmount: row.originalAmount,
       remainingAmountBefore: row.remainingAmountBefore,
       remainingAmountAfter: row.remainingAmountAfter,
+      milestoneIndex: row.milestoneIndex,
     }));
   } else if (isResourceSection) {
     const resources = resourceRows.map((row) => ({
@@ -481,30 +603,30 @@ const ManualInvoicePage = () => {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [createdInvoice, setCreatedInvoice] = useState(null);
   const [isEditPendingMode, setIsEditPendingMode] = useState(false);
-const [pendingVersionNo, setPendingVersionNo] = useState(null);
-const [autoSelectedPoId, setAutoSelectedPoId] = useState(null);
-// Track selected PO type metadata for rendering the correct input section
-const [selectedPOInfo, setSelectedPOInfo] = useState(null); // { poCategory, billingModel, poNumber }
-const [selectedPOData, setSelectedPOData] = useState(null);
-// Milestone-based PO: rows the user fills in
-const [milestoneRows, setMilestoneRows] = useState([]); // [{ _id, title, description, dueDate, percentage, amount, gstRate, hsnSac, status }]
-// Staffing / headcount PO: rows the user fills in
-const [resourceRows, setResourceRows] = useState([]);  // [{ _id, name, role, billingUnit, rate, quantity, hsnSac, gstRate }]
-// Retainer PO: single row
-const [retainerRow, setRetainerRow] = useState(null);  // { description, periodLabel, amount, hsnSac, gstRate }
-    // Add state for company details
-const [companyDetails, setCompanyDetails] = useState({
-  companyName: "",
-  address: "",
-  gstNumber: "",
-  panNumber: "",
-  bankName: "",
-  accountName: "",
-  accountNumber: "",
-  ifscCode: "",
-  branch: "",
-});
-    const [loadingCompany, setLoadingCompany] = useState(false);
+  const [pendingVersionNo, setPendingVersionNo] = useState(null);
+  const [autoSelectedPoId, setAutoSelectedPoId] = useState(null);
+  // Track selected PO type metadata for rendering the correct input section
+  const [selectedPOInfo, setSelectedPOInfo] = useState(null); // { poCategory, billingModel, poNumber }
+  const [selectedPOData, setSelectedPOData] = useState(null);
+  // Milestone-based PO: rows the user fills in
+  const [milestoneRows, setMilestoneRows] = useState([]); // [{ _id, title, description, dueDate, percentage, amount, gstRate, hsnSac, status }]
+  // Staffing / headcount PO: rows the user fills in
+  const [resourceRows, setResourceRows] = useState([]);  // [{ _id, name, role, billingUnit, rate, quantity, hsnSac, gstRate }]
+  // Retainer PO: single row
+  const [retainerRow, setRetainerRow] = useState(null);  // { description, periodLabel, amount, hsnSac, gstRate }
+  // Add state for company details
+  const [companyDetails, setCompanyDetails] = useState({
+    companyName: "",
+    address: "",
+    gstNumber: "",
+    panNumber: "",
+    bankName: "",
+    accountName: "",
+    accountNumber: "",
+    ifscCode: "",
+    branch: "",
+  });
+  const [loadingCompany, setLoadingCompany] = useState(false);
 
   const [invoice, setInvoice] = useState({
     invoiceNo: "Auto-generated on save",
@@ -608,11 +730,11 @@ const [companyDetails, setCompanyDetails] = useState({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-        // Get company ID from localStorage or user context
-        const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
-        const companyId = selectedCompany?._id || user?.company?._id;
+  // Get company ID from localStorage or user context
+  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+  const companyId = selectedCompany?._id || user?.company?._id;
 
-    // Fetch company details from API
+  // Fetch company details from API
   useEffect(() => {
     const fetchCompanyDetails = async () => {
       try {
@@ -672,131 +794,131 @@ const [companyDetails, setCompanyDetails] = useState({
 
     fetchCompanyDetails();
   }, [user?.company?._id]);
-  
+
 
   // Fetch invoice for editing
-useEffect(() => {
-  const invoiceId = editableInvoiceId;
-  if (!invoiceId) return;
+  useEffect(() => {
+    const invoiceId = editableInvoiceId;
+    if (!invoiceId) return;
 
-  const applyInvoiceDataToForm = (dataToLoad, loadedInvoiceId, loadedPendingVersionNo = null) => {
-    const safeDate = (d) => (d && !isNaN(new Date(d)) ? new Date(d).toISOString().split("T")[0] : "");
+    const applyInvoiceDataToForm = (dataToLoad, loadedInvoiceId, loadedPendingVersionNo = null) => {
+      const safeDate = (d) => (d && !isNaN(new Date(d)) ? new Date(d).toISOString().split("T")[0] : "");
 
-	    setInvoice((prev) => ({
-	      ...prev,
-	      ...dataToLoad,
-	      poType: dataToLoad.poType || "general",
-	      contractPaymentSchedule:
-	        dataToLoad.contractWorklog?.paymentSchedule || "",
-	      contractDaysWorked: dataToLoad.contractWorklog?.daysWorked ?? "",
-	      contractPeriodWorkingDays:
-	        dataToLoad.contractWorklog?.periodWorkingDays ?? "",
-	      linkedPO:
-	        dataToLoad.linkedPO?._id ||
-	        dataToLoad.linkedPO ||
-	        dataToLoad.purchaseOrderId ||
-	        dataToLoad.poId ||
-	        prev.linkedPO,
-	      linkedPORef:
-	        dataToLoad.linkedPORef ||
-	        dataToLoad.linkedPO?.poNumber ||
-	        prev.linkedPORef,
-	      invoiceDate: safeDate(dataToLoad.invoiceDate),
-      dueDate: safeDate(dataToLoad.dueDate),
-      paymentDueDate: safeDate(dataToLoad.paymentDueDate),
-      referenceDate: safeDate(dataToLoad.referenceDate),
-      items: dataToLoad.items.map((item) => ({
-        ...item,
-        hsnSac: item.hsnSac || item.hsnCode || "",
-        baseQuantity: item.baseQuantity ?? item.quantity,
-        baseRate: item.baseRate ?? item.rate,
-        combinedGstRate: item.gstRate || 0,
-        totalManuallyEdited: Boolean(item.totalManuallyEdited),
-      })),
-      billTo: {
-        name: dataToLoad.billTo?.name || "",
-        address: dataToLoad.billTo?.address || "",
-        city: dataToLoad.billTo?.city || "",
-        state: dataToLoad.billTo?.state || "",
-        stateCode: dataToLoad.billTo?.stateCode || "",
-        country: dataToLoad.billTo?.country || "",
-        pinCode: dataToLoad.billTo?.pinCode || "",
-        taxIdentifierType: dataToLoad.billTo?.taxIdentifierType || "",
-        taxIdentifierNumber: dataToLoad.billTo?.taxIdentifierNumber || dataToLoad.billTo?.GSTIN || "",
-      },
-      shipTo: {
-        name: dataToLoad.shipTo?.name || "",
-        address: dataToLoad.shipTo?.address || "",
-        city: dataToLoad.shipTo?.city || "",
-        state: dataToLoad.shipTo?.state || "",
-        stateCode: dataToLoad.shipTo?.stateCode || "",
-        country: dataToLoad.shipTo?.country || "",
-        pinCode: dataToLoad.shipTo?.pinCode || "",
-        taxIdentifierType: dataToLoad.shipTo?.taxIdentifierType || "",
-        taxIdentifierNumber: dataToLoad.shipTo?.taxIdentifierNumber || dataToLoad.shipTo?.GSTIN || "",
-      },
-    }));
+      setInvoice((prev) => ({
+        ...prev,
+        ...dataToLoad,
+        poType: dataToLoad.poType || "general",
+        contractPaymentSchedule:
+          dataToLoad.contractWorklog?.paymentSchedule || "",
+        contractDaysWorked: dataToLoad.contractWorklog?.daysWorked ?? "",
+        contractPeriodWorkingDays:
+          dataToLoad.contractWorklog?.periodWorkingDays ?? "",
+        linkedPO:
+          dataToLoad.linkedPO?._id ||
+          dataToLoad.linkedPO ||
+          dataToLoad.purchaseOrderId ||
+          dataToLoad.poId ||
+          prev.linkedPO,
+        linkedPORef:
+          dataToLoad.linkedPORef ||
+          dataToLoad.linkedPO?.poNumber ||
+          prev.linkedPORef,
+        invoiceDate: safeDate(dataToLoad.invoiceDate),
+        dueDate: safeDate(dataToLoad.dueDate),
+        paymentDueDate: safeDate(dataToLoad.paymentDueDate),
+        referenceDate: safeDate(dataToLoad.referenceDate),
+        items: dataToLoad.items.map((item) => ({
+          ...item,
+          hsnSac: item.hsnSac || item.hsnCode || "",
+          baseQuantity: item.baseQuantity ?? item.quantity,
+          baseRate: item.baseRate ?? item.rate,
+          combinedGstRate: item.gstRate || 0,
+          totalManuallyEdited: Boolean(item.totalManuallyEdited),
+        })),
+        billTo: {
+          name: dataToLoad.billTo?.name || "",
+          address: dataToLoad.billTo?.address || "",
+          city: dataToLoad.billTo?.city || "",
+          state: dataToLoad.billTo?.state || "",
+          stateCode: dataToLoad.billTo?.stateCode || "",
+          country: dataToLoad.billTo?.country || "",
+          pinCode: dataToLoad.billTo?.pinCode || "",
+          taxIdentifierType: dataToLoad.billTo?.taxIdentifierType || "",
+          taxIdentifierNumber: dataToLoad.billTo?.taxIdentifierNumber || dataToLoad.billTo?.GSTIN || "",
+        },
+        shipTo: {
+          name: dataToLoad.shipTo?.name || "",
+          address: dataToLoad.shipTo?.address || "",
+          city: dataToLoad.shipTo?.city || "",
+          state: dataToLoad.shipTo?.state || "",
+          stateCode: dataToLoad.shipTo?.stateCode || "",
+          country: dataToLoad.shipTo?.country || "",
+          pinCode: dataToLoad.shipTo?.pinCode || "",
+          taxIdentifierType: dataToLoad.shipTo?.taxIdentifierType || "",
+          taxIdentifierNumber: dataToLoad.shipTo?.taxIdentifierNumber || dataToLoad.shipTo?.GSTIN || "",
+        },
+      }));
 
-    setValueInWords(dataToLoad.valueInWords || "");
-    setCreatedInvoiceId(loadedInvoiceId);
-    setPendingVersionNo(loadedPendingVersionNo);
-    setSameAsBillTo(
-      JSON.stringify(dataToLoad.billTo) === JSON.stringify(dataToLoad.shipTo),
-    );
-  };
+      setValueInWords(dataToLoad.valueInWords || "");
+      setCreatedInvoiceId(loadedInvoiceId);
+      setPendingVersionNo(loadedPendingVersionNo);
+      setSameAsBillTo(
+        JSON.stringify(dataToLoad.billTo) === JSON.stringify(dataToLoad.shipTo),
+      );
+    };
 
-  const fetchInvoiceForEdit = async () => {
-    setLoadingInvoice(true);
-    if (editInvoiceId) {
-      setIsEditMode(true);
-      setIsEditPendingMode(false);
-    } else if (editPendingId) {
-      setIsEditMode(false);
-      setIsEditPendingMode(true);
-    }
-
-    try {
-      if (editPendingId && location.state?.pendingVersion?.snapshot) {
-        applyInvoiceDataToForm(
-          location.state.pendingVersion.snapshot,
-          invoiceId,
-          location.state.pendingVersion.versionNo || null,
-        );
-        return;
+    const fetchInvoiceForEdit = async () => {
+      setLoadingInvoice(true);
+      if (editInvoiceId) {
+        setIsEditMode(true);
+        setIsEditPendingMode(false);
+      } else if (editPendingId) {
+        setIsEditMode(false);
+        setIsEditPendingMode(true);
       }
 
-      const response = await getInvoiceByIdApi(invoiceId);
-      const invoiceData = response?.data;
-
-      if (!invoiceData || Array.isArray(invoiceData)) {
-        throw new Error("Invalid invoice data for edit");
-      }
-
-      let dataToLoad = invoiceData;
-      if (editPendingId) {
-        // For pending edit, use the snapshot from pendingVersion
-        if (!invoiceData.pendingVersion) {
-          toast.error("No pending version found for this invoice");
-          navigate("/invoice-data");
+      try {
+        if (editPendingId && location.state?.pendingVersion?.snapshot) {
+          applyInvoiceDataToForm(
+            location.state.pendingVersion.snapshot,
+            invoiceId,
+            location.state.pendingVersion.versionNo || null,
+          );
           return;
         }
-        dataToLoad = invoiceData.pendingVersion.snapshot;
-      }
-      applyInvoiceDataToForm(
-        dataToLoad,
-        invoiceId,
-        invoiceData.pendingVersion?.versionNo || null,
-      );
-    } catch (error) {
-      console.error("Error fetching invoice for edit:", error);
-      setError("Failed to load invoice for editing");
-    } finally {
-      setLoadingInvoice(false);
-    }
-  };
 
-  fetchInvoiceForEdit();
-}, [editableInvoiceId, editPendingId, location.state, navigate]);
+        const response = await getInvoiceByIdApi(invoiceId);
+        const invoiceData = response?.data;
+
+        if (!invoiceData || Array.isArray(invoiceData)) {
+          throw new Error("Invalid invoice data for edit");
+        }
+
+        let dataToLoad = invoiceData;
+        if (editPendingId) {
+          // For pending edit, use the snapshot from pendingVersion
+          if (!invoiceData.pendingVersion) {
+            toast.error("No pending version found for this invoice");
+            navigate("/invoice-data");
+            return;
+          }
+          dataToLoad = invoiceData.pendingVersion.snapshot;
+        }
+        applyInvoiceDataToForm(
+          dataToLoad,
+          invoiceId,
+          invoiceData.pendingVersion?.versionNo || null,
+        );
+      } catch (error) {
+        console.error("Error fetching invoice for edit:", error);
+        setError("Failed to load invoice for editing");
+      } finally {
+        setLoadingInvoice(false);
+      }
+    };
+
+    fetchInvoiceForEdit();
+  }, [editableInvoiceId, editPendingId, location.state, navigate]);
 
   // Fetch clients and existing descriptions from API
   useEffect(() => {
@@ -853,7 +975,7 @@ useEffect(() => {
             !["CLOSED", "FULLY_INVOICED"].includes(po.status) &&
             Number(po.remainingInvoicableAmount ?? po.totalAmount ?? 0) > 0,
         );
-        
+
         setPurchaseOrders(activePOs);
         setFilteredPOs(activePOs);
       } catch (err) {
@@ -866,36 +988,36 @@ useEffect(() => {
 
     fetchPurchaseOrders();
   }, [companyId, user?.company?._id]);
-  
+
   // Auto-select PO from URL parameter (if present)
-useEffect(() => {
-  // Only run if we have a poId in the URL and we haven't already selected it
-  if (poIdFromUrl && !autoSelectedPoId) {
-    const po = purchaseOrders.find(p => p._id === poIdFromUrl);
-    if (po) {
-      // PO is already in the list, select it directly
-      handleSelectPO(po);
-      setAutoSelectedPoId(poIdFromUrl);
-    } else {
-      // PO not in the list (maybe fully invoiced), fetch it directly
-      const fetchAndSelectPO = async () => {
-        try {
-          const response = await getPurchaseOrderApi(poIdFromUrl);
-          if (response?.data) {
-            handleSelectPO(response.data);
-            setAutoSelectedPoId(poIdFromUrl);
-          } else {
-            toast.error("Failed to load purchase order details");
+  useEffect(() => {
+    // Only run if we have a poId in the URL and we haven't already selected it
+    if (poIdFromUrl && !autoSelectedPoId) {
+      const po = purchaseOrders.find(p => p._id === poIdFromUrl);
+      if (po) {
+        // PO is already in the list, select it directly
+        handleSelectPO(po);
+        setAutoSelectedPoId(poIdFromUrl);
+      } else {
+        // PO not in the list (maybe fully invoiced), fetch it directly
+        const fetchAndSelectPO = async () => {
+          try {
+            const response = await getPurchaseOrderApi(poIdFromUrl);
+            if (response?.data) {
+              handleSelectPO(response.data);
+              setAutoSelectedPoId(poIdFromUrl);
+            } else {
+              toast.error("Failed to load purchase order details");
+            }
+          } catch (err) {
+            console.error("Error fetching PO for auto-select:", err);
+            toast.error("Failed to load purchase order");
           }
-        } catch (err) {
-          console.error("Error fetching PO for auto-select:", err);
-          toast.error("Failed to load purchase order");
-        }
-      };
-      fetchAndSelectPO();
+        };
+        fetchAndSelectPO();
+      }
     }
-  }
-}, [poIdFromUrl, purchaseOrders, autoSelectedPoId]);
+  }, [poIdFromUrl, purchaseOrders, autoSelectedPoId]);
   // Filter POs based on search
   useEffect(() => {
     if (poSearch) {
@@ -939,12 +1061,12 @@ useEffect(() => {
       setFilteredBillToClients(clients);
     }
   }, [billToSearch, clients]);
-  
+
   useEffect(() => {
-  if (!poIdFromUrl) {
-    setAutoSelectedPoId(null);
-  }
-}, [poIdFromUrl]);
+    if (!poIdFromUrl) {
+      setAutoSelectedPoId(null);
+    }
+  }, [poIdFromUrl]);
   // Filter shipTo clients based on search - BUG FIXED
   useEffect(() => {
     const getClientTaxNumber = (c) => c.gstNumber || c.panNumber || c.einNumber || c.vatNumber || c.ssnNumber || c.nationalIdNumber || "";
@@ -1440,7 +1562,7 @@ useEffect(() => {
 
     const poCategory = selectedPO.poCategory || "project";
     const billingModel = selectedPO.billingModel || "fixed";
-    const paymentTermSchedule = buildPaymentTermSchedule(selectedPO);
+    let paymentTermSchedule = buildPaymentTermSchedule(selectedPO);
 
     const buildAddress = (src) => ({
       name: src?.name || "",
@@ -1463,76 +1585,99 @@ useEffect(() => {
     let derivedItems = []; // always kept in sync with invoice.items
 
     // ──────────────────────────────────────────────────────────
-    // CASE 1 – MILESTONE billing (project + milestone)
+    // CASE 1 – MILESTONE billing (FIX: Show next milestone with remaining)
+    // ──────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────
+    // CASE 1 – MILESTONE billing (FIXED: uses linked invoices)
     // ──────────────────────────────────────────────────────────
     if (billingModel === "milestone" && Array.isArray(selectedPO.milestones) && selectedPO.milestones.length > 0) {
-      const openMilestoneAmount = (milestone) =>
-        Number(milestone.remainingAmount ?? milestone.amount ?? 0);
-      const milestoneInvoiceIndex = Math.max(
-        0,
-        Math.min(
-          (selectedPO.linkedInvoices || []).length,
-          selectedPO.milestones.length - 1,
-        ),
-      );
-      const currentMilestoneIndex = selectedPO.milestones.findIndex(
-        (m, idx) => idx >= milestoneInvoiceIndex && openMilestoneAmount(m) > 0,
-      );
-      const visibleMilestoneIndex =
-        currentMilestoneIndex >= 0 ? currentMilestoneIndex : milestoneInvoiceIndex;
+      // Helper: compute how much of a milestone has already been invoiced
+      const getInvoicedAmountForMilestone = (milestoneId) => {
+        const linkedInvoices = selectedPO.linkedInvoices || [];
+        let totalInvoiced = 0;
+        for (const inv of linkedInvoices) {
+          if (inv.milestones && Array.isArray(inv.milestones)) {
+            const milestoneInInv = inv.milestones.find(m => m.milestoneId === milestoneId);
+            if (milestoneInInv) {
+              totalInvoiced += Number(milestoneInInv.invoicedAmount || milestoneInInv.amount || 0);
+            }
+          }
+        }
+        return totalInvoiced;
+      };
 
-      const rows = selectedPO.milestones
-        .map((m, idx) => ({ milestone: m, index: idx }))
-        .filter(({ milestone, index }) =>
-          index <= visibleMilestoneIndex &&
-          milestone.status !== "invoiced" &&
-          openMilestoneAmount(milestone) > 0,
-        )
-        .map(({ milestone: m }) => ({
-          _id: m._id?.toString() || String(Math.random()),
-          title: m.title || "",
-          description: m.description || "",
-          dueDate: m.dueDate ? new Date(m.dueDate).toISOString().split("T")[0] : "",
-          percentage: Number(
-            selectedPO.totalAmount > 0
-              ? (((Number(m.remainingAmount ?? m.amount ?? 0) / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2))
-              : 0,
-          ),
-          originalPercentage: Number(m.percentage || 0),
-          originalAmount: Number(m.amount || 0),
-          alreadyInvoicedAmount: Number(m.invoicedAmount || 0),
-          remainingAmountBefore: Number(m.remainingAmount ?? m.amount ?? 0),
-          remainingAmountAfter: 0,
-          amount: Number(m.remainingAmount ?? m.amount ?? 0),
-          hsnSac: "",
-          gstRate: 0,
-          gstAmount: 0,
-          total: Number(m.remainingAmount ?? m.amount ?? 0),
-          selected: true, // user can deselect milestones they don't want to invoice now
-        }));
+      const milestones = selectedPO.milestones;
+      const rows = [];
+
+      // 1. Collect partially‑invoiced milestones (already invoiced > 0 but not fully)
+      milestones.forEach((m, idx) => {
+        const originalAmount = Number(m.amount || 0);
+        const alreadyInvoiced = getInvoicedAmountForMilestone(m._id);
+        const remaining = Math.max(0, originalAmount - alreadyInvoiced);
+        if (alreadyInvoiced > 0 && remaining > 0) {
+          rows.push({
+            ...m,
+            _milestoneIndex: idx,
+            _originalAmount: originalAmount,
+            _alreadyInvoiced: alreadyInvoiced,
+            _remaining: remaining,
+            _isCarryForward: true,
+          });
+        }
+      });
+
+      // 2. Find the next fresh milestone (never invoiced)
+      const nextFreshIndex = milestones.findIndex((m, idx) => {
+        const alreadyInvoiced = getInvoicedAmountForMilestone(m._id);
+        return alreadyInvoiced === 0;
+      });
+      if (nextFreshIndex !== -1) {
+        const m = milestones[nextFreshIndex];
+        const originalAmount = Number(m.amount || 0);
+        rows.push({
+          ...m,
+          _milestoneIndex: nextFreshIndex,
+          _originalAmount: originalAmount,
+          _alreadyInvoiced: 0,
+          _remaining: originalAmount,
+          _isCarryForward: false,
+        });
+      }
 
       if (rows.length === 0) {
-        const milestones = selectedPO.milestones || [];
-        const allMilestonesFullyInvoiced =
-          milestones.length > 0 &&
-          milestones.every(
-            (m) =>
-              m.status === "invoiced" ||
-              Number(m.remainingAmount ?? m.amount ?? 0) <= 0,
-          );
-
-        setError(
-          allMilestonesFullyInvoiced
-            ? "All milestones for this PO are already invoiced."
-            : "No milestones with open amount are available for invoice creation.",
-        );
+        setError("All milestones for this PO are already fully invoiced.");
         setPoDropdownOpen(false);
         return;
       }
 
-      setMilestoneRows(rows);
-      // Sync to items (each milestone = 1 line item with qty:1, rate = milestone amount)
-      derivedItems = rows.map((r) => ({
+      // Convert rows to UI‑friendly format
+      const milestoneRowsUI = rows.map((m) => ({
+        _id: m._id?.toString() || String(Math.random()),
+        milestoneIndex: m._milestoneIndex,
+        title: (m._isCarryForward ? "[Remaining] " : "") + (m.title || ""),
+        description: m.description || "",
+        dueDate: m.dueDate ? new Date(m.dueDate).toISOString().split("T")[0] : "",
+        percentage: Number(
+          selectedPO.totalAmount > 0
+            ? ((m._remaining / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2)
+            : 0,
+        ),
+        originalPercentage: Number(m.percentage || 0),
+        originalAmount: m._originalAmount,
+        alreadyInvoicedAmount: m._alreadyInvoiced,
+        remainingAmountBefore: m._remaining,
+        remainingAmountAfter: 0,
+        amount: m._remaining,
+        hsnSac: "",
+        gstRate: 0,
+        gstAmount: 0,
+        total: m._remaining,
+        selected: true,
+        isCarryForward: m._isCarryForward,
+      }));
+
+      setMilestoneRows(milestoneRowsUI);
+      derivedItems = milestoneRowsUI.map((r) => ({
         itemId: r._id,
         poItemId: r._id,
         description: r.title,
@@ -1545,11 +1690,106 @@ useEffect(() => {
         total: r.total,
         combinedGstRate: r.gstRate,
         totalManuallyEdited: false,
+        sourceType: "milestone",
+        milestoneIndex: r.milestoneIndex,
       }));
+    }
+    // ──────────────────────────────────────────────────────────
+    // CASE 2 – MONTHLY billing (project/fixed PO billed monthly)
+    // Only applies to non-staffing POs with monthly billing model
+    // ──────────────────────────────────────────────────────────
+    else if (billingModel === "monthly" && poCategory !== "staffing") {
+      const monthlySchedule = calculateMonthlyTermSchedule(selectedPO);
+
+      if (monthlySchedule.currentMonth > monthlySchedule.totalMonths) {
+        setError("All monthly installments for this PO are already invoiced.");
+        setPoDropdownOpen(false);
+        return;
+      }
+
+      // CHECK FOR PARTIAL INVOICE CARRY-FORWARD from previous months
+      const carryForward = getPartialMonthlyCarryForward(selectedPO, monthlySchedule);
+
+      const items = selectedPO.items || [];
+      const hasItems = items.length > 0;
+
+      if (hasItems) {
+        // Build per-item monthly portions
+        derivedItems = items.map((item) => {
+          const baseTotal = Number(item.totalAmount || item.total || 0);
+          const monthlyPortionBase = roundMoney(baseTotal / monthlySchedule.totalMonths);
+
+          const gstRate = Number(item.gstRate || 0);
+          const monthlyTaxable = gstRate > 0
+            ? roundMoney(monthlyPortionBase / (1 + gstRate / 100))
+            : monthlyPortionBase;
+          const monthlyGst = roundMoney(monthlyPortionBase - monthlyTaxable);
+
+          return {
+            itemId: item.itemId || item._id,
+            poItemId: item.itemId || item._id,
+            description: `${item.description || ""} (Month ${monthlySchedule.currentMonth}/${monthlySchedule.totalMonths})`,
+            hsnSac: item.hsnSac || item.hsnCode || "",
+            quantity: 1,
+            baseQuantity: Number(item.quantity || 0),
+            baseRate: Number(item.rate || 0),
+            poRemainingQuantity: getRemainingPOItemQuantity(item),
+            rate: monthlyPortionBase,
+            taxableValue: monthlyTaxable,
+            gstRate,
+            gstAmount: monthlyGst,
+            total: monthlyPortionBase,
+            combinedGstRate: item.combinedGstRate || gstRate,
+            totalManuallyEdited: false,
+            isMonthlyPortion: true,
+          };
+        });
+      } else {
+        // No line items – use totalAmount divided by months
+        const monthlyTotal = monthlySchedule.monthlyAmount;
+        derivedItems = [{
+          itemId: "monthly-" + monthlySchedule.currentMonth,
+          poItemId: "",
+          description: `Services – Month ${monthlySchedule.currentMonth} of ${monthlySchedule.totalMonths}`,
+          hsnSac: "",
+          quantity: 1,
+          rate: monthlyTotal,
+          taxableValue: monthlyTotal,
+          gstRate: 0,
+          gstAmount: 0,
+          total: monthlyTotal,
+          combinedGstRate: 0,
+          totalManuallyEdited: false,
+          isMonthlyPortion: true,
+        }];
+      }
+
+      // Prepend carry-forward line if any previous month had a shortfall
+      if (carryForward) {
+        derivedItems.unshift({
+          itemId: "carryforward-m" + carryForward.fromBillingMonth,
+          poItemId: "carryforward",
+          description: `Carry-forward balance from Month ${carryForward.fromBillingMonth}`,
+          quantity: 1,
+          rate: carryForward.remainingAmount,
+          taxableValue: carryForward.remainingAmount,
+          gstRate: 0,
+          gstAmount: 0,
+          total: carryForward.remainingAmount,
+          combinedGstRate: 0,
+          totalManuallyEdited: false,
+          isCarryForward: true,
+        });
+      }
+
+      paymentTermSchedule = {
+        ...monthlySchedule,
+        label: monthlySchedule.monthLabel,
+      };
     }
 
     // ──────────────────────────────────────────────────────────
-    // CASE 2 – STAFFING (daily / monthly / hourly) or project headcount with resources
+    // CASE 3 – STAFFING (daily / monthly / hourly) or project headcount with resources
     // ──────────────────────────────────────────────────────────
     else if (
       (poCategory === "staffing" || (poCategory === "project" && billingModel === "headcount")) &&
@@ -1557,7 +1797,7 @@ useEffect(() => {
     ) {
       const billingUnitLabel = billingModel === "daily" ? "Days"
         : billingModel === "hourly" ? "Hours"
-        : "Months";
+          : "Months";
 
       const rows = selectedPO.resources
         .filter((r) => r.isActive !== false)
@@ -1565,8 +1805,8 @@ useEffect(() => {
           const rate = billingModel === "daily" || billingModel === "headcount"
             ? Number(r.ratePerDay || 0)
             : billingModel === "hourly"
-            ? Number(r.ratePerHour || 0)
-            : Number(r.ratePerMonth || 0);
+              ? Number(r.ratePerHour || 0)
+              : Number(r.ratePerMonth || 0);
 
           return {
             _id: r._id?.toString() || String(Math.random()),
@@ -1606,7 +1846,7 @@ useEffect(() => {
     }
 
     // ──────────────────────────────────────────────────────────
-    // CASE 3 – RETAINER (fixed, no items / milestones / resources)
+    // CASE 4 – RETAINER (fixed, no items / milestones / resources)
     // ──────────────────────────────────────────────────────────
     else if (poCategory === "retainer" && !(Array.isArray(selectedPO.items) && selectedPO.items.some((i) => getRemainingPOItemQuantity(i) > 0))) {
       const scheduleLabel = selectedPO.paymentSchedule
@@ -1640,7 +1880,7 @@ useEffect(() => {
     }
 
     // ──────────────────────────────────────────────────────────
-    // CASE 4 – LINE ITEMS (project-fixed, project with items, general)
+    // CASE 5 – LINE ITEMS (project-fixed, project with items, general)
     // ──────────────────────────────────────────────────────────
     if (derivedItems.length === 0) {
       const remainingItems = (selectedPO.items || [])
@@ -1660,8 +1900,8 @@ useEffect(() => {
             paymentTermSchedule.totalInstallments > 1
               ? scheduledParts.recommendedInvoiceAmount
               : roundMoney(
-                  Math.max(0, originalTotal - Number(item.invoicedAmount || 0)),
-                );
+                Math.max(0, originalTotal - Number(item.invoicedAmount || 0)),
+              );
           const taxableValue = Number(
             (
               gstRate > 0
@@ -1817,24 +2057,39 @@ useEffect(() => {
             Math.min(Number(value || 0), Number(row.remainingAmountBefore || 0)),
           );
           row.amount = normalizedAmount;
+
+          // IMPORTANT: Calculate remaining amount after this invoice
+          row.remainingAmountAfter = Math.max(
+            0,
+            Number(row.remainingAmountBefore || 0) - normalizedAmount,
+          );
+
+          row.total = normalizedAmount;
+
           row.percentage = Number(
             selectedPOData?.totalAmount > 0
               ? (((normalizedAmount / Number(selectedPOData.totalAmount || 1)) * 100).toFixed(2))
               : 0,
           );
-          row.remainingAmountAfter = roundMoney(
-            Math.max(0, Number(row.remainingAmountBefore || 0) - normalizedAmount),
-          );
         }
-        // Recompute GST and total whenever amount or gstRate changes
-        if (field === "amount" || field === "gstRate" || field === "hsnSac") {
+
+        if (field === "gstRate") {
+          const newRate = Number(value || 0);
+          row.gstRate = newRate;
+          const gstAmount = roundMoney((row.amount * newRate) / 100);
+          row.gstAmount = gstAmount;
+          row.total = roundMoney(row.amount + gstAmount);
+        }
+
+        // Recompute GST and total whenever amount or hsnSac changes
+        if (field === "amount" || field === "hsnSac") {
           // If hsnSac changed, pick gstRate from hsnList
           if (field === "hsnSac") {
             const hsn = hsnList.find((h) => h.hsnCode === value);
             if (hsn) row.gstRate = hsn.igst || (hsn.cgst + hsn.sgst) || 0;
           }
           const amt = Number(row.amount || 0);
-          const gstRate = Number(field === "gstRate" ? value : row.gstRate) || 0;
+          const gstRate = Number(row.gstRate) || 0;
           row.gstAmount = roundMoney((amt * gstRate) / 100);
           row.total = roundMoney(amt + row.gstAmount);
         }
@@ -1938,17 +2193,17 @@ useEffect(() => {
 
   const showTypedTaxFields = poHasTaxData(selectedPOData);
 
-	  const handleClearPO = () => {
-	    setInvoice((prev) => ({
-	      ...prev,
-	      linkedPO: "",
-	      linkedPORef: "",
-	      poreferencevalue: "",
-        poType: "general",
-        contractPaymentSchedule: "",
-        contractDaysWorked: "",
-        contractPeriodWorkingDays: "",
-	    }));
+  const handleClearPO = () => {
+    setInvoice((prev) => ({
+      ...prev,
+      linkedPO: "",
+      linkedPORef: "",
+      poreferencevalue: "",
+      poType: "general",
+      contractPaymentSchedule: "",
+      contractDaysWorked: "",
+      contractPeriodWorkingDays: "",
+    }));
     setPoSearch("");
     setIsFromPO(false);
     setSelectedPOInfo(null);
@@ -1963,16 +2218,16 @@ useEffect(() => {
     setError(null);
     setSuccessMessage(null);
 
-	    // Enhanced validation
-	    if (!invoice.linkedPO && !editableInvoiceId) {
-	      setError("Invoice must be created from a purchase order.");
-	      return;
-	    }
+    // Enhanced validation
+    if (!invoice.linkedPO && !editableInvoiceId) {
+      setError("Invoice must be created from a purchase order.");
+      return;
+    }
 
-	    if (!invoice.invoiceDate || !invoice.dueDate || !invoice.billTo.name || !invoice.billTo.address || !invoice.shipTo.name || invoice.items.length === 0) {
-	      setError("Please fill in all required fields and add at least one item.");
-	      return;
-	    }
+    if (!invoice.invoiceDate || !invoice.dueDate || !invoice.billTo.name || !invoice.billTo.address || !invoice.shipTo.name || invoice.items.length === 0) {
+      setError("Please fill in all required fields and add at least one item.");
+      return;
+    }
 
     if (invoice.poType === "contract") {
       const daysWorked = Number(invoice.contractDaysWorked || 0);
@@ -1984,8 +2239,8 @@ useEffect(() => {
 
     // Validate items — milestone/resource/retainer types use taxableValue/total instead of qty*rate
     const isMilestoneSection = selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0;
-    const isResourceSection  = (selectedPOInfo?.poCategory === "staffing" || (selectedPOInfo?.poCategory === "project" && selectedPOInfo?.billingModel === "headcount")) && resourceRows.length > 0;
-    const isRetainerSection  = selectedPOInfo?.poCategory === "retainer" && retainerRow != null;
+    const isResourceSection = (selectedPOInfo?.poCategory === "staffing" || (selectedPOInfo?.poCategory === "project" && selectedPOInfo?.billingModel === "headcount")) && resourceRows.length > 0;
+    const isRetainerSection = selectedPOInfo?.poCategory === "retainer" && retainerRow != null;
 
     if (isMilestoneSection) {
       const selectedMilestones = milestoneRows.filter((r) => r.selected);
@@ -2020,21 +2275,21 @@ useEffect(() => {
     setError(null);
     setSuccessMessage(null);
 
-	    try {
-	      const completeInvoice = {
-          ...buildTypedInvoicePayload({
-            invoice,
-            selectedPOInfo,
-            selectedPOData,
-            milestoneRows,
-            resourceRows,
-            retainerRow,
-            valueInWords,
-            convertToWords,
-          }),
-	        status: status,
-	        companyId: user?.company?._id,
-	      };
+    try {
+      const completeInvoice = {
+        ...buildTypedInvoicePayload({
+          invoice,
+          selectedPOInfo,
+          selectedPOData,
+          milestoneRows,
+          resourceRows,
+          retainerRow,
+          valueInWords,
+          convertToWords,
+        }),
+        status: status,
+        companyId: user?.company?._id,
+      };
 
       // Convert dates to ISO strings
       completeInvoice.invoiceDate = new Date(completeInvoice.invoiceDate).toISOString();
@@ -2047,7 +2302,7 @@ useEffect(() => {
       }
 
       let response;
-      
+
       if ((isEditMode || isEditPendingMode) && editableInvoiceId) {
         // ✅ UPDATE EXISTING INVOICE
         response = await updateInvoiceApi(editableInvoiceId, completeInvoice);
@@ -2094,9 +2349,9 @@ useEffect(() => {
 
         // // console.log("Invoice to display in modal:", invoiceToDisplay);
 
-	        setCreatedInvoiceId(editableInvoiceId);
-	        setCreatedInvoice(invoiceToDisplay);
-	        setShowSuccessModal(true);
+        setCreatedInvoiceId(editableInvoiceId);
+        setCreatedInvoice(invoiceToDisplay);
+        setShowSuccessModal(true);
 
         toast.success("Invoice update submitted for approval.");
       } else {
@@ -2115,24 +2370,24 @@ useEffect(() => {
           invoiceNo: generatedInvoiceNo,
         }));
 
-	        // For create, use the API response directly
-	        setCreatedInvoice(response?.data);
-	        setShowSuccessModal(true);
+        // For create, use the API response directly
+        setCreatedInvoice(response?.data);
+        setShowSuccessModal(true);
 
         toast.success("Invoice created and submitted for approval.");
       }
 
       // // console.log("Invoice saved successfully:", response.data);
-	    } catch (err) {
-	      console.error("Error saving invoice:", err);
-	      const backendMessage =
-	        err.response?.data?.message ||
-	        err.response?.data?.error ||
-	        (Array.isArray(err.response?.data?.error) ? err.response.data.error.join(", ") : "");
-	      setError(backendMessage ? `Failed to save invoice: ${backendMessage}` : "Failed to save invoice. Please try again.");
-	    } finally {
-	      setLoading(false);
-	    }
+    } catch (err) {
+      console.error("Error saving invoice:", err);
+      const backendMessage =
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        (Array.isArray(err.response?.data?.error) ? err.response.data.error.join(", ") : "");
+      setError(backendMessage ? `Failed to save invoice: ${backendMessage}` : "Failed to save invoice. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleDownloadPdf = async () => {
@@ -2162,7 +2417,7 @@ useEffect(() => {
       setError("Please create an invoice first before downloading");
       return;
     }
-    
+
     try {
       const response = await downloadInvoiceWordApi(createdInvoiceId);
 
@@ -2217,16 +2472,16 @@ useEffect(() => {
         {/* Header/Logo Section */}
         <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
           <div className="p-10 flex flex-col items-center justify-center bg-white/40 backdrop-blur-md">
-            <img 
-              src="https://res.cloudinary.com/dxqzklc00/image/upload/v1736234703/Nexu_oauth_lpewoq.png" 
-              alt="Company Logo" 
-              className="h-20 object-contain mb-4 transform hover:scale-105 transition-transform" 
+            <img
+              src="https://res.cloudinary.com/dxqzklc00/image/upload/v1736234703/Nexu_oauth_lpewoq.png"
+              alt="Company Logo"
+              className="h-20 object-contain mb-4 transform hover:scale-105 transition-transform"
             />
             <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-6 uppercase">Tax Invoice</h1>
 
-            <button 
-              type="button" 
-              onClick={handleGoToList} 
+            <button
+              type="button"
+              onClick={handleGoToList}
               className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl hover:bg-slate-50 transition-all flex items-center font-bold shadow-sm group"
             >
               <ShoppingBag className="h-5 w-5 mr-3 text-blue-600 group-hover:scale-110 transition-transform" />
@@ -2236,1525 +2491,1521 @@ useEffect(() => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">
-                {/* Company Details */}
-                {/* Company Details */}
-                <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
-                  <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 flex items-center">
-                    <Building className="mr-3 text-blue-400" size={24} />
-                    <h2 className="text-xl font-bold tracking-tight">
-                      Company Details
-                      {loadingCompany && <Loader2 className="ml-3 animate-spin text-blue-400" size={18} />}
-                    </h2>
+          {/* Company Details */}
+          {/* Company Details */}
+          <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+            <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white p-6 flex items-center">
+              <Building className="mr-3 text-blue-400" size={24} />
+              <h2 className="text-xl font-bold tracking-tight">
+                Company Details
+                {loadingCompany && <Loader2 className="ml-3 animate-spin text-blue-400" size={18} />}
+              </h2>
+            </div>
+            <div className="p-6">
+              {loadingCompany ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="animate-spin text-blue-600" size={24} />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">Company Name</h3>
+                    <p className="text-gray-900">{companyDetails.companyName}</p>
                   </div>
-                  <div className="p-6">
-                    {loadingCompany ? (
-                      <div className="flex justify-center py-8">
-                        <Loader2 className="animate-spin text-blue-600" size={24} />
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        <div>
-                          <h3 className="text-sm font-semibold text-gray-600 mb-1">Company Name</h3>
-                          <p className="text-gray-900">{companyDetails.companyName}</p>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">Company Address</h3>
+                    <p className="text-gray-900">{companyDetails.address}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">GSTIN</h3>
+                      <p className="text-gray-900">{companyDetails.gstNumber}</p>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-600 mb-1">PAN</h3>
+                      <p className="text-gray-900">{companyDetails.panNumber}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Invoice Details */}
+          <div className="bg-white rounded-xl shadow-lg mb-6">
+            <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
+              <Receipt className="mr-2" size={20} />
+              <h2 className="text-lg font-semibold">Invoice Details</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {/* Invoice No */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Invoice No</label>
+                  <input type="text" name="invoiceNo" value={invoice.invoiceNo} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50" readOnly />
+                </div>
+
+                {/* Buyer's Order Reference - Now with PO Dropdown */}
+                <div className="relative" ref={poDropdownRef}>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference Purchase Order</label>
+
+                  <div className="relative">
+                    <input
+                      type="text"
+                      name="linkedPORef"
+                      value={poDropdownOpen ? poSearch : invoice.linkedPORef || poSearch || ""}
+                      onChange={(e) => {
+                        setPoSearch(e.target.value);
+                        setPoDropdownOpen(true);
+                      }}
+                      onFocus={() => {
+                        setPoDropdownOpen(true);
+                        if (!poSearch && invoice.linkedPORef) {
+                          setPoSearch(invoice.linkedPORef);
+                        }
+                      }}
+                      placeholder="Search or select PO..."
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md pr-10"
+                    />
+                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                      {loadingPOs ? (
+                        <Loader2 className="animate-spin text-gray-400" size={20} />
+                      ) : invoice.linkedPO ? (
+                        <X size={20} className="text-gray-400 cursor-pointer hover:text-red-500" onClick={handleClearPO} />
+                      ) : (
+                        <ChevronDown className={`text-gray-400 cursor-pointer ${poDropdownOpen ? "transform rotate-180" : ""}`} size={20} onClick={() => setPoDropdownOpen(!poDropdownOpen)} />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* PO Dropdown List */}
+                  {poDropdownOpen && (
+                    <div className="absolute z-30 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto ring-1 ring-black ring-opacity-5">
+                      {loadingPOs ? (
+                        <div className="p-4 text-center">
+                          <Loader2 className="animate-spin mx-auto text-blue-600" size={24} />
+                          <p className="mt-2 text-xs text-gray-500 font-medium">Fetching purchase orders...</p>
                         </div>
-                        <div>
-                          <h3 className="text-sm font-semibold text-gray-600 mb-1">Company Address</h3>
-                          <p className="text-gray-900">{companyDetails.address}</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <h3 className="text-sm font-semibold text-gray-600 mb-1">GSTIN</h3>
-                            <p className="text-gray-900">{companyDetails.gstNumber}</p>
+                      ) : filteredPOs.length > 0 ? (
+                        filteredPOs.map((po) => (
+                          <div
+                            key={po._id}
+                            className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors"
+                            onClick={() => handleSelectPO(po)}
+                          >
+                            <div className="flex justify-between items-start mb-1">
+                              <div className="font-bold text-blue-700">{po.poNumber}</div>
+                              <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-blue-100 text-blue-700 border border-blue-200">{po.status}</span>
+                            </div>
+                            <div className="text-xs text-gray-600 space-y-1">
+                              <div className="flex items-center gap-1.5"><Building size={12} className="text-gray-400" /> <span className="font-medium">{po.client?.name}</span></div>
+                              <div className="flex justify-between items-center text-[11px]">
+                                <span>Amount: <span className="font-bold text-slate-900">{po.currency} {po.totalAmount?.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</span></span>
+                                <span className="text-emerald-600 font-bold">
+                                  Open: {po.currency} {Number(po.remainingInvoicableAmount ?? Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0))).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-gray-400"><Calendar size={12} /> {new Date(po.poDate).toLocaleDateString()}</div>
+                            </div>
                           </div>
-                          <div>
-                            <h3 className="text-sm font-semibold text-gray-600 mb-1">PAN</h3>
-                            <p className="text-gray-900">{companyDetails.panNumber}</p>
-                          </div>
+                        ))
+                      ) : (
+                        <div className="p-6 text-center">
+                          <Search className="mx-auto text-gray-300 mb-2" size={32} />
+                          <p className="text-sm text-gray-500">No matching purchase orders found</p>
+                          {poSearch && (
+                            <button
+                              className="mt-2 text-xs text-blue-600 font-bold hover:underline"
+                              onClick={() => setPoSearch("")}
+                            >
+                              Clear search
+                            </button>
+                          )}
                         </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Client PO Reference</label>
+                  <input
+                    type="text"
+                    name="poreferencevalue"
+                    value={invoice.poreferencevalue || ""}
+                    readOnly
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                  />
+                </div>
+
+                {invoice.poType === "contract" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Contract Payment Type
+                      </label>
+                      <input
+                        type="text"
+                        value={invoice.contractPaymentSchedule || "-"}
+                        readOnly
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Days Worked
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={invoice.contractDaysWorked}
+                        onChange={(e) =>
+                          setInvoice((prev) => ({
+                            ...prev,
+                            contractDaysWorked: e.target.value,
+                          }))
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                        placeholder="Enter worked days"
+                      />
+                    </div>
+                    {invoice.contractPaymentSchedule !== "daily" && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Period Working Days
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={invoice.contractPeriodWorkingDays}
+                          onChange={(e) =>
+                            setInvoice((prev) => ({
+                              ...prev,
+                              contractPeriodWorkingDays: e.target.value,
+                            }))
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                          placeholder="e.g. 22"
+                        />
                       </div>
                     )}
+                  </>
+                )}
+
+                {/* Payment Mode */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
+                  <select name="paymentMode" value={invoice.paymentMode} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <option value="Bank-Transfer">Bank Transfer</option>
+                    <option value="Credit-Card">Credit Card</option>
+                    <option value="Debit-Card">Debit Card</option>
+                    <option value="UPI">UPI</option>
+                    <option value="Cash">Cash</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+
+                {/* Amount Due */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Amount Due</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500">{invoice.currency}</span>
+                    </div>
+                    <input
+                      type="number"
+                      name="amountDue"
+                      value={invoice.amountDue.toFixed(2)}
+                      onChange={handleAmountChange}
+                      className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                      readOnly
+                    />
                   </div>
                 </div>
 
-                {/* Invoice Details */}
-                <div className="bg-white rounded-xl shadow-lg mb-6">
-                  <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
-                    <Receipt className="mr-2" size={20} />
-                    <h2 className="text-lg font-semibold">Invoice Details</h2>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                      {/* Invoice No */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Invoice No</label>
-                        <input type="text" name="invoiceNo" value={invoice.invoiceNo} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50" readOnly />
+                {/* Invoice Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Date</label>
+                  <input type="date" name="invoiceDate" value={invoice.invoiceDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
+                </div>
+
+                {/* Due Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+                  <input type="date" name="dueDate" value={invoice.dueDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Payment Due Date</label>
+                  <input
+                    type="date"
+                    name="paymentDueDate"
+                    value={invoice.paymentDueDate || ""}
+                    onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                  />
+                </div>
+
+                {/* Currency */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
+                  <select name="currency" value={invoice.currency} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
+                    <option value="USD">USD - US Dollar</option>
+                    <option value="EUR">EUR - Euro</option>
+                    <option value="GBP">GBP - British Pound</option>
+                    <option value="INR">INR - Indian Rupee</option>
+                    <option value="JPY">JPY - Japanese Yen</option>
+                    <option value="CAD">CAD - Canadian Dollar</option>
+                    <option value="AUD">AUD - Australian Dollar</option>
+                  </select>
+                </div>
+
+                {/* Reference Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reference Date</label>
+                  <input type="date" name="referenceDate" value={invoice.referenceDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Client Details */}
+          <div className="bg-white rounded-xl shadow-lg mb-6">
+            <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
+              <User className="mr-2" size={20} />
+              <h2 className="text-lg font-semibold">Client Details</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Bill To */}
+                <div className="glass-card p-6 rounded-[2rem] border border-white/20 shadow-premium">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                      <User size={20} className="text-blue-500" />
+                      Bill To
+                    </h3>
+                    {invoice.billTo.name && !editingBillTo && (
+                      <div className="flex space-x-2">
+                        <button type="button" onClick={handleEditBillTo} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
+                          Edit
+                        </button>
+                        <button type="button" onClick={handleClearBillTo} className="flex items-center text-sm text-red-600 hover:text-red-800">
+                          <X size={16} className="mr-1" />
+                          Clear
+                        </button>
                       </div>
+                    )}
+                  </div>
 
-                      {/* Buyer's Order Reference - Now with PO Dropdown */}
-                      <div className="relative" ref={poDropdownRef}>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Reference Purchase Order</label>
-
+                  {/* Select Client Dropdown (Only show when editing or no client selected) */}
+                  {!invoice.billTo.name || editingBillTo ? (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Select Client</label>
+                      <div className="relative">
                         <div className="relative">
                           <input
                             type="text"
-                            name="linkedPORef"
-                            value={poDropdownOpen ? poSearch : invoice.linkedPORef || poSearch || ""}
+                            placeholder="Search client..."
+                            value={billToSearch}
                             onChange={(e) => {
-                              setPoSearch(e.target.value);
-                              setPoDropdownOpen(true);
+                              setBillToSearch(e.target.value);
+                              setBillToDropdownOpen(true);
                             }}
-                            onFocus={() => {
-                              setPoDropdownOpen(true);
-                              if (!poSearch && invoice.linkedPORef) {
-                                setPoSearch(invoice.linkedPORef);
-                              }
-                            }}
-                            placeholder="Search or select PO..."
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md pr-10"
+                            onFocus={() => setBillToDropdownOpen(true)}
+                            className="w-full px-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all pr-12 font-medium"
                           />
                           <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                            {loadingPOs ? (
+                            {loadingClients ? (
                               <Loader2 className="animate-spin text-gray-400" size={20} />
-                            ) : invoice.linkedPO ? (
-                              <X size={20} className="text-gray-400 cursor-pointer hover:text-red-500" onClick={handleClearPO} />
                             ) : (
-                              <ChevronDown className={`text-gray-400 cursor-pointer ${poDropdownOpen ? "transform rotate-180" : ""}`} size={20} onClick={() => setPoDropdownOpen(!poDropdownOpen)} />
+                              <ChevronDown
+                                className={`text-gray-400 cursor-pointer ${billToDropdownOpen ? "transform rotate-180" : ""}`}
+                                size={20}
+                                onClick={() => setBillToDropdownOpen(!billToDropdownOpen)}
+                              />
                             )}
                           </div>
                         </div>
 
-                        {/* PO Dropdown List */}
-                        {poDropdownOpen && (
-                          <div className="absolute z-30 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto ring-1 ring-black ring-opacity-5">
-                            {loadingPOs ? (
+                        {/* Dropdown List */}
+                        {billToDropdownOpen && (
+                          <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                            {loadingClients ? (
                               <div className="p-4 text-center">
-                                <Loader2 className="animate-spin mx-auto text-blue-600" size={24} />
-                                <p className="mt-2 text-xs text-gray-500 font-medium">Fetching purchase orders...</p>
+                                <Loader2 className="animate-spin mx-auto" size={20} />
                               </div>
-                            ) : filteredPOs.length > 0 ? (
-                              filteredPOs.map((po) => (
-                                <div 
-                                  key={po._id} 
-                                  className="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-b-0 transition-colors" 
-                                  onClick={() => handleSelectPO(po)}
+                            ) : filteredBillToClients.length > 0 ? (
+                              filteredBillToClients.map((client) => (
+                                <div
+                                  key={client._id}
+                                  className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0"
+                                  onClick={() => handleSelectBillToClient(client)}
                                 >
-                                  <div className="flex justify-between items-start mb-1">
-                                    <div className="font-bold text-blue-700">{po.poNumber}</div>
-                                    <span className="px-2 py-0.5 text-[10px] font-black uppercase rounded bg-blue-100 text-blue-700 border border-blue-200">{po.status}</span>
-                                  </div>
-                                  <div className="text-xs text-gray-600 space-y-1">
-                                    <div className="flex items-center gap-1.5"><Building size={12} className="text-gray-400" /> <span className="font-medium">{po.client?.name}</span></div>
-                                    <div className="flex justify-between items-center text-[11px]">
-                                      <span>Amount: <span className="font-bold text-slate-900">{po.currency} {po.totalAmount?.toLocaleString('en-IN', {minimumFractionDigits: 2})}</span></span>
-                                      <span className="text-emerald-600 font-bold">
-                                        Open: {po.currency} {Number(po.remainingInvoicableAmount ?? Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0))).toLocaleString('en-IN', {minimumFractionDigits: 2})}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400"><Calendar size={12} /> {new Date(po.poDate).toLocaleDateString()}</div>
+                                  <div className="font-medium">{client.clientName}</div>
+                                  <div className="text-sm text-gray-500">
+                                    {client.gstNumber && <span>GST: {client.gstNumber}</span>}
+                                    {client.panNumber && <span>PAN: {client.panNumber}</span>}
+                                    {client.einNumber && <span>EIN: {client.einNumber}</span>}
+                                    {client.stateCode && <span className="ml-2">State: {client.stateCode}</span>}
                                   </div>
                                 </div>
                               ))
                             ) : (
-                              <div className="p-6 text-center">
-                                <Search className="mx-auto text-gray-300 mb-2" size={32} />
-                                <p className="text-sm text-gray-500">No matching purchase orders found</p>
-                                {poSearch && (
-                                  <button 
-                                    className="mt-2 text-xs text-blue-600 font-bold hover:underline"
-                                    onClick={() => setPoSearch("")}
-                                  >
-                                    Clear search
-                                  </button>
-                                )}
-                              </div>
+                              <div className="p-4 text-center text-gray-500">No clients found</div>
                             )}
                           </div>
                         )}
                       </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Client PO Reference</label>
-                        <input
-                          type="text"
-                          name="poreferencevalue"
-                          value={invoice.poreferencevalue || ""}
-                          readOnly
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                        />
-                      </div>
-
-                      {invoice.poType === "contract" && (
-                        <>
+                    </div>
+                  ) : (
+                    /* Client Details Display (Read-only when client is selected) */
+                    <div className="mb-4">
+                      <div className="p-3 bg-white rounded-lg border border-gray-200">
+                        <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Contract Payment Type
-                            </label>
-                            <input
-                              type="text"
-                              value={invoice.contractPaymentSchedule || "-"}
-                              readOnly
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                            />
+                            <label className="block text-xs font-medium text-gray-500">Client Name</label>
+                            <p className="text-sm font-medium">{invoice.billTo.name}</p>
                           </div>
                           <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">
-                              Days Worked
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={invoice.contractDaysWorked}
-                              onChange={(e) =>
-                                setInvoice((prev) => ({
-                                  ...prev,
-                                  contractDaysWorked: e.target.value,
-                                }))
-                              }
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                              placeholder="Enter worked days"
-                            />
+                            <label className="block text-xs font-medium text-gray-500">{invoice.billTo.taxIdentifierType || "Tax ID"}</label>
+                            <p className="text-sm">{invoice.billTo.taxIdentifierNumber || "N/A"}</p>
                           </div>
-                          {invoice.contractPaymentSchedule !== "daily" && (
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">
-                                Period Working Days
-                              </label>
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
-                                value={invoice.contractPeriodWorkingDays}
-                                onChange={(e) =>
-                                  setInvoice((prev) => ({
-                                    ...prev,
-                                    contractPeriodWorkingDays: e.target.value,
-                                  }))
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                placeholder="e.g. 22"
-                              />
-                            </div>
-                          )}
-                        </>
-                      )}
-
-                      {/* Payment Mode */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Payment Mode</label>
-                        <select name="paymentMode" value={invoice.paymentMode} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
-                          <option value="Bank-Transfer">Bank Transfer</option>
-                          <option value="Credit-Card">Credit Card</option>
-                          <option value="Debit-Card">Debit Card</option>
-                          <option value="UPI">UPI</option>
-                          <option value="Cash">Cash</option>
-                          <option value="Cheque">Cheque</option>
-                        </select>
-                      </div>
-
-                      {/* Amount Due */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Amount Due</label>
-                        <div className="relative">
-                          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                            <span className="text-gray-500">{invoice.currency}</span>
-                          </div>
-                          <input
-                            type="number"
-                            name="amountDue"
-                            value={invoice.amountDue.toFixed(2)}
-                            onChange={handleAmountChange}
-                            className="w-full pl-14 pr-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                            readOnly
-                          />
-                        </div>
-                      </div>
-
-                      {/* Invoice Date */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Date</label>
-                        <input type="date" name="invoiceDate" value={invoice.invoiceDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
-                      </div>
-
-                      {/* Due Date */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
-                        <input type="date" name="dueDate" value={invoice.dueDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Payment Due Date</label>
-                        <input
-                          type="date"
-                          name="paymentDueDate"
-                          value={invoice.paymentDueDate || ""}
-                          onChange={handleInputChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                        />
-                      </div>
-
-                      {/* Currency */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Currency</label>
-                        <select name="currency" value={invoice.currency} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
-                          <option value="USD">USD - US Dollar</option>
-                          <option value="EUR">EUR - Euro</option>
-                          <option value="GBP">GBP - British Pound</option>
-                          <option value="INR">INR - Indian Rupee</option>
-                          <option value="JPY">JPY - Japanese Yen</option>
-                          <option value="CAD">CAD - Canadian Dollar</option>
-                          <option value="AUD">AUD - Australian Dollar</option>
-                        </select>
-                      </div>
-
-                      {/* Reference Date */}
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Reference Date</label>
-                        <input type="date" name="referenceDate" value={invoice.referenceDate} onChange={handleInputChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Client Details */}
-                <div className="bg-white rounded-xl shadow-lg mb-6">
-                  <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
-                    <User className="mr-2" size={20} />
-                    <h2 className="text-lg font-semibold">Client Details</h2>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Bill To */}
-                      <div className="glass-card p-6 rounded-[2rem] border border-white/20 shadow-premium">
-                        <div className="flex justify-between items-center mb-6">
-                          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            <User size={20} className="text-blue-500" />
-                            Bill To
-                          </h3>
-                          {invoice.billTo.name && !editingBillTo && (
-                            <div className="flex space-x-2">
-                              <button type="button" onClick={handleEditBillTo} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
-                                Edit
-                              </button>
-                              <button type="button" onClick={handleClearBillTo} className="flex items-center text-sm text-red-600 hover:text-red-800">
-                                <X size={16} className="mr-1" />
-                                Clear
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Select Client Dropdown (Only show when editing or no client selected) */}
-                        {!invoice.billTo.name || editingBillTo ? (
-                          <div className="mb-4">
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Select Client</label>
-                            <div className="relative">
-                              <div className="relative">
-                                <input
-                                  type="text"
-                                  placeholder="Search client..."
-                                  value={billToSearch}
-                                  onChange={(e) => {
-                                    setBillToSearch(e.target.value);
-                                    setBillToDropdownOpen(true);
-                                  }}
-                                  onFocus={() => setBillToDropdownOpen(true)}
-                                  className="w-full px-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all pr-12 font-medium"
-                                />
-                                <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                                  {loadingClients ? (
-                                    <Loader2 className="animate-spin text-gray-400" size={20} />
-                                  ) : (
-                                    <ChevronDown
-                                      className={`text-gray-400 cursor-pointer ${billToDropdownOpen ? "transform rotate-180" : ""}`}
-                                      size={20}
-                                      onClick={() => setBillToDropdownOpen(!billToDropdownOpen)}
-                                    />
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Dropdown List */}
-                              {billToDropdownOpen && (
-                                <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                                  {loadingClients ? (
-                                    <div className="p-4 text-center">
-                                      <Loader2 className="animate-spin mx-auto" size={20} />
-                                    </div>
-                                  ) : filteredBillToClients.length > 0 ? (
-                                    filteredBillToClients.map((client) => (
-                                      <div
-                                        key={client._id}
-                                        className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0"
-                                        onClick={() => handleSelectBillToClient(client)}
-                                      >
-                                        <div className="font-medium">{client.clientName}</div>
-                                        <div className="text-sm text-gray-500">
-                                          {client.gstNumber && <span>GST: {client.gstNumber}</span>}
-                                          {client.panNumber && <span>PAN: {client.panNumber}</span>}
-                                          {client.einNumber && <span>EIN: {client.einNumber}</span>}
-                                          {client.stateCode && <span className="ml-2">State: {client.stateCode}</span>}
-                                        </div>
-                                      </div>
-                                    ))
-                                  ) : (
-                                    <div className="p-4 text-center text-gray-500">No clients found</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ) : (
-                          /* Client Details Display (Read-only when client is selected) */
-                          <div className="mb-4">
-                            <div className="p-3 bg-white rounded-lg border border-gray-200">
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Client Name</label>
-                                  <p className="text-sm font-medium">{invoice.billTo.name}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">{invoice.billTo.taxIdentifierType || "Tax ID"}</label>
-                                  <p className="text-sm">{invoice.billTo.taxIdentifierNumber || "N/A"}</p>
-                                </div>
-                                <div className="col-span-2">
-                                  <label className="block text-xs font-medium text-gray-500">Address</label>
-                                  <p className="text-sm">{invoice.billTo.address}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">City</label>
-                                  <p className="text-sm">{invoice.billTo.city || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">State</label>
-                                  <p className="text-sm">{invoice.billTo.state || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">State Code</label>
-                                  <p className="text-sm">{invoice.billTo.stateCode || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Country</label>
-                                  <p className="text-sm">{invoice.billTo.country || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Pin Code</label>
-                                  <p className="text-sm">{invoice.billTo.pinCode || "N/A"}</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Manual Input Fields (Only show when editing and no client is selected from dropdown) */}
-                        {(!invoice.billTo.name || editingBillTo) && (
-                          <div className="space-y-4 mt-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Client Name *</label>
-                              <input type="text" name="name" value={invoice.billTo.name} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
-                              <textarea name="address" value={invoice.billTo.address} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                                <input type="text" name="city" value={invoice.billTo.city} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                                <input type="text" name="state" value={invoice.billTo.state} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">State Code</label>
-                                <input type="text" name="stateCode" value={invoice.billTo.stateCode} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                                <input type="text" name="country" value={invoice.billTo.country} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                              </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Pin Code</label>
-                                <input type="text" name="pinCode" value={invoice.billTo.pinCode} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                              </div>
-                              <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Type</label>
-                                <select name="taxIdentifierType" value={invoice.billTo.taxIdentifierType} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
-                                  <option value="">Select Type</option>
-                                  <option value="GST">GST</option>
-                                  <option value="PAN">PAN</option>
-                                  <option value="EIN">EIN</option>
-                                  <option value="VAT">VAT</option>
-                                  <option value="SSN">SSN</option>
-                                  <option value="National ID">National ID</option>
-                                </select>
-                              </div>
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Number</label>
-                              <input
-                                type="text"
-                                name="taxIdentifierNumber"
-                                value={invoice.billTo.taxIdentifierNumber}
-                                onChange={handleBillToChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                              />
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Ship To */}
-                      <div className="glass-card p-6 rounded-[2rem] border border-white/20 shadow-premium">
-                        <div className="flex justify-between items-center mb-6">
-                          <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                            <ShoppingBag size={20} className="text-amber-500" />
-                            Ship To
-                          </h3>
-                          <div className="flex items-center">
-                            <input type="checkbox" id="sameAsBillTo" checked={sameAsBillTo} onChange={(e) => handleSameAsBillTo(e.target.checked)} className="h-4 w-4 text-blue-600 rounded" />
-                            <label htmlFor="sameAsBillTo" className="ml-2 text-sm text-gray-700">
-                              Same as Bill To
-                            </label>
-                          </div>
-                          {invoice.shipTo.name && !sameAsBillTo && !editingShipTo && (
-                            <div className="flex space-x-2">
-                              <button type="button" onClick={handleEditShipTo} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
-                                Edit
-                              </button>
-                              <button type="button" onClick={handleClearShipTo} className="flex items-center text-sm text-red-600 hover:text-red-800">
-                                <X size={16} className="mr-1" />
-                                Clear
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* If same as bill to, show bill to details */}
-                        {sameAsBillTo ? (
-                          <div className="mb-4">
-                            <div className="p-4 bg-white/40 backdrop-blur-sm rounded-xl border border-white/20 shadow-sm">
-                              <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Client Name</label>
-                                  <p className="text-sm font-medium">{invoice.billTo.name}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">{invoice.billTo.taxIdentifierType || "Tax ID"}</label>
-                                  <p className="text-sm">{invoice.billTo.taxIdentifierNumber || "N/A"}</p>
-                                </div>
-                                <div className="col-span-2">
-                                  <label className="block text-xs font-medium text-gray-500">Address</label>
-                                  <p className="text-sm">{invoice.billTo.address}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">City</label>
-                                  <p className="text-sm">{invoice.billTo.city || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">State</label>
-                                  <p className="text-sm">{invoice.billTo.state || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">State Code</label>
-                                  <p className="text-sm">{invoice.billTo.stateCode || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Country</label>
-                                  <p className="text-sm">{invoice.billTo.country || "N/A"}</p>
-                                </div>
-                                <div>
-                                  <label className="block text-xs font-medium text-gray-500">Pin Code</label>
-                                  <p className="text-sm">{invoice.billTo.pinCode || "N/A"}</p>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            {/* Select Client Dropdown (Only show when editing or no client selected) */}
-                            {!invoice.shipTo.name || editingShipTo ? (
-                              <div className="mb-4">
-                                <label className="block text-sm font-medium text-slate-700 mb-2">Select Shipping Address</label>
-                                <div className="relative">
-                                  <div className="relative">
-                                    <input
-                                      type="text"
-                                      placeholder="Search client..."
-                                      value={shipToSearch}
-                                      onChange={(e) => {
-                                        setShipToSearch(e.target.value);
-                                        setShipToDropdownOpen(true);
-                                      }}
-                                      onFocus={() => setShipToDropdownOpen(true)}
-                                      className="w-full px-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all pr-12 font-medium"
-                                    />
-                                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
-                                      {loadingClients ? (
-                                        <Loader2 className="animate-spin text-gray-400" size={20} />
-                                      ) : (
-                                        <ChevronDown
-                                          className={`text-gray-400 cursor-pointer ${shipToDropdownOpen ? "transform rotate-180" : ""}`}
-                                          size={20}
-                                          onClick={() => setShipToDropdownOpen(!shipToDropdownOpen)}
-                                        />
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  {/* Dropdown List */}
-                                  {shipToDropdownOpen && (
-                                    <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
-                                      {loadingClients ? (
-                                        <div className="p-4 text-center">
-                                          <Loader2 className="animate-spin mx-auto" size={20} />
-                                        </div>
-                                      ) : filteredShipToClients.length > 0 ? (
-                                        filteredShipToClients.map((client) => (
-                                          <div
-                                            key={client._id}
-                                            className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0"
-                                            onClick={() => handleSelectShipToClient(client)}
-                                          >
-                                            <div className="font-medium">{client.clientName}</div>
-                                            <div className="text-sm text-gray-500">
-                                              {client.gstNumber && <span>GST: {client.gstNumber}</span>}
-                                              {client.panNumber && <span>PAN: {client.panNumber}</span>}
-                                              {client.einNumber && <span>EIN: {client.einNumber}</span>}
-                                              {client.stateCode && <span className="ml-2">State: {client.stateCode}</span>}
-                                            </div>
-                                          </div>
-                                        ))
-                                      ) : (
-                                        <div className="p-4 text-center text-gray-500">No clients found</div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            ) : (
-                              /* Client Details Display (Read-only when client is selected) */
-                              <div className="mb-4">
-                                <div className="p-4 bg-white/40 backdrop-blur-sm rounded-xl border border-white/20 shadow-sm">
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">Client Name</label>
-                                      <p className="text-sm font-medium">{invoice.shipTo.name}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">{invoice.shipTo.taxIdentifierType || "Tax ID"}</label>
-                                      <p className="text-sm">{invoice.shipTo.taxIdentifierNumber || "N/A"}</p>
-                                    </div>
-                                    <div className="col-span-2">
-                                      <label className="block text-xs font-medium text-gray-500">Address</label>
-                                      <p className="text-sm">{invoice.shipTo.address}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">City</label>
-                                      <p className="text-sm">{invoice.shipTo.city || "N/A"}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">State</label>
-                                      <p className="text-sm">{invoice.shipTo.state || "N/A"}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">State Code</label>
-                                      <p className="text-sm">{invoice.shipTo.stateCode || "N/A"}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">Country</label>
-                                      <p className="text-sm">{invoice.shipTo.country || "N/A"}</p>
-                                    </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500">Pin Code</label>
-                                      <p className="text-sm">{invoice.shipTo.pinCode || "N/A"}</p>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Manual Input Fields (Only show when editing and no client is selected from dropdown) */}
-                            {(!invoice.shipTo.name || editingShipTo) && !sameAsBillTo && (
-                              <div className="space-y-4 mt-4">
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Client Name *</label>
-                                  <input type="text" name="name" value={invoice.shipTo.name} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
-                                  <textarea
-                                    name="address"
-                                    value={invoice.shipTo.address}
-                                    onChange={handleShipToChange}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                    rows="3"
-                                    required
-                                  />
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
-                                    <input type="text" name="city" value={invoice.shipTo.city} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
-                                    <input type="text" name="state" value={invoice.shipTo.state} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                                  </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">State Code</label>
-                                    <input type="text" name="stateCode" value={invoice.shipTo.stateCode} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
-                                    <input type="text" name="country" value={invoice.shipTo.country} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                                  </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Pin Code</label>
-                                    <input type="text" name="pinCode" value={invoice.shipTo.pinCode} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
-                                  </div>
-                                  <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Type</label>
-                                    <select
-                                      name="taxIdentifierType"
-                                      value={invoice.shipTo.taxIdentifierType}
-                                      onChange={handleShipToChange}
-                                      className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                    >
-                                      <option value="">Select Type</option>
-                                      <option value="GST">GST</option>
-                                      <option value="PAN">PAN</option>
-                                      <option value="EIN">EIN</option>
-                                      <option value="VAT">VAT</option>
-                                      <option value="SSN">SSN</option>
-                                      <option value="National ID">National ID</option>
-                                    </select>
-                                  </div>
-                                </div>
-                                <div>
-                                  <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Number</label>
-                                  <input
-                                    type="text"
-                                    name="taxIdentifierNumber"
-                                    value={invoice.shipTo.taxIdentifierNumber}
-                                    onChange={handleShipToChange}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                                  />
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ══ PO TYPE SPECIFIC BILLING SECTION ══════════════════════════ */}
-                {selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0 ? (
-                  /* ── MILESTONE SECTION ── */
-                  <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
-                    <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-6 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Package size={24} />
-                        <div>
-                          <h2 className="text-xl font-bold tracking-tight">Milestone Billing</h2>
-                          <p className="text-indigo-200 text-xs mt-0.5">
-                            {selectedPOInfo?.label || "Select milestones to invoice from this purchase order"}
-                          </p>
-                        </div>
-                      </div>
-                      <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/30">
-                        {milestoneRows.filter(r => r.selected).length} / {milestoneRows.length} selected
-                      </span>
-                    </div>
-                    <div className="p-6 overflow-x-auto">
-                      <table className="min-w-full divide-y divide-slate-100">
-                        <thead className="bg-slate-50/50">
-                          <tr>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest w-8">✓</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">#</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Milestone Title</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Due Date</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Original %</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Original Amount (₹)</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Already Invoiced (₹)</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining (₹)</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice %</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice Amount (₹)</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After (₹)</th>
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
-                            )}
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
-                            )}
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
-                            )}
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {milestoneRows.map((row, idx) => (
-                            <tr key={row._id} className={`transition-colors ${row.selected ? "bg-indigo-50/30" : "bg-slate-50/50 opacity-60"}`}>
-                              <td className="px-3 py-3">
-                                <input type="checkbox" checked={row.selected} onChange={() => handleMilestoneToggle(idx)}
-                                  className="w-4 h-4 accent-indigo-600 cursor-pointer" />
-                              </td>
-                              <td className="px-3 py-3 text-center font-bold text-slate-600 text-sm">{idx + 1}</td>
-                              <td className="px-3 py-3">
-                                <input type="text" value={row.title}
-                                  onChange={(e) => handleMilestoneRowChange(idx, "title", e.target.value)}
-                                  disabled={!row.selected}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[160px] disabled:bg-slate-100" />
-                                {row.description && <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[160px]">{row.description}</p>}
-                                {(row.alreadyInvoicedAmount > 0 || row.remainingAmountBefore > 0) && (
-                                  <p className="text-[10px] text-slate-500 mt-1">
-                                    Already invoiced: {(row.alreadyInvoicedAmount || 0).toFixed(2)} · Open for invoice: {(row.remainingAmountBefore || 0).toFixed(2)}
-                                  </p>
-                                )}
-                              </td>
-                              <td className="px-3 py-3 text-sm text-slate-600 whitespace-nowrap">
-                                {row.dueDate || "—"}
-                              </td>
-                              <td className="px-3 py-3 text-center text-sm font-medium text-slate-700">
-                                {row.originalPercentage > 0 ? `${row.originalPercentage}%` : "—"}
-                              </td>
-                              <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
-                                {(row.originalAmount || 0).toFixed(2)}
-                              </td>
-                              <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
-                                {(row.alreadyInvoicedAmount || 0).toFixed(2)}
-                              </td>
-                              <td className="px-3 py-3 text-right text-sm font-bold text-amber-700">
-                                {(row.remainingAmountBefore || 0).toFixed(2)}
-                              </td>
-                              <td className="px-3 py-3 text-center text-sm font-medium text-slate-700">
-                                {row.percentage > 0 ? `${row.percentage}%` : "—"}
-                              </td>
-                              <td className="px-3 py-3">
-                                <input type="number" value={row.amount} min="0" max={row.remainingAmountBefore || 0} step="0.01"
-                                  onChange={(e) => handleMilestoneRowChange(idx, "amount", parseFloat(e.target.value) || 0)}
-                                  disabled={!row.selected}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm min-w-[110px] disabled:bg-slate-100" />
-                              </td>
-                              <td className="px-3 py-3 text-right text-sm font-bold text-emerald-700">
-                                {(row.remainingAmountAfter || 0).toFixed(2)}
-                              </td>
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3">
-                                  <select value={row.hsnSac}
-                                    onChange={(e) => handleMilestoneRowChange(idx, "hsnSac", e.target.value)}
-                                    disabled={!row.selected}
-                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[140px] disabled:bg-slate-100">
-                                    <option value="">No HSN</option>
-                                    {hsnList.map((h) => (
-                                      <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
-                                    ))}
-                                  </select>
-                                </td>
-                              )}
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3">
-                                  <input type="number" value={row.gstRate} min="0" max="100" step="0.1"
-                                    onChange={(e) => handleMilestoneRowChange(idx, "gstRate", parseFloat(e.target.value) || 0)}
-                                    disabled={!row.selected}
-                                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm disabled:bg-slate-100" />
-                                </td>
-                              )}
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
-                                  {(row.gstAmount || 0).toFixed(2)}
-                                </td>
-                              )}
-                              <td className="px-3 py-3 text-right text-sm font-bold text-slate-900">
-                                {(row.total || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div className="flex justify-end mt-4">
-                        <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-4 rounded-xl w-72">
-                          <div className="flex justify-between text-sm mb-1">
-                            <span className="opacity-80">Milestones selected:</span>
-                            <span className="font-bold">{milestoneRows.filter(r => r.selected).length}</span>
-                          </div>
-                          <div className="flex justify-between text-base font-black">
-                            <span>Invoice Total:</span>
-                            <span>{invoice.currency} {invoice.items.reduce((s, i) => s + (i.total || 0), 0).toFixed(2)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                ) : selectedPOInfo && (selectedPOInfo.poCategory === "staffing" || (selectedPOInfo.poCategory === "project" && selectedPOInfo.billingModel === "headcount")) && resourceRows.length > 0 ? (
-                  /* ── STAFFING / RESOURCE SECTION ── */
-                  <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
-                    <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-6 flex items-center gap-3">
-                      <User size={24} />
-                      <div>
-                        <h2 className="text-xl font-bold tracking-tight">
-                          {selectedPOInfo.billingModel === "daily" ? "Daily Rate Billing"
-                            : selectedPOInfo.billingModel === "hourly" ? "Hourly Rate Billing"
-                            : selectedPOInfo.billingModel === "monthly" ? "Monthly Rate Billing"
-                            : "Headcount Billing"}
-                        </h2>
-                        <p className="text-amber-200 text-xs mt-0.5">
-                          Enter actual {selectedPOInfo.billingModel === "daily" || selectedPOInfo.billingModel === "headcount" ? "days" : selectedPOInfo.billingModel === "hourly" ? "hours" : "months"} worked for each resource
-                        </p>
-                      </div>
-                    </div>
-                    <div className="p-6 overflow-x-auto">
-                      <table className="min-w-full divide-y divide-slate-100">
-                        <thead className="bg-slate-50/50">
-                          <tr>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">#</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Resource Name</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Role</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate (₹)</th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">
-                              {selectedPOInfo.billingModel === "daily" || selectedPOInfo.billingModel === "headcount" ? "Days Worked"
-                                : selectedPOInfo.billingModel === "hourly" ? "Hours Worked"
-                                : "Months"}
-                            </th>
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value (₹)</th>
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
-                            )}
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
-                            )}
-                            {showTypedTaxFields && (
-                              <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
-                            )}
-                            <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                          {resourceRows.map((row, idx) => (
-                            <tr key={row._id} className="hover:bg-amber-50/20">
-                              <td className="px-3 py-3 text-center font-bold text-slate-600 text-sm">{idx + 1}</td>
-                              <td className="px-3 py-3">
-                                <input type="text" value={row.name}
-                                  onChange={(e) => handleResourceRowChange(idx, "name", e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[130px]" />
-                                {row.employeeId && <p className="text-[10px] text-slate-400 mt-0.5">ID: {row.employeeId}</p>}
-                              </td>
-                              <td className="px-3 py-3">
-                                <input type="text" value={row.role}
-                                  onChange={(e) => handleResourceRowChange(idx, "role", e.target.value)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[100px]" />
-                              </td>
-                              <td className="px-3 py-3">
-                                <input type="number" value={row.rate} min="0" step="1"
-                                  onChange={(e) => handleResourceRowChange(idx, "rate", parseFloat(e.target.value) || 0)}
-                                  className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm min-w-[100px]" />
-                              </td>
-                              <td className="px-3 py-3">
-                                <input type="number" value={row.quantity} min="0" step="0.5"
-                                  onChange={(e) => handleResourceRowChange(idx, "quantity", parseFloat(e.target.value) || 0)}
-                                  className="w-24 px-2 py-1 border border-amber-300 bg-amber-50 rounded text-right text-sm font-bold" />
-                              </td>
-                              <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
-                                {(row.taxableValue || 0).toFixed(2)}
-                              </td>
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3">
-                                  <select value={row.hsnSac}
-                                    onChange={(e) => handleResourceRowChange(idx, "hsnSac", e.target.value)}
-                                    className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[140px]">
-                                    <option value="">No HSN</option>
-                                    {hsnList.map((h) => (
-                                      <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
-                                    ))}
-                                  </select>
-                                </td>
-                              )}
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3">
-                                  <input type="number" value={row.gstRate} min="0" max="100" step="0.1"
-                                    onChange={(e) => handleResourceRowChange(idx, "gstRate", parseFloat(e.target.value) || 0)}
-                                    className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
-                                </td>
-                              )}
-                              {showTypedTaxFields && (
-                                <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
-                                  {(row.gstAmount || 0).toFixed(2)}
-                                </td>
-                              )}
-                              <td className="px-3 py-3 text-right text-sm font-bold text-slate-900">
-                                {(row.total || 0).toFixed(2)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                      <div className="flex justify-end mt-4">
-                        <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-4 rounded-xl w-72">
-                          <div className="flex justify-between text-base font-black">
-                            <span>Invoice Total:</span>
-                            <span>{invoice.currency} {invoice.items.reduce((s, i) => s + (i.total || 0), 0).toFixed(2)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                ) : selectedPOInfo?.poCategory === "retainer" && retainerRow ? (
-                  /* ── RETAINER SECTION ── */
-                  <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
-                    <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6 flex items-center gap-3">
-                      <CreditCard size={24} />
-                      <div>
-                        <h2 className="text-xl font-bold tracking-tight">Retainer Billing</h2>
-                        <p className="text-emerald-200 text-xs mt-0.5">Fixed {retainerRow.periodLabel} retainer from this purchase order</p>
-                      </div>
-                    </div>
-                    <div className="p-6">
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 space-y-5">
-                        <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-1">Service Description</label>
-                          <input type="text" value={retainerRow.description}
-                            onChange={(e) => handleRetainerRowChange("description", e.target.value)}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm" />
-                        </div>
-                        <div className={`grid grid-cols-1 ${showTypedTaxFields ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-4`}>
-                          <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1">Billing Period</label>
-                            <input type="text" value={retainerRow.periodLabel} readOnly
-                              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-slate-50 font-medium" />
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-500">Address</label>
+                            <p className="text-sm">{invoice.billTo.address}</p>
                           </div>
                           <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-1">Retainer Amount (₹)</label>
-                            <input type="number" value={retainerRow.amount} min="0" step="0.01"
-                              onChange={(e) => handleRetainerRowChange("amount", parseFloat(e.target.value) || 0)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm text-right font-bold" />
+                            <label className="block text-xs font-medium text-gray-500">City</label>
+                            <p className="text-sm">{invoice.billTo.city || "N/A"}</p>
                           </div>
-                          {showTypedTaxFields && (
-                            <div>
-                              <label className="block text-sm font-semibold text-slate-700 mb-1">HSN/SAC Code</label>
-                              <select value={retainerRow.hsnSac}
-                                onChange={(e) => handleRetainerRowChange("hsnSac", e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm">
-                                <option value="">No HSN</option>
-                                {hsnList.map((h) => (
-                                  <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                        </div>
-                        <div className={`grid grid-cols-1 ${showTypedTaxFields ? "sm:grid-cols-3" : "sm:grid-cols-1"} gap-4`}>
-                          {showTypedTaxFields && (
-                            <div>
-                              <label className="block text-sm font-semibold text-slate-700 mb-1">GST Rate (%)</label>
-                              <input type="number" value={retainerRow.gstRate} min="0" max="100" step="0.1"
-                                onChange={(e) => handleRetainerRowChange("gstRate", parseFloat(e.target.value) || 0)}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm" />
-                            </div>
-                          )}
-                          {showTypedTaxFields && (
-                            <div>
-                              <label className="block text-sm font-semibold text-slate-700 mb-1">GST Amount (₹)</label>
-                              <input type="number" value={(retainerRow.gstAmount || 0).toFixed(2)} readOnly
-                                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-slate-50 text-right" />
-                            </div>
-                          )}
                           <div>
-                            <label className="block text-sm font-bold text-emerald-800 mb-1">Invoice Total (₹)</label>
-                            <input type="number" value={(retainerRow.total || 0).toFixed(2)} readOnly
-                              className="w-full px-3 py-2 border border-emerald-300 rounded-xl text-sm bg-emerald-100 text-right font-black text-emerald-900" />
+                            <label className="block text-xs font-medium text-gray-500">State</label>
+                            <p className="text-sm">{invoice.billTo.state || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">State Code</label>
+                            <p className="text-sm">{invoice.billTo.stateCode || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">Country</label>
+                            <p className="text-sm">{invoice.billTo.country || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">Pin Code</label>
+                            <p className="text-sm">{invoice.billTo.pinCode || "N/A"}</p>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-
-                ) : (
-                  /* ── DEFAULT LINE ITEMS (project-fixed, general, contract) ── */
-                  <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
-                      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
-                      <div className="flex items-center">
-                        <Package className="mr-3" size={24} />
-                        <div>
-                          <h2 className="text-xl font-bold tracking-tight">Line Items</h2>
-                          {selectedPOInfo?.label && (
-                            <p className="text-blue-200 text-xs mt-0.5">{selectedPOInfo.label}</p>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddItem}
-                        disabled={isFromPO}
-                        className={`px-5 py-2 backdrop-blur-md text-white rounded-xl flex items-center gap-2 transition-all font-bold border border-white/30 shadow-lg ${
-                          isFromPO
-                            ? "bg-white/10 opacity-50 cursor-not-allowed"
-                            : "bg-white/20 hover:bg-white/30"
-                        }`}
-                      >
-                        <Plus className="mr-2" size={20} />
-                        Add Item
-                      </button>
-                    </div>
-                    <div className="p-6">
-                      {invoice.items.length > 0 ? (
-                        <>
-                          <div className="overflow-x-auto rounded-2xl border border-slate-100 shadow-sm">
-                            <table className="min-w-full divide-y divide-slate-100">
-                              <thead className="bg-slate-50/50">
-                                <tr>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">S. No.</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Description</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Prev Remaining</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Current Term</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Term Remaining</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amount</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After</th>
-                                  <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
-                                </tr>
-                              </thead>
-                              <tbody className="bg-transparent divide-y divide-slate-50">
-                                {invoice.items.map((item, index) => (
-                                  <tr key={index} className="hover:bg-gray-50">
-                                    <td className="px-3 py-3 text-center font-semibold text-gray-700 align-top">{index + 1}</td>
-
-                                    <td className="px-4 py-3 align-top">
-                                      <input
-                                        type="text"
-                                        value={item.description}
-                                        onChange={(e) => handleItemChange(index, "description", e.target.value)}
-                                        list="descriptions"
-                                        className="w-full px-2 py-1 border border-gray-300 rounded"
-                                        placeholder="Item description..."
-                                      />
-                                      <datalist id="descriptions">
-                                        {existingDescriptions.map((desc, i) => (
-                                          <option key={i} value={desc} />
-                                        ))}
-                                      </datalist>
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium text-slate-700 align-top min-w-[120px]">
-                                      {(item.previousCarryForward || 0).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium text-slate-700 align-top min-w-[120px]">
-                                      {(item.currentTermAmount || 0).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 align-top">
-                                      <select
-                                        value={item.hsnSac}
-                                        onChange={(e) => handleItemChange(index, "hsnSac", e.target.value)}
-                                        disabled={isFromPO}
-                                        className={`w-full px-2 py-1 border rounded ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500 cursor-not-allowed" : "border-gray-300"}`}
-                                      >
-                                        <option value="" disabled>
-                                          Select HSN/SAC
-                                        </option>
-                                        {hsnList.map((hsn) => (
-                                          <option key={hsn._id} value={hsn.hsnCode}>
-                                            {hsn.hsnCode} - {hsn.serviceType} ({hsn.cgst + hsn.sgst}% CGST+SGST / {hsn.igst}% IGST)
-                                          </option>
-                                        ))}
-                                      </select>
-                                      {(() => {
-                                        const selectedHsn = hsnList.find((hsn) => hsn.hsnCode === item.hsnSac);
-
-                                        if (selectedHsn?.tdsRate && selectedHsn.tdsRate > 0) {
-                                          return <div className="text-[10px] text-gray-500 mt-1">TDS @ {selectedHsn.tdsRate}%</div>;
-                                        }
-                                        return null;
-                                      })()}
-                                    </td>
-
-                                    <td className="px-4 py-3 align-top">
-                                      <input
-                                        type="number"
-                                        value={item.quantity}
-                                        onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                                        className="w-full min-w-[120px] px-3 py-2 border border-gray-300 rounded text-right"
-                                        min="0"
-                                        max={item.poRemainingQuantity || undefined}
-                                        step="0.0001"
-                                        inputMode="decimal"
-                                      />
-                                      {item.poRemainingQuantity !== undefined && (
-                                        <div className="mt-1 text-[10px] text-amber-600 text-right">
-                                          Left: {item.poRemainingQuantity}
-                                        </div>
-                                      )}
-                                    </td>
-
-                                    <td className="px-4 py-3 align-top">
-                                      <input
-                                        type="number"
-                                        value={item.rate}
-                                        readOnly
-                                        className="w-full min-w-[120px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
-                                        min="0"
-                                        step="1"
-                                        inputMode="decimal"
-                                      />
-                                    </td>
-
-                                    <td className="px-4 py-3 align-top">
-                                      <input
-                                        type="number"
-                                        value={item.taxableValue}
-                                        onChange={(e) => handleItemChange(index, "taxableValue", e.target.value)}
-                                        className="w-full min-w-[140px] px-3 py-2 border border-gray-300 rounded text-right"
-                                        min="0"
-                                        step="0.01"
-                                        inputMode="decimal"
-                                      />
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium text-amber-600 align-top min-w-[130px]">
-                                      {(item.currentTermRemainingAmount || 0).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium align-top">
-                                      <input
-                                        type="number"
-                                        value={item.gstRate}
-                                        readOnly
-                                        className="w-full min-w-[100px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
-                                        min="0"
-                                        max="100"
-                                        step="0.1"
-                                      />
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium align-top">{item.gstAmount?.toFixed(2) || "0.00"}</td>
-                                    <td className="px-4 py-3 align-top">
-                                      <input
-                                        type="number"
-                                        value={item.total}
-                                        readOnly={isFromPO}
-                                        onChange={(e) => handleItemChange(index, "total", e.target.value)}
-                                        className={`w-full min-w-[150px] px-3 py-2 border rounded text-right font-semibold ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500" : "border-gray-300 text-gray-900"}`}
-                                        min="0"
-                                        max={item.maxAllowedInvoiceAmount || undefined}
-                                        step="0.01"
-                                      />
-                                      <div className="mt-1 text-[10px] text-gray-500 text-right">
-                                        {isFromPO ? "Auto total" : item.totalManuallyEdited ? "Manual total" : "Auto total"}
-                                      </div>
-                                    </td>
-                                    <td className="px-4 py-3 text-right font-medium text-amber-700 align-top min-w-[130px]">
-                                      {(item.remainingAfterInvoice || 0).toFixed(2)}
-                                    </td>
-                                    <td className="px-4 py-3 align-top">
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveItem(index)}
-                                        disabled={invoice.items.length === 1}
-                                        className={`text-red-500 hover:text-red-700 ${
-                                          invoice.items.length === 1
-                                            ? "opacity-50 cursor-not-allowed"
-                                            : ""
-                                        }`}
-                                      >
-                                        <Trash2 size={20} />
-                                      </button>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                          <div className="flex justify-end mt-4">
-                            <div className="bg-gradient-to-r from-neutral-500 to-neutral-700 text-white p-4 rounded-lg w-64">
-                              <h3 className="text-lg font-bold text-right">
-                                Total: {invoice.currency} {getTotalAmount()}
-                              </h3>
-                            </div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="text-center py-8 bg-gray-50 rounded-lg">
-                          <Package className="mx-auto text-gray-400 mb-2" size={48} />
-                          <p className="text-gray-500">No items added yet. Click "Add Item" to get started.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Bank & Amount Details */}
-                <div className="bg-white rounded-xl shadow-lg mb-6">
-                  <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
-                    <Banknote className="mr-2" size={20} />
-                    <h2 className="text-lg font-semibold">Bank & Amount Details</h2>
-                  </div>
-                  <div className="p-6">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                      {/* Bank Details */}
-                      <div className="bg-gradient-to-r from-neutral-700 to-neutral-500 text-white p-6 rounded-lg">
-                        <h3 className="text-lg font-semibold mb-4">Bank Details</h3>
-                        {loadingCompany ? (
-                          <div className="flex justify-center py-4">
-                            <Loader2 className="animate-spin" size={24} />
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <div>
-                              <h4 className="text-sm font-semibold opacity-90 mb-1">Bank Name</h4>
-                              <p>{companyDetails.bankName}</p>
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-semibold opacity-90 mb-1">Account Name</h4>
-                              <p>{companyDetails.accountName}</p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <h4 className="text-sm font-semibold opacity-90 mb-1">Account Number</h4>
-                                <p>{companyDetails.accountNumber}</p>
-                              </div>
-                              <div>
-                                <h4 className="text-sm font-semibold opacity-90 mb-1">IFSC Code</h4>
-                                <p>{companyDetails.ifscCode}</p>
-                              </div>
-                            </div>
-                            <div>
-                              <h4 className="text-sm font-semibold opacity-90 mb-1">Branch</h4>
-                              <p>{companyDetails.branch}</p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Amount Details */}
-                      <div className="glass-card p-8 rounded-[2.5rem] border border-white/20 shadow-premium">
-                        <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
-                          <Banknote size={20} className="text-emerald-500" />
-                          Amount Details
-                        </h3>
-                        <div className="space-y-4">
-                          {/* Total Taxable Value */}
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Total Taxable Value</label>
-                              <input
-                                type="number"
-                                name="totalTaxableValue"
-                                value={invoice.totalTaxableValue.toFixed(2)}
-                                onChange={handleAmountChange}
-                                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
-                                readOnly
-                              />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">TDS (Reference Only)</label>
-                            <input
-                              type="number"
-                              value={invoice.tdsAmount}
-                              onChange={(e) => handleTdsChange(e.target.value)}
-                              className="w-full px-3 py-2 border rounded bg-white"
-                              min="0"
-                              step="0.01"
-                            />
-                            <p className="mt-1 text-[11px] text-gray-500">
-                              Auto-calculated by default. You can manually adjust it for special cases.
-                            </p>
-                          </div>
-
-                           <div>
-                             <label className="block text-sm font-bold text-slate-700 mb-2">Invoice Total</label>
-                             <div className="relative">
-                               <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-blue-600">₹</span>
-                               <input 
-                                 value={invoice.netPayable.toFixed(2)} 
-                                 readOnly 
-                                 className="w-full pl-8 pr-4 py-4 bg-blue-50/50 border-2 border-blue-100 rounded-2xl font-black text-2xl text-blue-700 shadow-inner" 
-                               />
-                             </div>
-                           </div>
-
-                          {/* Value in Words */}
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Value in Words</label>
-                            <textarea
-                              value={valueInWords}
-                              onChange={(e) => setValueInWords(e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                              rows="2"
-                              readOnly
-                            />
-                          </div>
-
-                          {/* CGST & SGST */}
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Total CGST</label>
-                              <input
-                                type="number"
-                                name="totalCGSTAmount"
-                                value={invoice.totalCGSTAmount.toFixed(2)}
-                                onChange={handleAmountChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                                readOnly
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-sm font-medium text-gray-700 mb-1">Total SGST</label>
-                              <input
-                                type="number"
-                                name="totalSGSTAmount"
-                                value={invoice.totalSGSTAmount.toFixed(2)}
-                                onChange={handleAmountChange}
-                                className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                                readOnly
-                              />
-                            </div>
-                          </div>
-
-                          {/* IGST */}
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Total IGST</label>
-                            <input
-                              type="number"
-                              name="totalIGSTAmount"
-                              value={invoice.totalIGSTAmount.toFixed(2)}
-                              onChange={handleAmountChange}
-                              className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                              readOnly
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* PDF Generation Options */}
-                <div className="bg-white rounded-xl shadow-lg mb-6">
-                  <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
-                    <Download className="mr-2" size={20} />
-                    <h2 className="text-lg font-semibold">PDF Generation Options</h2>
-                  </div>
-                  <div className="p-6">
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center">
-                          <input
-                            type="checkbox"
-                            id="digitalSignature"
-                            checked={invoice.withSignature}
-                            onChange={(e) =>
-                              setInvoice((prev) => ({
-                                ...prev,
-                                withSignature: e.target.checked,
-                              }))
-                            }
-                            className="h-5 w-5 text-blue-600 rounded"
-                          />
-                          <label htmlFor="digitalSignature" className="ml-2 text-gray-700 font-medium">
-                            Include Digital Signature
-                          </label>
-                        </div>
-                        <span className={`px-3 py-1 text-sm rounded-full ${invoice.withSignature ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-800"}`}>
-                          {invoice.withSignature ? "With Signature" : "Without Signature"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex justify-end items-center gap-4 mt-12 pb-10">
-                  <button
-                    type="button"
-                    onClick={handleGoToList}
-                    className="px-8 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl hover:bg-slate-50 transition-all font-bold shadow-sm"
-                  >
-                    Cancel
-                  </button>
-                  
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="px-10 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl hover:from-blue-700 hover:to-indigo-700 transition-all font-black shadow-lg shadow-blue-600/20 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed transform hover:-translate-y-0.5 active:translate-y-0"
-                  >
-                    {loading ? (
-                      <>
-                        <Loader2 className="animate-spin" size={20} />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <Check size={20} />
-                        {isEditMode ? "Update Invoice" : "Generate Invoice"}
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {/* Messages and Post-action Options */}
-                <div className="mt-8 space-y-4">
-                  {error && <div className="text-red-600 bg-red-50 p-4 rounded-xl border border-red-100 flex items-center gap-3 font-medium">Error: {error}</div>}
-                  {successMessage && (
-                    <div className="text-emerald-600 bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex items-center gap-3 font-medium">
-                      <Check className="h-5 w-5" />
-                      {successMessage}
                     </div>
                   )}
 
-                  {/* Download Buttons - Only visible after generation */}
-                  <div className="flex flex-wrap gap-4 pt-4">
-                    <button
-                      type="button"
-                      onClick={handleDownloadPdf}
-                      disabled={!createdInvoiceId}
-                      className={`px-6 py-3 text-white rounded-xl flex items-center gap-2 hover:shadow-lg transition-all font-bold ${
-                        !createdInvoiceId ? "bg-slate-300 cursor-not-allowed" : "bg-gradient-to-r from-orange-500 to-pink-500 hover:scale-105"
-                      }`}
-                    >
-                      <Download size={20} />
-                      Download PDF
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDownloadWord}
-                      disabled={!createdInvoiceId}
-                      className={`px-6 py-3 text-white rounded-xl flex items-center gap-2 hover:shadow-lg transition-all font-bold ${
-                        !createdInvoiceId ? "bg-slate-300 cursor-not-allowed" : "bg-gradient-to-r from-green-500 to-teal-500 hover:scale-105"
-                      }`}
-                    >
-                      <Download size={20} />
-                      Download Word
-                    </button>
-                  </div>
+                  {/* Manual Input Fields (Only show when editing and no client is selected from dropdown) */}
+                  {(!invoice.billTo.name || editingBillTo) && (
+                    <div className="space-y-4 mt-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Client Name *</label>
+                        <input type="text" name="name" value={invoice.billTo.name} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
+                        <textarea name="address" value={invoice.billTo.address} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" rows="3" required />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                          <input type="text" name="city" value={invoice.billTo.city} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                          <input type="text" name="state" value={invoice.billTo.state} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">State Code</label>
+                          <input type="text" name="stateCode" value={invoice.billTo.stateCode} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                          <input type="text" name="country" value={invoice.billTo.country} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Pin Code</label>
+                          <input type="text" name="pinCode" value={invoice.billTo.pinCode} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Type</label>
+                          <select name="taxIdentifierType" value={invoice.billTo.taxIdentifierType} onChange={handleBillToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md">
+                            <option value="">Select Type</option>
+                            <option value="GST">GST</option>
+                            <option value="PAN">PAN</option>
+                            <option value="EIN">EIN</option>
+                            <option value="VAT">VAT</option>
+                            <option value="SSN">SSN</option>
+                            <option value="National ID">National ID</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Number</label>
+                        <input
+                          type="text"
+                          name="taxIdentifierNumber"
+                          value={invoice.billTo.taxIdentifierNumber}
+                          onChange={handleBillToChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </form>
 
+                {/* Ship To */}
+                <div className="glass-card p-6 rounded-[2rem] border border-white/20 shadow-premium">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                      <ShoppingBag size={20} className="text-amber-500" />
+                      Ship To
+                    </h3>
+                    <div className="flex items-center">
+                      <input type="checkbox" id="sameAsBillTo" checked={sameAsBillTo} onChange={(e) => handleSameAsBillTo(e.target.checked)} className="h-4 w-4 text-blue-600 rounded" />
+                      <label htmlFor="sameAsBillTo" className="ml-2 text-sm text-gray-700">
+                        Same as Bill To
+                      </label>
+                    </div>
+                    {invoice.shipTo.name && !sameAsBillTo && !editingShipTo && (
+                      <div className="flex space-x-2">
+                        <button type="button" onClick={handleEditShipTo} className="flex items-center text-sm text-blue-600 hover:text-blue-800">
+                          Edit
+                        </button>
+                        <button type="button" onClick={handleClearShipTo} className="flex items-center text-sm text-red-600 hover:text-red-800">
+                          <X size={16} className="mr-1" />
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-              {/* Success Modal */}
-              <InvoiceCreatedModal
-                open={showSuccessModal}
-                onClose={() => {
-                  setShowSuccessModal(false);
-                  navigate("/invoice-data");
-                }}
-                invoice={createdInvoice}
-                isEdit={isEditMode}
-              />
+                  {/* If same as bill to, show bill to details */}
+                  {sameAsBillTo ? (
+                    <div className="mb-4">
+                      <div className="p-4 bg-white/40 backdrop-blur-sm rounded-xl border border-white/20 shadow-sm">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">Client Name</label>
+                            <p className="text-sm font-medium">{invoice.billTo.name}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">{invoice.billTo.taxIdentifierType || "Tax ID"}</label>
+                            <p className="text-sm">{invoice.billTo.taxIdentifierNumber || "N/A"}</p>
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-xs font-medium text-gray-500">Address</label>
+                            <p className="text-sm">{invoice.billTo.address}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">City</label>
+                            <p className="text-sm">{invoice.billTo.city || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">State</label>
+                            <p className="text-sm">{invoice.billTo.state || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">State Code</label>
+                            <p className="text-sm">{invoice.billTo.stateCode || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">Country</label>
+                            <p className="text-sm">{invoice.billTo.country || "N/A"}</p>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-500">Pin Code</label>
+                            <p className="text-sm">{invoice.billTo.pinCode || "N/A"}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Select Client Dropdown (Only show when editing or no client selected) */}
+                      {!invoice.shipTo.name || editingShipTo ? (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-slate-700 mb-2">Select Shipping Address</label>
+                          <div className="relative">
+                            <div className="relative">
+                              <input
+                                type="text"
+                                placeholder="Search client..."
+                                value={shipToSearch}
+                                onChange={(e) => {
+                                  setShipToSearch(e.target.value);
+                                  setShipToDropdownOpen(true);
+                                }}
+                                onFocus={() => setShipToDropdownOpen(true)}
+                                className="w-full px-4 py-3 text-sm bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all pr-12 font-medium"
+                              />
+                              <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                                {loadingClients ? (
+                                  <Loader2 className="animate-spin text-gray-400" size={20} />
+                                ) : (
+                                  <ChevronDown
+                                    className={`text-gray-400 cursor-pointer ${shipToDropdownOpen ? "transform rotate-180" : ""}`}
+                                    size={20}
+                                    onClick={() => setShipToDropdownOpen(!shipToDropdownOpen)}
+                                  />
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Dropdown List */}
+                            {shipToDropdownOpen && (
+                              <div className="absolute z-10 mt-1 w-full bg-white border border-gray-300 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                                {loadingClients ? (
+                                  <div className="p-4 text-center">
+                                    <Loader2 className="animate-spin mx-auto" size={20} />
+                                  </div>
+                                ) : filteredShipToClients.length > 0 ? (
+                                  filteredShipToClients.map((client) => (
+                                    <div
+                                      key={client._id}
+                                      className="px-4 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-200 last:border-b-0"
+                                      onClick={() => handleSelectShipToClient(client)}
+                                    >
+                                      <div className="font-medium">{client.clientName}</div>
+                                      <div className="text-sm text-gray-500">
+                                        {client.gstNumber && <span>GST: {client.gstNumber}</span>}
+                                        {client.panNumber && <span>PAN: {client.panNumber}</span>}
+                                        {client.einNumber && <span>EIN: {client.einNumber}</span>}
+                                        {client.stateCode && <span className="ml-2">State: {client.stateCode}</span>}
+                                      </div>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <div className="p-4 text-center text-gray-500">No clients found</div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Client Details Display (Read-only when client is selected) */
+                        <div className="mb-4">
+                          <div className="p-4 bg-white/40 backdrop-blur-sm rounded-xl border border-white/20 shadow-sm">
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">Client Name</label>
+                                <p className="text-sm font-medium">{invoice.shipTo.name}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">{invoice.shipTo.taxIdentifierType || "Tax ID"}</label>
+                                <p className="text-sm">{invoice.shipTo.taxIdentifierNumber || "N/A"}</p>
+                              </div>
+                              <div className="col-span-2">
+                                <label className="block text-xs font-medium text-gray-500">Address</label>
+                                <p className="text-sm">{invoice.shipTo.address}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">City</label>
+                                <p className="text-sm">{invoice.shipTo.city || "N/A"}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">State</label>
+                                <p className="text-sm">{invoice.shipTo.state || "N/A"}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">State Code</label>
+                                <p className="text-sm">{invoice.shipTo.stateCode || "N/A"}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">Country</label>
+                                <p className="text-sm">{invoice.shipTo.country || "N/A"}</p>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-medium text-gray-500">Pin Code</label>
+                                <p className="text-sm">{invoice.shipTo.pinCode || "N/A"}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Manual Input Fields (Only show when editing and no client is selected from dropdown) */}
+                      {(!invoice.shipTo.name || editingShipTo) && !sameAsBillTo && (
+                        <div className="space-y-4 mt-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Client Name *</label>
+                            <input type="text" name="name" value={invoice.shipTo.name} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" required />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Address *</label>
+                            <textarea
+                              name="address"
+                              value={invoice.shipTo.address}
+                              onChange={handleShipToChange}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                              rows="3"
+                              required
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+                              <input type="text" name="city" value={invoice.shipTo.city} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+                              <input type="text" name="state" value={invoice.shipTo.state} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">State Code</label>
+                              <input type="text" name="stateCode" value={invoice.shipTo.stateCode} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                              <input type="text" name="country" value={invoice.shipTo.country} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Pin Code</label>
+                              <input type="text" name="pinCode" value={invoice.shipTo.pinCode} onChange={handleShipToChange} className="w-full px-3 py-2 border border-gray-300 rounded-md" />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Type</label>
+                              <select
+                                name="taxIdentifierType"
+                                value={invoice.shipTo.taxIdentifierType}
+                                onChange={handleShipToChange}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                              >
+                                <option value="">Select Type</option>
+                                <option value="GST">GST</option>
+                                <option value="PAN">PAN</option>
+                                <option value="EIN">EIN</option>
+                                <option value="VAT">VAT</option>
+                                <option value="SSN">SSN</option>
+                                <option value="National ID">National ID</option>
+                              </select>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Tax Identifier Number</label>
+                            <input
+                              type="text"
+                              name="taxIdentifierNumber"
+                              value={invoice.shipTo.taxIdentifierNumber}
+                              onChange={handleShipToChange}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        );
+
+          {/* ══ PO TYPE SPECIFIC BILLING SECTION ══════════════════════════ */}
+          {selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0 ? (
+            /* ── MILESTONE SECTION ── */
+            <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-6 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Package size={24} />
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Milestone Billing</h2>
+                    <p className="text-indigo-200 text-xs mt-0.5">
+                      {selectedPOInfo?.label || "Select milestones to invoice from this purchase order"}
+                    </p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/30">
+                  {milestoneRows.filter(r => r.selected).length} / {milestoneRows.length} selected
+                </span>
+              </div>
+              <div className="p-6 overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-100">
+                  <thead className="bg-slate-50/50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest w-8">✓</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">#</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Milestone Title</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Due Date</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Original %</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Original Amount (₹)</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Already Invoiced (₹)</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining (₹)</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice %</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice Amount (₹)</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After (₹)</th>
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
+                      )}
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
+                      )}
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
+                      )}
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {milestoneRows.map((row, idx) => (
+                      <tr key={row._id} className={`transition-colors ${row.selected ? "bg-indigo-50/30" : "bg-slate-50/50 opacity-60"}`}>
+                        <td className="px-3 py-3">
+                          <input type="checkbox" checked={row.selected} onChange={() => handleMilestoneToggle(idx)}
+                            className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                        </td>
+                        <td className="px-3 py-3 text-center font-bold text-slate-600 text-sm">{idx + 1}</td>
+                        <td className="px-3 py-3">
+                          <input type="text" value={row.title}
+                            onChange={(e) => handleMilestoneRowChange(idx, "title", e.target.value)}
+                            disabled={!row.selected}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[160px] disabled:bg-slate-100" />
+                          {row.description && <p className="text-[10px] text-slate-400 mt-0.5 truncate max-w-[160px]">{row.description}</p>}
+                          {(row.alreadyInvoicedAmount > 0 || row.remainingAmountBefore > 0) && (
+                            <p className="text-[10px] text-slate-500 mt-1">
+                              Already invoiced: {(row.alreadyInvoicedAmount || 0).toFixed(2)} · Open for invoice: {(row.remainingAmountBefore || 0).toFixed(2)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3 text-sm text-slate-600 whitespace-nowrap">
+                          {row.dueDate || "—"}
+                        </td>
+                        <td className="px-3 py-3 text-center text-sm font-medium text-slate-700">
+                          {row.originalPercentage > 0 ? `${row.originalPercentage}%` : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
+                          {(row.originalAmount || 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
+                          {(row.alreadyInvoicedAmount || 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-bold text-amber-700">
+                          {(row.remainingAmountBefore || 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-3 text-center text-sm font-medium text-slate-700">
+                          {row.percentage > 0 ? `${row.percentage}%` : "—"}
+                        </td>
+                        <td className="px-3 py-3">
+                          <input type="number" value={row.amount} min="0" max={row.remainingAmountBefore || 0} step="0.01"
+                            onChange={(e) => handleMilestoneRowChange(idx, "amount", parseFloat(e.target.value) || 0)}
+                            disabled={!row.selected}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm min-w-[110px] disabled:bg-slate-100" />
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-bold text-emerald-700">
+                          {(row.remainingAmountAfter || 0).toFixed(2)}
+                        </td>
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3">
+                            <select value={row.hsnSac}
+                              onChange={(e) => handleMilestoneRowChange(idx, "hsnSac", e.target.value)}
+                              disabled={!row.selected}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[140px] disabled:bg-slate-100">
+                              <option value="">No HSN</option>
+                              {hsnList.map((h) => (
+                                <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
+                              ))}
+                            </select>
+                          </td>
+                        )}
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3">
+                            <input type="number" value={row.gstRate} min="0" max="100" step="0.1"
+                              onChange={(e) => handleMilestoneRowChange(idx, "gstRate", parseFloat(e.target.value) || 0)}
+                              disabled={!row.selected}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm disabled:bg-slate-100" />
+                          </td>
+                        )}
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
+                            {(row.gstAmount || 0).toFixed(2)}
+                          </td>
+                        )}
+                        <td className="px-3 py-3 text-right text-sm font-bold text-slate-900">
+                          {(row.total || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex justify-end mt-4">
+                  <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-4 rounded-xl w-72">
+                    <div className="flex justify-between text-sm mb-1">
+                      <span className="opacity-80">Milestones selected:</span>
+                      <span className="font-bold">{milestoneRows.filter(r => r.selected).length}</span>
+                    </div>
+                    <div className="flex justify-between text-base font-black">
+                      <span>Invoice Total:</span>
+                      <span>{invoice.currency} {invoice.items.reduce((s, i) => s + (i.total || 0), 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          ) : selectedPOInfo && (selectedPOInfo.poCategory === "staffing" || (selectedPOInfo.poCategory === "project" && selectedPOInfo.billingModel === "headcount")) && resourceRows.length > 0 ? (
+            /* ── STAFFING / RESOURCE SECTION ── */
+            <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+              <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-6 flex items-center gap-3">
+                <User size={24} />
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">
+                    {selectedPOInfo.billingModel === "daily" ? "Daily Rate Billing"
+                      : selectedPOInfo.billingModel === "hourly" ? "Hourly Rate Billing"
+                        : selectedPOInfo.billingModel === "monthly" ? "Monthly Rate Billing"
+                          : "Headcount Billing"}
+                  </h2>
+                  <p className="text-amber-200 text-xs mt-0.5">
+                    Enter actual {selectedPOInfo.billingModel === "daily" || selectedPOInfo.billingModel === "headcount" ? "days" : selectedPOInfo.billingModel === "hourly" ? "hours" : "months"} worked for each resource
+                  </p>
+                </div>
+              </div>
+              <div className="p-6 overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-100">
+                  <thead className="bg-slate-50/50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">#</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Resource Name</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Role</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate (₹)</th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">
+                        {selectedPOInfo.billingModel === "daily" || selectedPOInfo.billingModel === "headcount" ? "Days Worked"
+                          : selectedPOInfo.billingModel === "hourly" ? "Hours Worked"
+                            : "Months"}
+                      </th>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value (₹)</th>
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
+                      )}
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
+                      )}
+                      {showTypedTaxFields && (
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
+                      )}
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {resourceRows.map((row, idx) => (
+                      <tr key={row._id} className="hover:bg-amber-50/20">
+                        <td className="px-3 py-3 text-center font-bold text-slate-600 text-sm">{idx + 1}</td>
+                        <td className="px-3 py-3">
+                          <input type="text" value={row.name}
+                            onChange={(e) => handleResourceRowChange(idx, "name", e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[130px]" />
+                          {row.employeeId && <p className="text-[10px] text-slate-400 mt-0.5">ID: {row.employeeId}</p>}
+                        </td>
+                        <td className="px-3 py-3">
+                          <input type="text" value={row.role}
+                            onChange={(e) => handleResourceRowChange(idx, "role", e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[100px]" />
+                        </td>
+                        <td className="px-3 py-3">
+                          <input type="number" value={row.rate} min="0" step="1"
+                            onChange={(e) => handleResourceRowChange(idx, "rate", parseFloat(e.target.value) || 0)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-right text-sm min-w-[100px]" />
+                        </td>
+                        <td className="px-3 py-3">
+                          <input type="number" value={row.quantity} min="0" step="0.5"
+                            onChange={(e) => handleResourceRowChange(idx, "quantity", parseFloat(e.target.value) || 0)}
+                            className="w-24 px-2 py-1 border border-amber-300 bg-amber-50 rounded text-right text-sm font-bold" />
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
+                          {(row.taxableValue || 0).toFixed(2)}
+                        </td>
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3">
+                            <select value={row.hsnSac}
+                              onChange={(e) => handleResourceRowChange(idx, "hsnSac", e.target.value)}
+                              className="w-full px-2 py-1 border border-gray-300 rounded text-sm min-w-[140px]">
+                              <option value="">No HSN</option>
+                              {hsnList.map((h) => (
+                                <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
+                              ))}
+                            </select>
+                          </td>
+                        )}
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3">
+                            <input type="number" value={row.gstRate} min="0" max="100" step="0.1"
+                              onChange={(e) => handleResourceRowChange(idx, "gstRate", parseFloat(e.target.value) || 0)}
+                              className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                          </td>
+                        )}
+                        {showTypedTaxFields && (
+                          <td className="px-3 py-3 text-right text-sm font-medium text-slate-700">
+                            {(row.gstAmount || 0).toFixed(2)}
+                          </td>
+                        )}
+                        <td className="px-3 py-3 text-right text-sm font-bold text-slate-900">
+                          {(row.total || 0).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex justify-end mt-4">
+                  <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white p-4 rounded-xl w-72">
+                    <div className="flex justify-between text-base font-black">
+                      <span>Invoice Total:</span>
+                      <span>{invoice.currency} {invoice.items.reduce((s, i) => s + (i.total || 0), 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          ) : selectedPOInfo?.poCategory === "retainer" && retainerRow ? (
+            /* ── RETAINER SECTION ── */
+            <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-600 to-emerald-700 text-white p-6 flex items-center gap-3">
+                <CreditCard size={24} />
+                <div>
+                  <h2 className="text-xl font-bold tracking-tight">Retainer Billing</h2>
+                  <p className="text-emerald-200 text-xs mt-0.5">Fixed {retainerRow.periodLabel} retainer from this purchase order</p>
+                </div>
+              </div>
+              <div className="p-6">
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 space-y-5">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">Service Description</label>
+                    <input type="text" value={retainerRow.description}
+                      onChange={(e) => handleRetainerRowChange("description", e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm" />
+                  </div>
+                  <div className={`grid grid-cols-1 ${showTypedTaxFields ? "sm:grid-cols-3" : "sm:grid-cols-2"} gap-4`}>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">Billing Period</label>
+                      <input type="text" value={retainerRow.periodLabel} readOnly
+                        className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-slate-50 font-medium" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-1">Retainer Amount (₹)</label>
+                      <input type="number" value={retainerRow.amount} min="0" step="0.01"
+                        onChange={(e) => handleRetainerRowChange("amount", parseFloat(e.target.value) || 0)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm text-right font-bold" />
+                    </div>
+                    {showTypedTaxFields && (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">HSN/SAC Code</label>
+                        <select value={retainerRow.hsnSac}
+                          onChange={(e) => handleRetainerRowChange("hsnSac", e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm">
+                          <option value="">No HSN</option>
+                          {hsnList.map((h) => (
+                            <option key={h._id} value={h.hsnCode}>{h.hsnCode} – {h.serviceType}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className={`grid grid-cols-1 ${showTypedTaxFields ? "sm:grid-cols-3" : "sm:grid-cols-1"} gap-4`}>
+                    {showTypedTaxFields && (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">GST Rate (%)</label>
+                        <input type="number" value={retainerRow.gstRate} min="0" max="100" step="0.1"
+                          onChange={(e) => handleRetainerRowChange("gstRate", parseFloat(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm" />
+                      </div>
+                    )}
+                    {showTypedTaxFields && (
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">GST Amount (₹)</label>
+                        <input type="number" value={(retainerRow.gstAmount || 0).toFixed(2)} readOnly
+                          className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-slate-50 text-right" />
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-sm font-bold text-emerald-800 mb-1">Invoice Total (₹)</label>
+                      <input type="number" value={(retainerRow.total || 0).toFixed(2)} readOnly
+                        className="w-full px-3 py-2 border border-emerald-300 rounded-xl text-sm bg-emerald-100 text-right font-black text-emerald-900" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          ) : (
+            /* ── DEFAULT LINE ITEMS (project-fixed, general, contract) ── */
+            <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white p-6 flex items-center justify-between">
+                <div className="flex items-center">
+                  <Package className="mr-3" size={24} />
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Line Items</h2>
+                    {selectedPOInfo?.label && (
+                      <p className="text-blue-200 text-xs mt-0.5">{selectedPOInfo.label}</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddItem}
+                  disabled={isFromPO}
+                  className={`px-5 py-2 backdrop-blur-md text-white rounded-xl flex items-center gap-2 transition-all font-bold border border-white/30 shadow-lg ${isFromPO
+                    ? "bg-white/10 opacity-50 cursor-not-allowed"
+                    : "bg-white/20 hover:bg-white/30"
+                    }`}
+                >
+                  <Plus className="mr-2" size={20} />
+                  Add Item
+                </button>
+              </div>
+              <div className="p-6">
+                {invoice.items.length > 0 ? (
+                  <>
+                    <div className="overflow-x-auto rounded-2xl border border-slate-100 shadow-sm">
+                      <table className="min-w-full divide-y divide-slate-100">
+                        <thead className="bg-slate-50/50">
+                          <tr>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">S. No.</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Description</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Prev Remaining</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Current Term</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Term Remaining</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amount</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-transparent divide-y divide-slate-50">
+                          {invoice.items.map((item, index) => (
+                            <tr key={index} className="hover:bg-gray-50">
+                              <td className="px-3 py-3 text-center font-semibold text-gray-700 align-top">{index + 1}</td>
+
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="text"
+                                  value={item.description}
+                                  onChange={(e) => handleItemChange(index, "description", e.target.value)}
+                                  list="descriptions"
+                                  className="w-full px-2 py-1 border border-gray-300 rounded"
+                                  placeholder="Item description..."
+                                />
+                                <datalist id="descriptions">
+                                  {existingDescriptions.map((desc, i) => (
+                                    <option key={i} value={desc} />
+                                  ))}
+                                </datalist>
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-slate-700 align-top min-w-[120px]">
+                                {(item.previousCarryForward || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-slate-700 align-top min-w-[120px]">
+                                {(item.currentTermAmount || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <select
+                                  value={item.hsnSac}
+                                  onChange={(e) => handleItemChange(index, "hsnSac", e.target.value)}
+                                  disabled={isFromPO}
+                                  className={`w-full px-2 py-1 border rounded ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500 cursor-not-allowed" : "border-gray-300"}`}
+                                >
+                                  <option value="" disabled>
+                                    Select HSN/SAC
+                                  </option>
+                                  {hsnList.map((hsn) => (
+                                    <option key={hsn._id} value={hsn.hsnCode}>
+                                      {hsn.hsnCode} - {hsn.serviceType} ({hsn.cgst + hsn.sgst}% CGST+SGST / {hsn.igst}% IGST)
+                                    </option>
+                                  ))}
+                                </select>
+                                {(() => {
+                                  const selectedHsn = hsnList.find((hsn) => hsn.hsnCode === item.hsnSac);
+
+                                  if (selectedHsn?.tdsRate && selectedHsn.tdsRate > 0) {
+                                    return <div className="text-[10px] text-gray-500 mt-1">TDS @ {selectedHsn.tdsRate}%</div>;
+                                  }
+                                  return null;
+                                })()}
+                              </td>
+
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="number"
+                                  value={item.quantity}
+                                  onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
+                                  className="w-full min-w-[120px] px-3 py-2 border border-gray-300 rounded text-right"
+                                  min="0"
+                                  max={item.poRemainingQuantity || undefined}
+                                  step="0.0001"
+                                  inputMode="decimal"
+                                />
+                                {item.poRemainingQuantity !== undefined && (
+                                  <div className="mt-1 text-[10px] text-amber-600 text-right">
+                                    Left: {item.poRemainingQuantity}
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="number"
+                                  value={item.rate}
+                                  readOnly
+                                  className="w-full min-w-[120px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
+                                  min="0"
+                                  step="1"
+                                  inputMode="decimal"
+                                />
+                              </td>
+
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="number"
+                                  value={item.taxableValue}
+                                  onChange={(e) => handleItemChange(index, "taxableValue", e.target.value)}
+                                  className="w-full min-w-[140px] px-3 py-2 border border-gray-300 rounded text-right"
+                                  min="0"
+                                  step="0.01"
+                                  inputMode="decimal"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-amber-600 align-top min-w-[130px]">
+                                {(item.currentTermRemainingAmount || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium align-top">
+                                <input
+                                  type="number"
+                                  value={item.gstRate}
+                                  readOnly
+                                  className="w-full min-w-[100px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
+                                  min="0"
+                                  max="100"
+                                  step="0.1"
+                                />
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium align-top">{item.gstAmount?.toFixed(2) || "0.00"}</td>
+                              <td className="px-4 py-3 align-top">
+                                <input
+                                  type="number"
+                                  value={item.total}
+                                  readOnly={isFromPO}
+                                  onChange={(e) => handleItemChange(index, "total", e.target.value)}
+                                  className={`w-full min-w-[150px] px-3 py-2 border rounded text-right font-semibold ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500" : "border-gray-300 text-gray-900"}`}
+                                  min="0"
+                                  max={item.maxAllowedInvoiceAmount || undefined}
+                                  step="0.01"
+                                />
+                                <div className="mt-1 text-[10px] text-gray-500 text-right">
+                                  {isFromPO ? "Auto total" : item.totalManuallyEdited ? "Manual total" : "Auto total"}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-right font-medium text-amber-700 align-top min-w-[130px]">
+                                {(item.remainingAfterInvoice || 0).toFixed(2)}
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveItem(index)}
+                                  disabled={invoice.items.length === 1}
+                                  className={`text-red-500 hover:text-red-700 ${invoice.items.length === 1
+                                    ? "opacity-50 cursor-not-allowed"
+                                    : ""
+                                    }`}
+                                >
+                                  <Trash2 size={20} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="flex justify-end mt-4">
+                      <div className="bg-gradient-to-r from-neutral-500 to-neutral-700 text-white p-4 rounded-lg w-64">
+                        <h3 className="text-lg font-bold text-right">
+                          Total: {invoice.currency} {getTotalAmount()}
+                        </h3>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-8 bg-gray-50 rounded-lg">
+                    <Package className="mx-auto text-gray-400 mb-2" size={48} />
+                    <p className="text-gray-500">No items added yet. Click "Add Item" to get started.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Bank & Amount Details */}
+          <div className="bg-white rounded-xl shadow-lg mb-6">
+            <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
+              <Banknote className="mr-2" size={20} />
+              <h2 className="text-lg font-semibold">Bank & Amount Details</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Bank Details */}
+                <div className="bg-gradient-to-r from-neutral-700 to-neutral-500 text-white p-6 rounded-lg">
+                  <h3 className="text-lg font-semibold mb-4">Bank Details</h3>
+                  {loadingCompany ? (
+                    <div className="flex justify-center py-4">
+                      <Loader2 className="animate-spin" size={24} />
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">Bank Name</h4>
+                        <p>{companyDetails.bankName}</p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">Account Name</h4>
+                        <p>{companyDetails.accountName}</p>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <h4 className="text-sm font-semibold opacity-90 mb-1">Account Number</h4>
+                          <p>{companyDetails.accountNumber}</p>
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-semibold opacity-90 mb-1">IFSC Code</h4>
+                          <p>{companyDetails.ifscCode}</p>
+                        </div>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold opacity-90 mb-1">Branch</h4>
+                        <p>{companyDetails.branch}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Amount Details */}
+                <div className="glass-card p-8 rounded-[2.5rem] border border-white/20 shadow-premium">
+                  <h3 className="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+                    <Banknote size={20} className="text-emerald-500" />
+                    Amount Details
+                  </h3>
+                  <div className="space-y-4">
+                    {/* Total Taxable Value */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Total Taxable Value</label>
+                      <input
+                        type="number"
+                        name="totalTaxableValue"
+                        value={invoice.totalTaxableValue.toFixed(2)}
+                        onChange={handleAmountChange}
+                        className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900"
+                        readOnly
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">TDS (Reference Only)</label>
+                      <input
+                        type="number"
+                        value={invoice.tdsAmount}
+                        onChange={(e) => handleTdsChange(e.target.value)}
+                        className="w-full px-3 py-2 border rounded bg-white"
+                        min="0"
+                        step="0.01"
+                      />
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        Auto-calculated by default. You can manually adjust it for special cases.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-2">Invoice Total</label>
+                      <div className="relative">
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-blue-600">₹</span>
+                        <input
+                          value={invoice.netPayable.toFixed(2)}
+                          readOnly
+                          className="w-full pl-8 pr-4 py-4 bg-blue-50/50 border-2 border-blue-100 rounded-2xl font-black text-2xl text-blue-700 shadow-inner"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Value in Words */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Value in Words</label>
+                      <textarea
+                        value={valueInWords}
+                        onChange={(e) => setValueInWords(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                        rows="2"
+                        readOnly
+                      />
+                    </div>
+
+                    {/* CGST & SGST */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Total CGST</label>
+                        <input
+                          type="number"
+                          name="totalCGSTAmount"
+                          value={invoice.totalCGSTAmount.toFixed(2)}
+                          onChange={handleAmountChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                          readOnly
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Total SGST</label>
+                        <input
+                          type="number"
+                          name="totalSGSTAmount"
+                          value={invoice.totalSGSTAmount.toFixed(2)}
+                          onChange={handleAmountChange}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                          readOnly
+                        />
+                      </div>
+                    </div>
+
+                    {/* IGST */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Total IGST</label>
+                      <input
+                        type="number"
+                        name="totalIGSTAmount"
+                        value={invoice.totalIGSTAmount.toFixed(2)}
+                        onChange={handleAmountChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                        readOnly
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* PDF Generation Options */}
+          <div className="bg-white rounded-xl shadow-lg mb-6">
+            <div className="bg-neutral-700 text-white p-4 rounded-t-xl flex items-center">
+              <Download className="mr-2" size={20} />
+              <h2 className="text-lg font-semibold">PDF Generation Options</h2>
+            </div>
+            <div className="p-6">
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="digitalSignature"
+                      checked={invoice.withSignature}
+                      onChange={(e) =>
+                        setInvoice((prev) => ({
+                          ...prev,
+                          withSignature: e.target.checked,
+                        }))
+                      }
+                      className="h-5 w-5 text-blue-600 rounded"
+                    />
+                    <label htmlFor="digitalSignature" className="ml-2 text-gray-700 font-medium">
+                      Include Digital Signature
+                    </label>
+                  </div>
+                  <span className={`px-3 py-1 text-sm rounded-full ${invoice.withSignature ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-800"}`}>
+                    {invoice.withSignature ? "With Signature" : "Without Signature"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex justify-end items-center gap-4 mt-12 pb-10">
+            <button
+              type="button"
+              onClick={handleGoToList}
+              className="px-8 py-4 bg-white border border-slate-200 text-slate-600 rounded-2xl hover:bg-slate-50 transition-all font-bold shadow-sm"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-10 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-2xl hover:from-blue-700 hover:to-indigo-700 transition-all font-black shadow-lg shadow-blue-600/20 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed transform hover:-translate-y-0.5 active:translate-y-0"
+            >
+              {loading ? (
+                <>
+                  <Loader2 className="animate-spin" size={20} />
+                  Processing...
+                </>
+              ) : (
+                <>
+                  <Check size={20} />
+                  {isEditMode ? "Update Invoice" : "Generate Invoice"}
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Messages and Post-action Options */}
+          <div className="mt-8 space-y-4">
+            {error && <div className="text-red-600 bg-red-50 p-4 rounded-xl border border-red-100 flex items-center gap-3 font-medium">Error: {error}</div>}
+            {successMessage && (
+              <div className="text-emerald-600 bg-emerald-50 p-4 rounded-xl border border-emerald-100 flex items-center gap-3 font-medium">
+                <Check className="h-5 w-5" />
+                {successMessage}
+              </div>
+            )}
+
+            {/* Download Buttons - Only visible after generation */}
+            <div className="flex flex-wrap gap-4 pt-4">
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={!createdInvoiceId}
+                className={`px-6 py-3 text-white rounded-xl flex items-center gap-2 hover:shadow-lg transition-all font-bold ${!createdInvoiceId ? "bg-slate-300 cursor-not-allowed" : "bg-gradient-to-r from-orange-500 to-pink-500 hover:scale-105"
+                  }`}
+              >
+                <Download size={20} />
+                Download PDF
+              </button>
+              <button
+                type="button"
+                onClick={handleDownloadWord}
+                disabled={!createdInvoiceId}
+                className={`px-6 py-3 text-white rounded-xl flex items-center gap-2 hover:shadow-lg transition-all font-bold ${!createdInvoiceId ? "bg-slate-300 cursor-not-allowed" : "bg-gradient-to-r from-green-500 to-teal-500 hover:scale-105"
+                  }`}
+              >
+                <Download size={20} />
+                Download Word
+              </button>
+            </div>
+          </div>
+        </form>
+
+
+        {/* Success Modal */}
+        <InvoiceCreatedModal
+          open={showSuccessModal}
+          onClose={() => {
+            setShowSuccessModal(false);
+            navigate("/invoice-data");
+          }}
+          invoice={createdInvoice}
+          isEdit={isEditMode}
+        />
+      </div>
+    </div>
+  );
 };
 
 export default ManualInvoicePage;
