@@ -390,10 +390,26 @@ const PurchaseOrderData = () => {
       const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
       setClients(clientsList.filter((c) => c.isActive !== false));
 
-      // Fetch vendors
+      // Fetch vendors with enhanced address mapping
       const vendorRes = await getVendors(companyId);
-      const vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
-      setVendors(vendorList.filter((v) => v.isActive !== false));
+      let vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
+      const normalizedVendors = vendorList.map((v) => {
+        let address = v.address || v.vendorAddress || v.billingAddress?.line1 || v.registeredAddress || "";
+        let stateCode = v.stateCode || v.gstStateCode || v.vendorState || "";
+        let gstin = v.gstNumber || v.gstin || v.GSTIN || "";
+        return {
+          _id: v._id,
+          name: v.vendorName || v.name || "",
+          address: address,
+          stateCode: stateCode,
+          GSTIN: gstin,
+          taxNumber: gstin || v.panNumber || "",
+          vendorName: v.vendorName,
+          country: v.country || "",
+          email: v.email || "",
+        };
+      });
+      setVendors(normalizedVendors.filter((v) => v.isActive !== false));
 
       let poData;
       if (Object.keys(activeFilters).length > 0) {
@@ -430,10 +446,16 @@ const PurchaseOrderData = () => {
     return clientId || null;
   };
 
-  // Filter POs by direction
-  const receivablePOs = purchaseOrders.filter(po => po.direction === "receivable");
-  const payablePOs = purchaseOrders.filter(po => po.direction === "payable");
-  const currentPOs = viewMode === "receivable" ? receivablePOs : payablePOs;
+  // Filter POs by direction with useMemo for performance
+  const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable"), [purchaseOrders]);
+  const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable"), [purchaseOrders]);
+  const currentPOs = useMemo(() => viewMode === "receivable" ? receivablePOs : payablePOs, [viewMode, receivablePOs, payablePOs]);
+
+  // Stats derived from currentPOs
+  const totalPOs = currentPOs.length;
+  const totalValue = currentPOs.reduce((s, po) => s + (po.totalAmount || 0), 0);
+  const pendingPOs = currentPOs.filter(po => !["CLOSED", "FULLY_INVOICED"].includes(po.status)).length;
+  const completedPOs = currentPOs.filter(po => po.status === "CLOSED").length;
 
   // Client stats (receivable)
   const clientStats = useMemo(() => {
@@ -497,11 +519,6 @@ const PurchaseOrderData = () => {
     return stats;
   }, [vendors, currentPOs]);
 
-  const totalPOs = currentPOs.length;
-  const totalValue = currentPOs.reduce((s, po) => s + (po.totalAmount || 0), 0);
-  const pendingPOs = currentPOs.filter((po) => !["CLOSED", "FULLY_INVOICED"].includes(po.status)).length;
-  const completedPOs = currentPOs.filter((po) => po.status === "CLOSED").length;
-
   const handleAdvancedSearch = (filters) => { setLoadingAdvanced(true); setActiveFilters(filters); setSearchQuery(""); setPage(1); };
   const handleClearSearch = () => {
     setActiveFilters({});
@@ -523,11 +540,11 @@ const PurchaseOrderData = () => {
     if (debouncedSearchQuery) {
       const q = debouncedSearchQuery.toLowerCase();
       list = list.filter(item => {
-        const name = (viewMode === "receivable" ? item.clientName : item.vendorName)?.toLowerCase() || "";
+        const name = (viewMode === "receivable" ? item.clientName : item.name)?.toLowerCase() || "";
         const code = (viewMode === "receivable" ? item.clientCode : item.vendorCode)?.toLowerCase() || "";
         const tax = viewMode === "receivable"
           ? (getFirstTaxId(item).toLowerCase())
-          : (item.gstNumber || item.panNumber || item.taxNumber || "N/A").toLowerCase();
+          : (item.GSTIN || item.taxNumber || "N/A").toLowerCase();
         const country = (viewMode === "receivable" ? item.clientCountry : item.country)?.toLowerCase() || "";
         return name.includes(q) || code.includes(q) || tax.includes(q) || country.includes(q);
       });
@@ -539,8 +556,8 @@ const PurchaseOrderData = () => {
       const sb = statsMap[b._id] || {};
       switch (sort.key) {
         case "name":
-          va = (viewMode === "receivable" ? a.clientName : a.vendorName) || "";
-          vb = (viewMode === "receivable" ? b.clientName : b.vendorName) || "";
+          va = (viewMode === "receivable" ? a.clientName : a.name) || "";
+          vb = (viewMode === "receivable" ? b.clientName : b.name) || "";
           break;
         case "totalPOs": va = sa.totalPOs || 0; vb = sb.totalPOs || 0; break;
         case "totalValue": va = sa.totalValue || 0; vb = sb.totalValue || 0; break;
@@ -672,8 +689,8 @@ const PurchaseOrderData = () => {
           <button
             onClick={() => setViewMode("receivable")}
             className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-all flex items-center gap-2 ${viewMode === "receivable"
-                ? "bg-blue-600 text-white shadow-md"
-                : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
+              ? "bg-blue-600 text-white shadow-md"
+              : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
               }`}
           >
             <User size={16} /> Receivable (Clients)
@@ -681,8 +698,8 @@ const PurchaseOrderData = () => {
           <button
             onClick={() => setViewMode("payable")}
             className={`px-5 py-2.5 text-sm font-semibold rounded-t-lg transition-all flex items-center gap-2 ${viewMode === "payable"
-                ? "bg-amber-600 text-white shadow-md"
-                : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
+              ? "bg-amber-600 text-white shadow-md"
+              : "bg-white text-slate-600 hover:bg-slate-50 border border-b-0 border-slate-200"
               }`}
           >
             <Building2 size={16} /> Payable (Vendors)
@@ -805,6 +822,7 @@ const PurchaseOrderData = () => {
                     <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-widest">Actions</th>
                   </tr>
                 </thead>
+
                 <tbody className="divide-y divide-slate-100">
                   {tableRows.length === 0 ? (
                     <tr>
@@ -826,9 +844,9 @@ const PurchaseOrderData = () => {
                         lastCreated: null,
                       };
                       const hasPOs = stats.totalPOs > 0;
-                      const name = viewMode === "receivable" ? row.clientName : row.vendorName;
+                      const name = viewMode === "receivable" ? row.clientName : row.name;
                       const code = viewMode === "receivable" ? row.clientCode : row.vendorCode;
-                      const tax = viewMode === "receivable" ? getFirstTaxId(row) : (row.gstNumber || row.panNumber || row.taxNumber || "N/A");
+                      const tax = viewMode === "receivable" ? getFirstTaxId(row) : (row.GSTIN || row.taxNumber || "N/A");
                       const country = viewMode === "receivable" ? row.clientCountry : row.country;
                       const gradient = viewMode === "receivable" ? "from-blue-500 to-indigo-600" : "from-amber-500 to-orange-600";
                       const hoverColor = viewMode === "receivable" ? "group-hover:text-blue-600" : "group-hover:text-amber-600";
@@ -952,8 +970,8 @@ const PurchaseOrderData = () => {
                           key={p}
                           onClick={() => setPage(p)}
                           className={`min-w-[30px] h-[30px] rounded-lg text-[11px] font-bold transition-all border ${safeP === p
-                              ? "text-white border-blue-600 shadow-sm shadow-blue-500/20"
-                              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                            ? "text-white border-blue-600 shadow-sm shadow-blue-500/20"
+                            : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                             }`}
                           style={safeP === p ? { background: "linear-gradient(135deg,#1e3a8a,#2563eb)" } : {}}
                         >
@@ -985,6 +1003,7 @@ const PurchaseOrderData = () => {
         )}
       </div>
 
+
       <AuditLogSidebar
         isOpen={openLogs}
         onClose={() => setOpenLogs(false)}
@@ -998,6 +1017,7 @@ const PurchaseOrderData = () => {
         onClose={() => setModalOpen(false)}
         clientId={selectedClientId}
       />
+
     </div>
   );
 };
