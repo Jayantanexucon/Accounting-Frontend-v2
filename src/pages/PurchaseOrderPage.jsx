@@ -470,16 +470,16 @@ export default function PurchaseOrderPage() {
       if (field === "percentage") {
         let percent = value === "" ? 0 : Number(value);
         if (isNaN(percent)) percent = 0;
-        
+
         // Validation: Percentage cannot exceed 100%
         const totalPercentageWithoutCurrent = milestones
           .reduce((sum, m, i) => i !== idx ? sum + (m.percentage || 0) : sum, 0);
-        
+
         if (percent + totalPercentageWithoutCurrent > 100) {
           setError(`Milestone percentage cannot exceed 100%. Current total: ${totalPercentageWithoutCurrent}%`);
           return prev;
         }
-        
+
         newMilestone.percentage = percent;
         newMilestone.amount = (prev.totalAmount * percent) / 100;
         setError(null);
@@ -493,13 +493,13 @@ export default function PurchaseOrderPage() {
         const poDate = dayjs(prev.poDate);
         const deliveryDate = dayjs(prev.deliveryDate);
         const milestoneDueDate = dayjs(value);
-        
+
         // Check if date is before PO date or after delivery date
         if (milestoneDueDate.isBefore(poDate, "day") || milestoneDueDate.isAfter(deliveryDate, "day")) {
           setError(`Milestone due date must be between PO Date (${poDate.format("DD MMM YYYY")}) and Delivery Date (${deliveryDate.format("DD MMM YYYY")})`);
           return prev;
         }
-        
+
         newMilestone[field] = value;
         setError(null);
       } else {
@@ -826,13 +826,12 @@ export default function PurchaseOrderPage() {
                       </div>
                       <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                         <div
-                          className={`h-full transition-all ${
-                            form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100
+                          className={`h-full transition-all ${form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100
                               ? "bg-red-500"
                               : form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) === 100
-                              ? "bg-green-500"
-                              : "bg-blue-500"
-                          }`}
+                                ? "bg-green-500"
+                                : "bg-blue-500"
+                            }`}
                           style={{
                             width: `${Math.min(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0), 100)}%`,
                           }}
@@ -1002,14 +1001,292 @@ export default function PurchaseOrderPage() {
 
           {/* STEP 4: Review */}
           {step === 4 && (
-            <div>
-              <h2 className="text-base font-semibold text-slate-800 mb-0.5">Review & Submit</h2>
-              <p className="text-[11px] text-slate-500 mb-4">Review all details carefully. Click <strong>Edit</strong> on any section to go back and make changes.</p>
-              <div className="p-3 border border-slate-200 rounded-lg bg-slate-50">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={form.withSignature} onChange={(e) => set("withSignature", e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 text-blue-500" />
-                  <span className="text-xs text-slate-600">Include digital signature in document</span>
-                </label>
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-800 mb-0.5">Review & Submit</h2>
+                <p className="text-[11px] text-slate-500 mb-4">Review all details carefully. Click <strong>Edit</strong> on any section to go back and make changes.</p>
+              </div>
+
+              {/* Entity Section */}
+              <div className={`border ${colors.border} rounded-lg p-4 ${colors.bg}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-slate-800 flex items-center gap-2">
+                    <Building size={14} className={colors.text} />
+                    {mode === "client" ? "Client" : "Vendor"} Details
+                  </h3>
+                  <button onClick={() => setStep(1)} className={`flex items-center gap-1 text-xs ${colors.text} hover:opacity-70 transition`}>
+                    <Edit2 size={12} /> Edit
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <p className="text-slate-600">Name</p>
+                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.name : form.vendor.name}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">GSTIN</p>
+                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.GSTIN : form.vendor.GSTIN || "—"}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-slate-600">Address</p>
+                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.address : form.vendor.address}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">State Code</p>
+                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.stateCode : form.vendor.stateCode}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Deliver To Section */}
+              {mode === "client" && (
+                <div className={`border ${colors.border} rounded-lg p-4 ${colors.bg}`}>
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-slate-800 flex items-center gap-2">
+                      <Building2 size={14} className={colors.text} />
+                      Deliver To
+                    </h3>
+                    <button onClick={() => setStep(1)} className={`flex items-center gap-1 text-xs ${colors.text} hover:opacity-70 transition`}>
+                      <Edit2 size={12} /> Edit
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="col-span-2">
+                        <p className="text-slate-600">Name</p>
+                        <p className="font-medium text-slate-800">{form.deliverTo.name}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-slate-600">Address</p>
+                        <p className="font-medium text-slate-800">{form.deliverTo.address}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">State Code</p>
+                        <p className="font-medium text-slate-800">{form.deliverTo.stateCode}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-600">GSTIN</p>
+                        <p className="font-medium text-slate-800">{form.deliverTo.GSTIN || "—"}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* PO Details & Items Section */}
+              <div className={`border ${colors.border} rounded-lg p-4 ${colors.bg}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-slate-800 flex items-center gap-2">
+                    <FileText size={14} className={colors.text} />
+                    PO Details & Items
+                  </h3>
+                  <button onClick={() => setStep(2)} className={`flex items-center gap-1 text-xs ${colors.text} hover:opacity-70 transition`}>
+                    <Edit2 size={12} /> Edit
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div className="grid grid-cols-3 gap-3 text-xs">
+                    <div>
+                      <p className="text-slate-600">PO Date</p>
+                      <p className="font-medium text-slate-800">{dayjs(form.poDate).format("DD MMM YYYY")}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">Delivery Date</p>
+                      <p className="font-medium text-slate-800">{dayjs(form.deliveryDate).format("DD MMM YYYY")}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">Currency</p>
+                      <p className="font-medium text-slate-800">{form.currency}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">PO Category</p>
+                      <p className="font-medium text-slate-800 capitalize">{form.poCategory}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">Billing Model</p>
+                      <p className="font-medium text-slate-800 capitalize">{form.billingModel}</p>
+                    </div>
+                    <div>
+                      <p className="text-slate-600">PO Reference</p>
+                      <p className="font-medium text-slate-800">{form.poreferencevalue || "—"}</p>
+                    </div>
+                  </div>
+
+                  {/* Items Table */}
+                  <div className="border-t border-slate-200 pt-3">
+                    <p className="text-xs font-semibold text-slate-700 mb-2">Items</p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-100">
+                            <th className="px-2 py-1.5 text-left font-medium text-slate-600">Description</th>
+                            <th className="px-2 py-1.5 text-center font-medium text-slate-600">Qty</th>
+                            <th className="px-2 py-1.5 text-right font-medium text-slate-600">Rate</th>
+                            <th className="px-2 py-1.5 text-right font-medium text-slate-600">GST %</th>
+                            <th className="px-2 py-1.5 text-right font-medium text-slate-600">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {form.items.map((item, idx) => (
+                            <tr key={idx} className="border-b border-slate-200 last:border-b-0">
+                              <td className="px-2 py-1.5 text-slate-700">{item.description}</td>
+                              <td className="px-2 py-1.5 text-center text-slate-700">{item.quantity}</td>
+                              <td className="px-2 py-1.5 text-right text-slate-700">₹ {item.rate?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                              <td className="px-2 py-1.5 text-right text-slate-700">{item.gstRate}%</td>
+                              <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Totals */}
+                  <div className="border-t border-slate-200 pt-2 space-y-1 text-xs">
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">Taxable Value</span>
+                      <span className="font-medium text-slate-800">₹ {form.totalTaxableValue?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-600">GST Amount</span>
+                      <span className="font-medium text-slate-800">₹ {form.totalGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
+                      <span className="font-semibold text-slate-800">Total Amount</span>
+                      <span className="font-semibold text-slate-800">₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex justify-between pt-1 italic text-slate-600">
+                      <span>In Words</span>
+                      <span className="text-slate-700">{form.valueInWords}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Payment Terms Section */}
+              <div className={`border ${colors.border} rounded-lg p-4 ${colors.bg}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-slate-800 flex items-center gap-2">
+                    <CreditCard size={14} className={colors.text} />
+                    Payment Terms
+                  </h3>
+                  <button onClick={() => setStep(3)} className={`flex items-center gap-1 text-xs ${colors.text} hover:opacity-70 transition`}>
+                    <Edit2 size={12} /> Edit
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-slate-600 text-xs">Payment Terms Type</p>
+                    <p className="font-medium text-slate-800 text-xs capitalize">{form.paymentTerms}</p>
+                  </div>
+
+                  {/* Milestone Distribution */}
+                  {form.paymentTerms === "milestone" && distributionBreakdown.length > 0 && (
+                    <div className="border-t border-slate-200 pt-3">
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Milestone Breakdown</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200 bg-slate-100">
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Milestone</th>
+                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">%</th>
+                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">Amount</th>
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Due Date</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {distributionBreakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-slate-200 last:border-b-0">
+                                <td className="px-2 py-1.5 text-slate-700">{item.period}</td>
+                                <td className="px-2 py-1.5 text-right text-slate-600">{item.percentage}%</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                                <td className="px-2 py-1.5 text-slate-600">{item.dueDate ? dayjs(item.dueDate).format("DD MMM YYYY") : "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Monthly Distribution */}
+                  {form.paymentTerms === "monthly" && distributionBreakdown.length > 0 && (
+                    <div className="border-t border-slate-200 pt-3">
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Monthly Distribution</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200 bg-slate-100">
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Month</th>
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Period</th>
+                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {distributionBreakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-slate-200 last:border-b-0">
+                                <td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td>
+                                <td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Weekly Distribution */}
+                  {form.paymentTerms === "weekly" && distributionBreakdown.length > 0 && (
+                    <div className="border-t border-slate-200 pt-3">
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Weekly Distribution</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-200 bg-slate-100">
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Week</th>
+                              <th className="px-2 py-1.5 text-left font-medium text-slate-600">Period</th>
+                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {distributionBreakdown.map((item, idx) => (
+                              <tr key={idx} className="border-b border-slate-200 last:border-b-0">
+                                <td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td>
+                                <td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Notes & Signature Section */}
+              <div className={`border ${colors.border} rounded-lg p-4 ${colors.bg}`}>
+                <h3 className="text-xs font-semibold text-slate-800 mb-3 flex items-center gap-2">
+                  <ListChecks size={14} className={colors.text} />
+                  Additional Settings
+                </h3>
+                <div className="space-y-3">
+                  {form.notes && (
+                    <div>
+                      <p className="text-slate-600 text-xs">Notes</p>
+                      <p className="font-medium text-slate-800 text-xs whitespace-pre-wrap">{form.notes}</p>
+                    </div>
+                  )}
+                  <div>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={form.withSignature} onChange={(e) => set("withSignature", e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 text-blue-500" />
+                      <span className="text-xs text-slate-600">Include digital signature in document</span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
           )}
