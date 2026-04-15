@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -30,11 +30,10 @@ import AccountSearchDropdown from "../components/AccountSearchDropdown";
 
 const statusStyles = {
   MATCHED: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  PARTIALLY_MATCHED: "bg-amber-100 text-amber-700 border-amber-200",
+  PARTIAL: "bg-amber-100 text-amber-700 border-amber-200",
   UNMATCHED: "bg-rose-100 text-rose-700 border-rose-200",
   EXACT: "bg-emerald-50 text-emerald-700 border-emerald-200",
   POTENTIAL: "bg-blue-50 text-blue-700 border-blue-200",
-  PARTIAL: "bg-amber-50 text-amber-700 border-amber-200",
 };
 
 const fmtCurrency = (value) =>
@@ -54,6 +53,35 @@ const fmtDate = (value) =>
       })
     : "—";
 
+const getBookEntryDate = (payment) =>
+  payment?.date ||
+  payment?.paymentDate ||
+  payment?.journalDate ||
+  payment?.paymentDetails?.paymentDate ||
+  payment?.paymentDetails?.date ||
+  null;
+
+const getBookEntryReference = (payment) =>
+  payment?.paymentDetails?.invoice?.invoiceNo ||
+  payment?.reference ||
+  payment?.paymentDetails?.reference ||
+  payment?.journalNumber ||
+  payment?.journalLineId ||
+  "Manual Entry";
+
+const getBookEntryDescription = (payment) =>
+  payment?.description ||
+  payment?.paymentDetails?.notes ||
+  payment?.paymentDetails?.invoice?.clientName ||
+  payment?.paymentDetails?.invoice?.customerName ||
+  "No description";
+
+const getBookEntryTotalAmount = (payment) =>
+  Number(payment?.totalAmount ?? payment?.grossAmount ?? payment?.paymentDetails?.amountPaid ?? payment?.amount ?? 0);
+
+const getJournalLines = (payment) =>
+  Array.isArray(payment?.journalLines) ? payment.journalLines : [];
+
 const readWorkbookRows = async (file) => {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array" });
@@ -62,21 +90,17 @@ const readWorkbookRows = async (file) => {
 };
 
 const getAvailablePaymentAmount = (payment) => {
-  const total = Math.abs(Number(payment.amount || 0));
-  const allocated = (payment.reconciliationAllocations || []).reduce(
-    (sum, item) => sum + Number(item.allocatedAmount || 0),
+  return Math.max(
     0,
+    Number(payment.unreconciledAmount ?? payment.availableAmount ?? payment.amount ?? 0),
   );
-  return Math.max(0, total - allocated);
 };
 
 const getAvailableBankAmount = (bankTransaction) => {
-  const total = Math.abs(Number(bankTransaction.amount || 0));
-  const allocated = (bankTransaction.reconciliationAllocations || []).reduce(
-    (sum, item) => sum + Number(item.allocatedAmount || 0),
+  return Math.max(
     0,
+    Number(bankTransaction.availableAmount ?? bankTransaction.amount ?? 0),
   );
-  return Math.max(0, total - allocated);
 };
 
 const StatusPill = ({ value }) => (
@@ -117,8 +141,7 @@ export default function BankReconciliationPage() {
 
   const allAccounts = accountsQuery.data?.data || [];
   const bankAccounts = allAccounts.filter(acc => 
-    (acc.groupName || "").toLowerCase().includes("bank") || 
-    (acc.groupName || "").toLowerCase().includes("cash")
+    (acc.groupName || "").toLowerCase().includes("bank")
   );
 
   const overviewQuery = useQuery({
@@ -135,12 +158,13 @@ export default function BankReconciliationPage() {
     mutationFn: uploadBankStatementApi,
     onSuccess: () => {
       invalidate();
+      setActivePanel("bank");
       toast.success("Bank statement imported");
     },
   });
 
   const autoMutation = useMutation({
-    mutationFn: () => autoMatchBankTransactionsApi(companyId),
+    mutationFn: () => autoMatchBankTransactionsApi(companyId, selectedLedgerId),
     onSuccess: (response) => {
       invalidate();
       const exactCount = response?.data?.exactMatches?.length || 0;
@@ -191,11 +215,21 @@ export default function BankReconciliationPage() {
   const payments = useMemo(() => rawData.payments || [], [rawData.payments]);
   const openInvoices = rawData.openInvoices || [];
   const brs = rawData.brs || {};
+  const selectedLedger = useMemo(
+    () => bankAccounts.find((item) => item._id === selectedLedgerId) || null,
+    [bankAccounts, selectedLedgerId],
+  );
 
   const selectedBank = useMemo(
     () => bankTransactions.find((item) => item._id === selectedBankId) || null,
     [bankTransactions, selectedBankId],
   );
+
+  useEffect(() => {
+    setSelectedBankId(null);
+    setAllocationDrafts({});
+    setMatchNote("");
+  }, [selectedLedgerId]);
 
   const filteredPayments = useMemo(() => {
     if (!selectedBank) return payments;
@@ -307,9 +341,11 @@ export default function BankReconciliationPage() {
       companyId,
       bankTransactionId: selectedBank._id,
       invoiceId: paymentForm.invoiceId,
+      bankLedgerId: selectedLedgerId,
       paymentData: {
         amountPaid: Number(paymentForm.amountPaid || availableSelectedBankAmount || 0),
         paymentDate: paymentForm.paymentDate || selectedBank.transactionDate,
+        paymentMode: "BANK_TRANSFER",
         reference: paymentForm.reference || selectedBank.reference,
         notes: paymentForm.notes || selectedBank.description,
       },
@@ -317,23 +353,48 @@ export default function BankReconciliationPage() {
   };
 
   return (
-    <div className="container mx-auto px-4 space-y-5 max-w-[1600px]">
-      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="mx-auto w-full max-w-[1900px] space-y-6 px-4 pb-6 xl:px-6 2xl:px-8">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Tally Style BRS</p>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">Bank Reconciliation</h1>
-            <div className="mt-4 w-full max-w-sm">
+            <h1 className="mt-1 text-3xl font-bold text-slate-900">Bank Reconciliation</h1>
+            <div className="mt-4 w-full max-w-xl">
               <label className="mb-1.5 block text-[10px] font-bold uppercase tracking-wider text-slate-500">
                 Select Bank Account
               </label>
-              <AccountSearchDropdown
-                value={selectedLedgerId}
-                onChange={setSelectedLedgerId}
-                options={bankAccounts}
-                placeholder="Choose bank ledger..."
-              />
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="flex-1">
+                  <AccountSearchDropdown
+                    value={selectedLedgerId}
+                    onChange={setSelectedLedgerId}
+                    options={bankAccounts}
+                    placeholder="Choose bank ledger..."
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLedgerId("")}
+                  disabled={!selectedLedgerId}
+                  className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <X size={14} />
+                  Clear
+                </button>
+              </div>
             </div>
+            <div className="mt-3 min-h-6">
+              {selectedLedger ? (
+                <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  <span>{selectedLedger.name}</span>
+                  <span className="text-blue-400">•</span>
+                  <span>{selectedLedger.groupName || "BANK"}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">No bank ledger selected</p>
+              )}
+            </div>
+            
             <p className="mt-4 max-w-3xl text-sm text-slate-500">
               Match bank statement lines with posted payments, suggest exact and timing matches, allow partial allocation, and create missing payments without changing journals during reconciliation.
             </p>
@@ -342,11 +403,17 @@ export default function BankReconciliationPage() {
           <div className="flex flex-wrap gap-2">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800">
               <Upload size={14} /> Import Bank Statement
-              <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileUpload} />
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                disabled={!selectedLedgerId}
+                onChange={handleFileUpload}
+              />
             </label>
             <button
               onClick={() => autoMutation.mutate()}
-              disabled={autoMutation.isPending}
+              disabled={autoMutation.isPending || !selectedLedgerId}
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
             >
               <RefreshCw size={14} className={autoMutation.isPending ? "animate-spin" : ""} />
@@ -361,6 +428,12 @@ export default function BankReconciliationPage() {
           </div>
         )}
 
+        {!selectedLedgerId && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            Select a bank ledger first to load bank statement rows and book entries.
+          </div>
+        )}
+
         <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 lg:flex-row">
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -372,7 +445,7 @@ export default function BankReconciliationPage() {
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            {["ALL", "UNMATCHED", "PARTIALLY_MATCHED", "MATCHED"].map((item) => (
+            {["ALL", "UNMATCHED", "PARTIAL", "MATCHED"].map((item) => (
               <button
                 key={item}
                 onClick={() => setStatusFilter(item)}
@@ -390,20 +463,20 @@ export default function BankReconciliationPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">Book Balance</p>
           <p className="mt-2 text-2xl font-black text-slate-900">{fmtCurrency(brs.bookBalance)}</p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">Bank Balance</p>
           <p className="mt-2 text-2xl font-black text-slate-900">{fmtCurrency(brs.bankBalance)}</p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">Difference</p>
           <p className="mt-2 text-2xl font-black text-slate-900">{fmtCurrency(brs.difference)}</p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">Unmatched Items</p>
           <p className="mt-2 text-2xl font-black text-slate-900">
             {(rawData.paymentSummary?.unmatched || 0) + (rawData.bankSummary?.unmatched || 0)}
@@ -431,13 +504,14 @@ export default function BankReconciliationPage() {
         ))}
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1.1fr_1.1fr_0.8fr]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1.35fr)_minmax(360px,0.95fr)]">
         <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm max-w-full ${activePanel !== "bank" ? "hidden xl:block" : ""}`}>
-          <div className="border-b border-slate-100 px-5 py-3.5">
-            <h2 className="text-sm font-bold text-slate-800">Bank Transactions</h2>
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-base font-bold text-slate-800">Bank Transactions</h2>
+            <p className="text-xs text-slate-400">Uploaded bank statement rows for the selected ledger</p>
           </div>
-          <div className="max-h-[700px] overflow-x-auto overflow-y-auto max-w-full">
-            <table className="min-w-full divide-y divide-slate-100 text-xs">
+          <div className="max-h-[760px] overflow-x-auto overflow-y-auto max-w-full">
+            <table className="min-w-[720px] divide-y divide-slate-100 text-sm">
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
                   {["Date", "Amount", "Reference", "Type", "Status"].map((label) => (
@@ -495,14 +569,15 @@ export default function BankReconciliationPage() {
         </section>
 
         <section className={`rounded-2xl border border-slate-200 bg-white shadow-sm max-w-full ${activePanel !== "payments" ? "hidden xl:block" : ""}`}>
-          <div className="border-b border-slate-100 px-5 py-3.5">
-            <h2 className="text-sm font-bold text-slate-800">Book Payments</h2>
+          <div className="border-b border-slate-100 px-6 py-4">
+            <h2 className="text-base font-bold text-slate-800">Book Entries</h2>
+            <p className="text-xs text-slate-400">All journal debit and credit lines related to the selected bank account</p>
           </div>
-          <div className="max-h-[700px] overflow-x-auto overflow-y-auto max-w-full">
-            <table className="min-w-full divide-y divide-slate-100 text-xs">
+          <div className="max-h-[760px] overflow-x-auto overflow-y-auto max-w-full">
+            <table className="min-w-[1080px] divide-y divide-slate-100 text-sm">
               <thead className="sticky top-0 bg-slate-50">
                 <tr>
-                  {["Entry/Ref", "Date", "Amount", "Free", "Status", "Allocate"].map((label) => (
+                  {["Entry/Ref", "Date", "Journal Lines", "Unreconciled", "Total", "Status", "Allocate"].map((label) => (
                     <th key={label} className="px-4 py-3 text-left font-semibold text-slate-500">
                       {label}
                     </th>
@@ -514,20 +589,62 @@ export default function BankReconciliationPage() {
                   const suggestion = selectedSuggestions.find((item) => item.paymentId === payment._id);
                   const allocatedValue = allocationDrafts[payment._id] || "";
                   const freeAmount = getAvailablePaymentAmount(payment);
+                  const bookEntryDate = getBookEntryDate(payment);
+                  const bookEntryReference = getBookEntryReference(payment);
+                  const bookEntryDescription = getBookEntryDescription(payment);
+                  const bookEntryTotalAmount = getBookEntryTotalAmount(payment);
+                  const journalLines = getJournalLines(payment);
 
                   return (
                     <tr key={payment._id} className="hover:bg-slate-50">
                       <td className="px-4 py-3">
-                        <div className="font-bold text-slate-800">
-                          {payment.paymentDetails?.invoice?.invoiceNo || payment.reference || "Manual Entry"}
+                        {/* <div className="font-bold text-slate-800">{bookEntryReference}</div> */}
+                        <div className="text-xs text-slate-500">{bookEntryDescription}</div>
+                        {/* {payment.journalNumber && (
+                          <div className="mt-1 text-xs font-medium text-slate-400">{payment.journalNumber}</div>
+                        )} */}
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">{fmtDate(bookEntryDate)}</td>
+                      {/* <td className="px-4 py-3 text-slate-600">{payment.voucherType || payment.transactionType || "—"}</td> */}
+                      <td className="px-4 py-3">
+                        <div className="space-y-2">
+                          {journalLines.length ? (
+                            journalLines.map((line) => (
+                              <div
+                                key={line._id}
+                                className={`rounded-xl border px-3 py-2 ${
+                                  line.isBankLedgerLine
+                                    ? "border-blue-200 bg-blue-50"
+                                    : "border-slate-200 bg-slate-50"
+                                }`}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <div className="font-semibold text-slate-800">{line.accountName || "Unknown Account"}</div>
+                                    <div className="text-xs text-slate-500">
+                                      {line.accountCode || "—"}
+                                      {line.isBankLedgerLine ? " • Selected bank ledger line" : ""}
+                                    </div>
+                                    {line.description ? (
+                                      <div className="mt-1 text-xs text-slate-500">{line.description}</div>
+                                    ) : null}
+                                  </div>
+                                  <div className="text-right text-xs font-semibold text-slate-700">
+                                    <div>Dr {fmtCurrency(line.debitAmount)}</div>
+                                    <div>Cr {fmtCurrency(line.creditAmount)}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <span className="text-xs text-slate-400">No related journal lines found</span>
+                          )}
                         </div>
-                        <div className="text-[11px] text-slate-500 line-clamp-1">{payment.description || "No description"}</div>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{fmtDate(payment.date)}</td>
                       <td className="px-4 py-3 font-black text-slate-900">
-                        {fmtCurrency(payment.amount)}
+                        {fmtCurrency(payment.unreconciledAmount ?? payment.amount)}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{fmtCurrency(freeAmount)}</td>
+                      <td className="px-4 py-3 text-slate-600">{fmtCurrency(bookEntryTotalAmount)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           <StatusPill value={payment.reconciliationStatus} />
@@ -573,8 +690,10 @@ export default function BankReconciliationPage() {
                 })}
                 {!filteredPayments.length && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
-                      No book entries available
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                      {selectedLedgerId
+                        ? "No book entries available for this bank ledger"
+                        : "Select a bank ledger to view book entries"}
                     </td>
                   </tr>
                 )}
@@ -584,7 +703,7 @@ export default function BankReconciliationPage() {
         </section>
 
         <section className={`space-y-5 ${activePanel !== "actions" ? "hidden xl:block" : ""}`}>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-800">Manual Reconcile</h2>
               <Link2 size={16} className="text-blue-600" />

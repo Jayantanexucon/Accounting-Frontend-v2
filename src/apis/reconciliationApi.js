@@ -12,8 +12,10 @@ export const uploadBankStatementApi = async (payload) => {
   return data;
 };
 
-export const autoMatchBankTransactionsApi = async (companyId) => {
-  const { data } = await API.post(`/accounting/bank-reconciliation/reconcile/auto/${companyId}`);
+export const autoMatchBankTransactionsApi = async (companyId, bankLedgerId) => {
+  const { data } = await API.post(`/accounting/bank-reconciliation/reconcile/auto/${companyId}`, null, {
+    params: bankLedgerId ? { bankLedgerId } : {},
+  });
   return data;
 };
 

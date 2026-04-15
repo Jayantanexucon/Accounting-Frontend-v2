@@ -70,6 +70,22 @@ const EntryRow = ({ entry, type, onOpenJournal, isMatch }) => (
           {entry.externalDocNo && (
             <div className="text-[10px] text-slate-400 font-mono">Ref: {entry.externalDocNo}</div>
           )}
+          {entry.reconciliationStatus && (
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+              <span className={`rounded-full border px-2 py-0.5 font-bold ${
+                entry.reconciliationStatus === "MATCHED"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : entry.reconciliationStatus === "PARTIAL"
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
+              }`}>
+                {entry.reconciliationStatus}
+              </span>
+              <span className="text-slate-500">
+                Unreconciled: {formatCurrency(entry.unreconciledAmount || 0)}
+              </span>
+            </div>
+          )}
           {isMatch && (
             <div className="flex items-center gap-1 text-[10px] text-amber-600 font-bold mt-0.5">
               <Filter size={9} /> Matches filter

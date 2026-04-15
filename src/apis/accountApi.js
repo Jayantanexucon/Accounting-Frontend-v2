@@ -93,6 +93,10 @@ const toLegacyLedgerData = (report = {}) => {
           credit: Number(transaction.debit || 0),
         },
       ],
+      reconciliationStatus: transaction.reconciliationStatus || "UNMATCHED",
+      isReconciled: Boolean(transaction.isReconciled),
+      allocatedAmount: Number(transaction.allocatedAmount || 0),
+      unreconciledAmount: Number(transaction.unreconciledAmount || 0),
     })),
   };
 };
