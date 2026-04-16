@@ -412,6 +412,7 @@ const PurchaseOrderData = () => {
           email: v.email || "",
         };
       });
+
       setVendors(normalizedVendors.filter((v) => v.isActive !== false));
 
       let poData;

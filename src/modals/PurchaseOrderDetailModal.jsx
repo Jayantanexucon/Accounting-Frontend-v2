@@ -24,7 +24,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import dayjs from "dayjs";
-import { getPurchaseOrderApi, downloadPdfPurchaseOrderApi } from "../apis/purchaseOrderApi";
+import { getPOProgressApi, getPurchaseOrderApi, downloadPdfPurchaseOrderApi } from "../apis/purchaseOrderApi";
 import { motion, AnimatePresence } from "framer-motion";
 import InvoiceDetailsModal from "./InvoiceDetailsModal";
 import { useNavigate } from "react-router-dom";
@@ -40,16 +40,83 @@ const fmtC = (amt, currency = "INR") =>
     maximumFractionDigits: 2,
   }).format(amt || 0);
 
-const PAYMENT_TERM_DAYS = {
-  "net-15": 15,
-  "net-30": 30,
-  "net-45": 45,
-  "net-60": 60,
-  "net-90": 90,
-};
-
 const roundMoney = (value = 0) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
+const getNormalizedPaymentTermType = (po = {}) => {
+  const paymentTerms = String(po.paymentTerms || "").toLowerCase();
+  if (["milestone", "monthly", "weekly"].includes(paymentTerms)) {
+    return paymentTerms;
+  }
+
+  if (String(po.billingModel || "").toLowerCase() === "milestone") {
+    return "milestone";
+  }
+
+  return "";
+};
+
+const distributeAmountAcrossTerms = (totalAmount = 0, totalTerms = 1) => {
+  const normalizedTotal = roundMoney(totalAmount);
+  const count = Math.max(1, Number(totalTerms || 1));
+  const baseAmount = roundMoney(normalizedTotal / count);
+  const distribution = Array.from({ length: count }, () => baseAmount);
+  const assigned = roundMoney(distribution.reduce((sum, amount) => sum + amount, 0));
+  distribution[count - 1] = roundMoney(distribution[count - 1] + (normalizedTotal - assigned));
+  return distribution;
+};
+
+const buildRecurringTermSchedule = (po = {}) => {
+  const paymentTermType = getNormalizedPaymentTermType(po);
+  if (!["monthly", "weekly"].includes(paymentTermType)) {
+    return null;
+  }
+
+  const start = dayjs(po.poDate || po.referenceDate);
+  const end = dayjs(po.deliveryDate || po.dueDate || po.poDate || po.referenceDate);
+  if (!start.isValid() || !end.isValid()) {
+    return null;
+  }
+
+  const totalDays = Math.max(1, end.diff(start, "day") + 1);
+  const totalTerms =
+    paymentTermType === "monthly"
+      ? Math.max(1, Math.ceil(totalDays / 30))
+      : Math.max(1, Math.ceil(totalDays / 7));
+  const scheduledAmounts = distributeAmountAcrossTerms(po.totalAmount || 0, totalTerms);
+  const terms = [];
+  let cursor = start.clone();
+
+  for (let index = 0; index < totalTerms; index += 1) {
+    let termEnd =
+      paymentTermType === "monthly"
+        ? cursor.add(1, "month").subtract(1, "day")
+        : cursor.add(6, "day");
+
+    if (termEnd.isAfter(end)) {
+      termEnd = end.clone();
+    }
+
+    terms.push({
+      termNumber: index + 1,
+      amount: scheduledAmounts[index] || 0,
+      startDate: cursor.format("YYYY-MM-DD"),
+      endDate: termEnd.format("YYYY-MM-DD"),
+      label:
+        paymentTermType === "monthly"
+          ? `Month ${index + 1} of ${totalTerms}`
+          : `Week ${index + 1} of ${totalTerms}`,
+    });
+
+    cursor = paymentTermType === "monthly" ? cursor.add(1, "month") : termEnd.add(1, "day");
+  }
+
+  return {
+    paymentTermType,
+    totalTerms,
+    terms,
+  };
+};
 
 const getInvoiceTimelineBreakdown = (invoice = {}) => {
   const lineItems = Array.isArray(invoice.items) ? invoice.items : [];
@@ -67,43 +134,22 @@ const getInvoiceTimelineBreakdown = (invoice = {}) => {
 };
 
 const getTermTimelineSummary = ({ po, invoice, invoiceIndex, orderedInvoices }) => {
-  const termDays = PAYMENT_TERM_DAYS[po?.paymentTerms] || 0;
-  const scheduleStart = po?.referenceDate || po?.poDate;
-  const scheduleEnd = po?.deliveryDate;
-
-  if (!termDays || !scheduleStart || !scheduleEnd) {
+  const recurringSchedule = buildRecurringTermSchedule(po);
+  if (!recurringSchedule) {
     return null;
   }
 
-  const startDate = new Date(scheduleStart);
-  const endDate = new Date(scheduleEnd);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-
-  const totalDurationDays = Math.max(
-    1,
-    Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)),
-  );
-  const totalInstallments = Math.max(1, Math.ceil(totalDurationDays / termDays));
-  const installmentAmount = roundMoney((Number(po?.totalAmount || 0)) / totalInstallments);
-  const installmentNo = invoiceIndex + 1;
-
+  const currentTerm = recurringSchedule.terms[invoiceIndex] || null;
   const actualRaisedAmounts = orderedInvoices.map((entry) => getInvoiceTimelineBreakdown(entry).termInvoiceAmount);
   const actualRaisedTillPrevious = roundMoney(
     actualRaisedAmounts.slice(0, invoiceIndex).reduce((sum, amount) => sum + amount, 0),
   );
-  const actualRaisedTillCurrent = roundMoney(actualRaisedTillPrevious + actualRaisedAmounts[invoiceIndex]);
-
   const scheduledTillPrevious = roundMoney(
-    Math.min(Number(po?.totalAmount || 0), installmentAmount * Math.max(0, installmentNo - 1)),
+    recurringSchedule.terms
+      .slice(0, invoiceIndex)
+      .reduce((sum, term) => sum + Number(term.amount || 0), 0),
   );
-  const scheduledTillCurrent = roundMoney(
-    Math.min(Number(po?.totalAmount || 0), installmentAmount * installmentNo),
-  );
-  const scheduledTillNext = roundMoney(
-    Math.min(Number(po?.totalAmount || 0), installmentAmount * Math.min(totalInstallments, installmentNo + 1)),
-  );
+  const scheduledTermAmount = roundMoney(Number(currentTerm?.amount || 0));
   const carryForwardFromPrevious = roundMoney(
     Math.max(0, scheduledTillPrevious - actualRaisedTillPrevious),
   );
@@ -111,18 +157,21 @@ const getTermTimelineSummary = ({ po, invoice, invoiceIndex, orderedInvoices }) 
     Math.max(0, actualRaisedAmounts[invoiceIndex] - carryForwardFromPrevious),
   );
   const remainingFromThisTerm = roundMoney(
-    Math.max(0, (scheduledTillCurrent - scheduledTillPrevious) - currentTermRaisedAmount),
+    Math.max(0, scheduledTermAmount - currentTermRaisedAmount),
+  );
+  const nextScheduledTermAmount = roundMoney(
+    Number(recurringSchedule.terms[invoiceIndex + 1]?.amount || 0),
   );
 
   return {
-    installmentNo,
-    totalInstallments,
-    scheduledTermAmount: roundMoney(scheduledTillCurrent - scheduledTillPrevious),
+    installmentNo: currentTerm?.termNumber || invoiceIndex + 1,
+    totalInstallments: recurringSchedule.totalTerms,
+    scheduledTermAmount,
     carryForwardFromPrevious,
     actualRaisedAmount: actualRaisedAmounts[invoiceIndex],
     currentTermRaisedAmount,
     remainingFromThisTerm,
-    nextExpectedInvoiceAmount: roundMoney(Math.max(0, scheduledTillNext - actualRaisedTillCurrent)),
+    nextExpectedInvoiceAmount: roundMoney(nextScheduledTermAmount + remainingFromThisTerm),
   };
 };
 
@@ -286,6 +335,46 @@ const hasMeaningfulItemData = (item) => {
   );
 };
 
+const getDerivedPoTotalAmount = (po = {}) => {
+  if (!po) return 0;
+
+  const explicitTotal = Number(po.totalAmount || 0);
+  if (explicitTotal > 0) return explicitTotal;
+
+  const itemTotal = Array.isArray(po.items)
+    ? po.items.reduce((sum, item) => sum + Number(item.totalAmount || item.total || 0), 0)
+    : 0;
+  if (itemTotal > 0) return roundMoney(itemTotal);
+
+  const milestoneTotal = Array.isArray(po.milestones)
+    ? po.milestones.reduce((sum, milestone) => sum + Number(milestone.amount || 0), 0)
+    : 0;
+  if (milestoneTotal > 0) return roundMoney(milestoneTotal);
+
+  return 0;
+};
+
+const getDerivedPoInvoicedAmount = (po = {}) => {
+  if (!po) return 0;
+
+  const explicitInvoiced = Number(po.totalInvoicedAmount || 0);
+  if (explicitInvoiced > 0) return explicitInvoiced;
+
+  const linkedInvoiceAmount = Array.isArray(po.linkedInvoices)
+    ? po.linkedInvoices.reduce(
+        (sum, invoice) => sum + getInvoiceTimelineBreakdown(invoice).termInvoiceAmount,
+        0,
+      )
+    : 0;
+  if (linkedInvoiceAmount > 0) return roundMoney(linkedInvoiceAmount);
+
+  const milestoneInvoiced = Array.isArray(po.milestones)
+    ? po.milestones.reduce((sum, milestone) => sum + Number(milestone.invoicedAmount || 0), 0)
+    : 0;
+
+  return roundMoney(milestoneInvoiced);
+};
+
 /* ── Derive which tabs are meaningful for a given PO ── */
 const getAvailableTabs = (po) => {
   if (!po) return ["overview"];
@@ -350,8 +439,13 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await getPurchaseOrderApi(purchaseOrderId);
-      const data = res?.data || res;
+      let res;
+      try {
+        res = await getPOProgressApi(purchaseOrderId);
+      } catch {
+        res = await getPurchaseOrderApi(purchaseOrderId);
+      }
+      const data = res?.data?.data || res?.data || res;
       setPo(data);
     } catch {
       setError("Failed to load purchase order details");
@@ -378,8 +472,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
   const handleCreateInvoice = () => {
     if (po?._id) {
+      onClose?.();
       navigate(`/master-data/manual-invoice?poId=${po._id}`);
-      onClose();
     }
   };
 
@@ -392,10 +486,14 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const status = po ? STATUS_CFG[po.status] || STATUS_CFG.draft : null;
   const delSt = po?.deliveryDate ? deliveryStatus(po.deliveryDate) : null;
   const currency = po?.currency || "INR";
-  const openAmount = Math.max(
-    0,
-    (po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0),
+  const totalPoAmount = roundMoney(getDerivedPoTotalAmount(po));
+  const totalInvoicedAmount = roundMoney(
+    Math.min(totalPoAmount || Number.MAX_SAFE_INTEGER, getDerivedPoInvoicedAmount(po)),
   );
+  const openAmount = roundMoney(Math.max(0, totalPoAmount - totalInvoicedAmount));
+  const invoicedPercentage = totalPoAmount > 0
+    ? ((totalInvoicedAmount / totalPoAmount) * 100).toFixed(1)
+    : "0.0";
 
   // ── Precompute what this PO actually has ──────────────────────
   const lineItems = Array.isArray(po?.items) ? po.items.filter(hasMeaningfulItemData) : [];
@@ -493,7 +591,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
             <div className="flex items-center gap-1.5">
               {po?._id && canCreateInvoice(po.status) && (
                 <button
-                  onClick={() => { window.location.href = `/master-data/manual-invoice?poId=${po._id}`; }}
+                  onClick={handleCreateInvoice}
                   className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all text-xs font-bold flex items-center gap-1.5"
                   title="Create Invoice"
                 >
@@ -522,8 +620,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                 key={t}
                 onClick={() => setTab(t)}
                 className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${tab === t
-                    ? "border-blue-600 text-blue-600"
-                    : "border-transparent text-slate-500 hover:text-slate-700"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
                   }`}
               >
                 {TAB_LABELS[t]}
@@ -566,13 +664,13 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                     {[
                       {
                         label: "Total Amount",
-                        value: fmtC(po.totalAmount, currency),
+                        value: fmtC(totalPoAmount, currency),
                         g: "linear-gradient(135deg,#1e3a8a,#2563eb)",
                         blob: "#93c5fd",
                       },
                       {
                         label: "Invoiced %",
-                        value: `${((po.totalInvoicedAmount || 0) / Math.max(po.totalAmount || 1, 1) * 100).toFixed(1)}%`,
+                        value: `${invoicedPercentage}%`,
                         g: "linear-gradient(135deg,#064e3b,#059669)",
                         blob: "#6ee7b7",
                       },
@@ -584,7 +682,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       },
                       {
                         label: "Open Amount",
-                        value: `${fmtC(openAmount, currency)} / ${fmtC(po.totalAmount, currency)}`,
+                        value: `${fmtC(openAmount, currency)} / ${fmtC(totalPoAmount, currency)}`,
                         g: "linear-gradient(135deg,#7f1d1d,#dc2626)",
                         blob: "#fca5a5",
                       },
@@ -1209,11 +1307,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                           </div>
                         )}
 
-                        {orderedInvoices.map((invoice, index) => (
-                          (() => {
+                        {orderedInvoices.map((invoice, index) => {
                             const breakdown = getInvoiceTimelineBreakdown(invoice);
                             const isMilestoneInvoice =
-                              po?.billingModel === "milestone" &&
+                              getNormalizedPaymentTermType(po) === "milestone" &&
                               Array.isArray(invoice?.milestones) &&
                               invoice.milestones.length > 0;
 
@@ -1297,8 +1394,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                 </button>
                               </div>
                             );
-                          })()
-                        ))}
+                          })}
 
                         {/* Delivery — only if a delivery date exists */}
                         {po.deliveryDate && (
