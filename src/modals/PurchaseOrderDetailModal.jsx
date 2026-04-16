@@ -292,23 +292,23 @@ const getAvailableTabs = (po) => {
   const tabs = ["overview"];
 
   const hasItems = Array.isArray(po?.items) && po.items.some(hasMeaningfulItemData);
-  const hasResources  = Array.isArray(po.resources) && po.resources.length > 0;
+  const hasResources = Array.isArray(po.resources) && po.resources.length > 0;
   const hasMilestones = Array.isArray(po.milestones) && po.milestones.length > 0;
   const hasAttendance = Array.isArray(po.attendanceRecords) && po.attendanceRecords.length > 0;
-  const isRetainer    = po.poCategory === "retainer";
+  const isRetainer = po.poCategory === "retainer";
 
   // Show the details/items tab only when there's actually something to display
- const hasRetainerData =
-  po?.poCategory === "retainer" &&
-  (
-    po?.totalAmount > 0 ||
-    po?.paymentSchedule ||
-    po?.paymentTerms
-  );
+  const hasRetainerData =
+    po?.poCategory === "retainer" &&
+    (
+      po?.totalAmount > 0 ||
+      po?.paymentSchedule ||
+      po?.paymentTerms
+    );
 
-if (hasItems || hasResources || hasMilestones || hasAttendance || hasRetainerData) {
-  tabs.push("details");
-}
+  if (hasItems || hasResources || hasMilestones || hasAttendance || hasRetainerData) {
+    tabs.push("details");
+  }
 
   // Timeline always makes sense
   tabs.push("timeline");
@@ -320,18 +320,18 @@ if (hasItems || hasResources || hasMilestones || hasAttendance || hasRetainerDat
 };
 
 const TAB_LABELS = {
-  overview:  "Overview",
-  details:   "Details",
-  timeline:  "Timeline",
+  overview: "Overview",
+  details: "Details",
+  timeline: "Timeline",
   documents: "Documents",
 };
 
 const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const navigate = useNavigate();
-  const [loading, setLoading]               = useState(true);
-  const [error, setError]                   = useState(null);
-  const [po, setPo]                         = useState(null);
-  const [tab, setTab]                       = useState("overview");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [po, setPo] = useState(null);
+  const [tab, setTab] = useState("overview");
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(null);
   const orderedInvoices = [...(po?.linkedInvoices || [])]
     .sort((a, b) => new Date(a?.invoiceDate || 0) - new Date(b?.invoiceDate || 0));
@@ -364,9 +364,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
     if (!po) return;
     try {
       const res = await downloadPdfPurchaseOrderApi(po._id);
-      const url  = window.URL.createObjectURL(new Blob([res.data]));
+      const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
-      link.href  = url;
+      link.href = url;
       link.setAttribute("download", `PO_${po.poNumber}.pdf`);
       document.body.appendChild(link);
       link.click();
@@ -389,42 +389,38 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
   if (!isOpen) return null;
 
-  const status   = po ? STATUS_CFG[po.status] || STATUS_CFG.draft : null;
-  const delSt    = po?.deliveryDate ? deliveryStatus(po.deliveryDate) : null;
+  const status = po ? STATUS_CFG[po.status] || STATUS_CFG.draft : null;
+  const delSt = po?.deliveryDate ? deliveryStatus(po.deliveryDate) : null;
   const currency = po?.currency || "INR";
   const openAmount = Math.max(
     0,
-    Number(
-      po?.progress?.remaining ??
-        po?.remainingInvoicableAmount ??
-        (po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0),
-    ),
+    (po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0),
   );
-  
+
   // ── Precompute what this PO actually has ──────────────────────
-  const lineItems     = Array.isArray(po?.items) ? po.items.filter(hasMeaningfulItemData) : [];
-  const hasItems      = lineItems.length > 0;
-  const hasResources  = Array.isArray(po?.resources) && po.resources.length > 0;
+  const lineItems = Array.isArray(po?.items) ? po.items.filter(hasMeaningfulItemData) : [];
+  const hasItems = lineItems.length > 0;
+  const hasResources = Array.isArray(po?.resources) && po.resources.length > 0;
   const hasMilestones = Array.isArray(po?.milestones) && po.milestones.length > 0;
   const hasAttendance = Array.isArray(po?.attendanceRecords) && po.attendanceRecords.length > 0;
-  const isStaffing    = po?.poCategory === "staffing";
-  const isProject     = po?.poCategory === "project";
-  const isRetainer    = po?.poCategory === "retainer";
+  const isStaffing = po?.poCategory === "staffing";
+  const isProject = po?.poCategory === "project";
+  const isRetainer = po?.poCategory === "retainer";
 
   const hasRetainerData =
-  isRetainer &&
-  (
-    po?.totalAmount > 0 ||
-    po?.paymentSchedule ||
-    po?.paymentTerms
-  );
+    isRetainer &&
+    (
+      po?.totalAmount > 0 ||
+      po?.paymentSchedule ||
+      po?.paymentTerms
+    );
 
   const hasAnyDetailsData =
-  hasItems ||
-  hasResources ||
-  hasMilestones ||
-  hasAttendance ||
-  hasRetainerData;
+    hasItems ||
+    hasResources ||
+    hasMilestones ||
+    hasAttendance ||
+    hasRetainerData;
   const showRatePerDay = hasResources && po.resources.some((r) => Number(r?.ratePerDay || 0) > 0);
   const showRatePerHour = hasResources && po.resources.some((r) => Number(r?.ratePerHour || 0) > 0);
   const showRatePerMonth = hasResources && po.resources.some((r) => Number(r?.ratePerMonth || 0) > 0);
@@ -439,25 +435,25 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   // Badge helpers used in details tab
   const catBadge = {
     staffing: "bg-violet-100 text-violet-700 border-violet-200",
-    project:  "bg-blue-100 text-blue-700 border-blue-200",
+    project: "bg-blue-100 text-blue-700 border-blue-200",
     retainer: "bg-emerald-100 text-emerald-700 border-emerald-200",
   };
   const modelBadge = {
-    daily:     "bg-amber-100 text-amber-700 border-amber-200",
-    monthly:   "bg-amber-100 text-amber-700 border-amber-200",
-    hourly:    "bg-amber-100 text-amber-700 border-amber-200",
+    daily: "bg-amber-100 text-amber-700 border-amber-200",
+    monthly: "bg-amber-100 text-amber-700 border-amber-200",
+    hourly: "bg-amber-100 text-amber-700 border-amber-200",
     milestone: "bg-indigo-100 text-indigo-700 border-indigo-200",
     headcount: "bg-cyan-100 text-cyan-700 border-cyan-200",
-    fixed:     "bg-slate-100 text-slate-600 border-slate-200",
+    fixed: "bg-slate-100 text-slate-600 border-slate-200",
   };
   const msCfg = {
-    pending:     "bg-slate-100 text-slate-600 border-slate-200",
+    pending: "bg-slate-100 text-slate-600 border-slate-200",
     in_progress: "bg-blue-100 text-blue-700 border-blue-200",
-    completed:   "bg-emerald-100 text-emerald-700 border-emerald-200",
+    completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
     partially_invoiced: "bg-amber-100 text-amber-700 border-amber-200",
-    invoiced:    "bg-violet-100 text-violet-700 border-violet-200",
+    invoiced: "bg-violet-100 text-violet-700 border-violet-200",
   };
-  
+
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-start justify-center z-50 p-4 pt-6 overflow-y-auto">
@@ -525,11 +521,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${
-                  tab === t
+                className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all ${tab === t
                     ? "border-blue-600 text-blue-600"
                     : "border-transparent text-slate-500 hover:text-slate-700"
-                }`}
+                  }`}
               >
                 {TAB_LABELS[t]}
               </button>
@@ -577,7 +572,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       },
                       {
                         label: "Invoiced %",
-                        value: `${Number(po.progress?.invoicedPct || ((po.totalInvoicedAmount || 0) / Math.max(po.totalAmount || 1, 1)) * 100).toFixed(1)}%`,
+                        value: `${((po.totalInvoicedAmount || 0) / Math.max(po.totalAmount || 1, 1) * 100).toFixed(1)}%`,
                         g: "linear-gradient(135deg,#064e3b,#059669)",
                         blob: "#6ee7b7",
                       },
@@ -595,12 +590,12 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       },
                       po.deliveryDate
                         ? {
-                            label: "Delivery Date",
-                            value: fmt(po.deliveryDate),
-                            sub: delSt?.text,
-                            g: "linear-gradient(135deg,#312e81,#7c3aed)",
-                            blob: "#c4b5fd",
-                          }
+                          label: "Delivery Date",
+                          value: fmt(po.deliveryDate),
+                          sub: delSt?.text,
+                          g: "linear-gradient(135deg,#312e81,#7c3aed)",
+                          blob: "#c4b5fd",
+                        }
                         : null,
                     ]
                       .filter(Boolean)
@@ -658,7 +653,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                     {po.client?.name && (
                       <Card title="Client Details" icon={Building} accent="linear-gradient(180deg,#2563eb,#60a5fa)">
                         <div className="grid grid-cols-2 gap-3">
-                          <F label="Company"    value={po.client?.name} />
+                          <F label="Company" value={po.client?.name} />
                           {po.client?.stateCode && <F label="State Code" value={po.client?.stateCode} />}
                           {po.client?.address && (
                             <div className="col-span-2">
@@ -678,7 +673,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                     {po.deliverTo?.name && (
                       <Card title="Deliver To" icon={Truck} accent="linear-gradient(180deg,#059669,#34d399)">
                         <div className="grid grid-cols-2 gap-3">
-                          <F label="Name"       value={po.deliverTo?.name} />
+                          <F label="Name" value={po.deliverTo?.name} />
                           {po.deliverTo?.stateCode && <F label="State Code" value={po.deliverTo?.stateCode} />}
                           {po.deliverTo?.address && (
                             <div className="col-span-2">
@@ -700,7 +695,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                   {(po.poDate || po.deliveryDate || po.referenceDate) && (
                     <Card title="Key Dates" icon={Calendar} accent="linear-gradient(180deg,#0f766e,#14b8a6)">
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                        {po.poDate       && <F label="PO Date"         value={fmt(po.poDate)} />}
+                        {po.poDate && <F label="PO Date" value={fmt(po.poDate)} />}
                         {po.deliveryDate && <F label="Delivery / End Date" value={fmt(po.deliveryDate)} />}
                         {po.referenceDate && <F label="Reference Date" value={fmt(po.referenceDate)} />}
                         {po.poreferencevalue && <F label="Reference No." value={po.poreferencevalue} mono />}
@@ -784,7 +779,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
               )}
 
               {/* ══ DETAILS ════════════════════════════════════════════ */}
-              {tab === "details" && hasAnyDetailsData &&(
+              {tab === "details" && hasAnyDetailsData && (
                 <div className="space-y-4">
 
                   {/* ── PO type / model badge strip ── */}
@@ -1070,10 +1065,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                               <div className="h-full rounded-full" style={{ width: `${m.percentage ?? 0}%`, background: "linear-gradient(90deg,#4f46e5,#818cf8)" }} />
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-4 py-3">
-                              <F label="Amount"  value={fmtC(m.amount, currency)} />
+                              <F label="Amount" value={fmtC(m.amount, currency)} />
                               <F label="Invoiced" value={fmtC(m.invoicedAmount || 0, currency)} />
-                              <F label="Remaining" value={fmtC(m.remainingAmount ?? m.amount ?? 0, currency)} />
-                              {m.dueDate && <F label="Due Date"  value={fmt(m.dueDate)} />}
+                              <F label="Remaining" value={fmtC(Math.max(0, (m.amount || 0) - (m.invoicedAmount || 0)), currency)} />
+                              {m.dueDate && <F label="Due Date" value={fmt(m.dueDate)} />}
                               {m.completedDate && <F label="Completed" value={fmt(m.completedDate)} />}
                               {m.notes && <F label="Notes" value={m.notes} />}
                             </div>
@@ -1082,9 +1077,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       </div>
                       <div className="border-t border-slate-100 px-5 py-3 bg-slate-50/60 flex items-center justify-between">
                         <div className="flex gap-4 text-[10px] text-slate-500">
-                          <span>Completed / Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m) => m.status === "completed" || m.status === "invoiced").length}</strong></span>
-                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m) => m.status === "partially_invoiced").length}</strong></span>
-                          <span>Pending / In Progress: <strong className="text-amber-700">{po.milestones.filter((m) => m.status === "pending" || m.status === "in_progress").length}</strong></span>
+                          <span>Fully Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) >= (m.amount || 0) && (m.amount || 0) > 0).length}</strong></span>
+                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) > 0 && (m.invoicedAmount || 0) < (m.amount || 0)).length}</strong></span>
+                          <span>Pending: <strong className="text-amber-700">{po.milestones.filter((m) => !(m.invoicedAmount > 0)).length}</strong></span>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Total Milestone Value</p>
@@ -1106,13 +1101,13 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Retainer Configuration</p>
                       </div>
                       <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                        {po.billingModel    && <F label="Billing Model"    value={po.billingModel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
+                        {po.billingModel && <F label="Billing Model" value={po.billingModel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
                         {po.paymentSchedule && <F label="Payment Schedule" value={po.paymentSchedule.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
-                        {po.paymentTerms    && <F label="Payment Terms"    value={po.paymentTerms.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
-                        <F label="Total PO Value"   value={fmtC(po.totalAmount, currency)} />
+                        {po.paymentTerms && <F label="Payment Terms" value={po.paymentTerms.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
+                        <F label="Total PO Value" value={fmtC(po.totalAmount, currency)} />
                         {(po.totalInvoicedAmount || 0) > 0 && <F label="Invoiced to Date" value={fmtC(po.totalInvoicedAmount, currency)} />}
-                        <F label="Remaining"        value={fmtC(Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0)), currency)} />
-                        {po.poDate       && <F label="Start Date"     value={fmt(po.poDate)} />}
+                        <F label="Remaining" value={fmtC(Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0)), currency)} />
+                        {po.poDate && <F label="Start Date" value={fmt(po.poDate)} />}
                         {po.deliveryDate && <F label="End / Delivery" value={fmt(po.deliveryDate)} />}
                       </div>
                     </div>
@@ -1217,120 +1212,90 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         {orderedInvoices.map((invoice, index) => (
                           (() => {
                             const breakdown = getInvoiceTimelineBreakdown(invoice);
-                            const isMilestoneInvoice = po?.billingModel === "milestone" &&
+                            const isMilestoneInvoice =
+                              po?.billingModel === "milestone" &&
                               Array.isArray(invoice?.milestones) &&
                               invoice.milestones.length > 0;
-                            const termSummary = !isMilestoneInvoice && index >= 0
-                              ? getTermTimelineSummary({
+
+                            const termSummary =
+                              !isMilestoneInvoice && index >= 0
+                                ? getTermTimelineSummary({
                                   po,
                                   invoice,
                                   invoiceIndex: index,
                                   orderedInvoices,
                                 })
-                              : null;
+                                : null;
+
                             const milestoneSummary = isMilestoneInvoice
                               ? getMilestoneTimelineSummary({
-                                  po,
-                                  invoice,
-                                  invoiceIndex: index,
-                                  orderedInvoices,
-                                })
+                                po,
+                                invoice,
+                                invoiceIndex: index,
+                                orderedInvoices,
+                              })
                               : null;
+
                             const timelineSummary = milestoneSummary || termSummary;
+
                             return (
-                          <div key={invoice._id || invoice.invoiceNo || index} className="relative flex gap-4">
-                            <div className="absolute -left-8 w-6 h-6 rounded-full bg-amber-500 border-2 border-white shadow-md flex items-center justify-center">
-                              <FileSignature size={10} className="text-white" />
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedInvoiceId(invoice._id)}
-                              className="flex-1 text-left bg-amber-50 border border-amber-100 rounded-2xl p-4 hover:border-amber-300 hover:bg-amber-100/60 transition-all"
-                            >
-                              <div className="flex justify-between items-start gap-3">
-                                <div>
-                                  <p className="text-xs font-bold text-slate-800">Invoice Generated</p>
-                                  <p className="text-[11px] text-slate-500 mt-0.5">
-                                    {invoice.invoiceNo} · {fmtC(breakdown.termInvoiceAmount, currency)}
-                                  </p>
-                                  <p className="text-[10px] text-slate-400 mt-1.5">
-                                    Status: <span className="font-black text-slate-700">{invoice.status?.replaceAll("_", " ")}</span>
-                                  </p>
-                                  {timelineSummary && (
-                                    <div className="mt-1.5 space-y-1.5">
-                                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div key={invoice._id || index} className="relative flex gap-4">
+                                <div className="absolute -left-8 w-6 h-6 rounded-full bg-amber-500 border-2 border-white shadow-md flex items-center justify-center">
+                                  <FileSignature size={10} className="text-white" />
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedInvoiceId(invoice._id)}
+                                  className="flex-1 text-left bg-amber-50 border border-amber-100 rounded-2xl p-4 hover:border-amber-300 hover:bg-amber-100/60 transition-all"
+                                >
+                                  <div className="flex justify-between items-start gap-3">
+                                    <div>
+                                      <p className="text-xs font-bold text-slate-800">Invoice Generated</p>
+                                      <p className="text-[11px] text-slate-500 mt-0.5">
+                                        {invoice.invoiceNo} · {fmtC(breakdown.termInvoiceAmount, currency)}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1">
+                                        <Calendar size={10} /> {fmtT(invoice.invoiceDate || invoice.createdAt)}
+                                      </p>
+                                      <p className="text-[10px] text-slate-400 mt-1.5">
+                                        Status: <span className="font-black text-slate-700">{invoice.status?.replaceAll("_", " ")}</span>
+                                      </p>
+
+                                      {timelineSummary && (
+                                        <div className="mt-1.5 space-y-1.5">
+                                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                            <p className="text-[10px] text-slate-500">
+                                              {termSummary
+                                                ? `Scheduled For Term ${termSummary.installmentNo}/${termSummary.totalInstallments}`
+                                                : "Scheduled For Term"}
+                                              :{" "}
+                                              <span className="font-black text-blue-700">{fmtC(timelineSummary.scheduledTermAmount, currency)}</span>
+                                            </p>
+                                            <p className="text-[10px] text-slate-500">
+                                              Raised In This Invoice:{" "}
+                                              <span className="font-black text-slate-700">{fmtC(timelineSummary.actualRaisedAmount, currency)}</span>
+                                            </p>
+                                            <p className="text-[10px] text-slate-500">
+                                              Remaining From This Term:{" "}
+                                              <span className="font-black text-amber-700">{fmtC(timelineSummary.remainingFromThisTerm, currency)}</span>
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <p className="text-[10px] text-slate-500">
-                                          {termSummary
-                                            ? `Scheduled For Term ${termSummary.installmentNo}/${termSummary.totalInstallments}`
-                                            : "Scheduled For Term"}
-                                          :{" "}
-                                          <span className="font-black text-blue-700">{fmtC(timelineSummary.scheduledTermAmount, currency)}</span>
-                                        </p>
-                                        <p className="text-[10px] text-slate-500">
-                                          Raised In This Invoice:{" "}
-                                          <span className="font-black text-slate-700">
-                                            {fmtC(timelineSummary.actualRaisedAmount, currency)}
-                                          </span>
-                                        </p>
-                                        <p className="text-[10px] text-slate-500">
-                                          Remaining From This Term:{" "}
-                                          <span className="font-black text-amber-700">
-                                            {fmtC(timelineSummary.remainingFromThisTerm, currency)}
-                                          </span>
-                                        </p>
-                                      </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <p className="text-[10px] text-slate-500">
-                                          Paid: <span className="font-black text-emerald-700">{fmtC(breakdown.paidAmount, currency)}</span>
+                                          Paid till date: <span className="font-black text-emerald-700">{fmtC(breakdown.paidAmount, currency)}</span>
                                         </p>
                                         <p className="text-[10px] text-slate-500">
                                           Remaining Amount: <span className="font-black text-amber-700">{fmtC(breakdown.remainingAmount, currency)}</span>
                                         </p>
                                       </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <p className="text-[10px] text-slate-500">
-                                          Previous Carry Forward:{" "}
-                                          <span className="font-black text-amber-700">
-                                            {fmtC(timelineSummary.carryForwardFromPrevious, currency)}
-                                          </span>
-                                        </p>
-                                        <p className="text-[10px] text-slate-500">
-                                          Next Expected Invoice Amount:{" "}
-                                          <span className="font-black text-emerald-700">{fmtC(timelineSummary.nextExpectedInvoiceAmount, currency)}</span>
-                                        </p>
-                                      </div>
-                                      {/* {milestoneSummary?.previousMilestoneRemaining?.length > 0 && (
-                                        <div className="space-y-1 pt-0.5">
-                                          {milestoneSummary.previousMilestoneRemaining.map((milestone) => (
-                                            <p
-                                              key={`${invoice._id || invoice.invoiceNo}-${milestone.title}`}
-                                              className="text-[10px] text-slate-500"
-                                            >
-                                              Previous milestone remaining in {milestone.title}:{" "}
-                                              <span className="font-black text-amber-700">
-                                                {fmtC(milestone.remainingAmount, currency)}
-                                              </span>
-                                            </p>
-                                          ))}
-                                        </div>
-                                      )} */}
                                     </div>
-                                  )}
-                                  {Array.isArray(invoice.milestones) && invoice.milestones.length > 0 && (
-                                    <div className="mt-2 space-y-1">
-                                      {invoice.milestones.map((milestone) => (
-                                        <p key={`${invoice._id || invoice.invoiceNo}-${milestone.milestoneId}`} className="text-[10px] text-slate-500">
-                                          {milestone.title}: invoiced <span className="font-black text-slate-700">{fmtC(milestone.invoicedAmount || milestone.amount || 0, currency)}</span>
-                                          {" · "}remaining <span className="font-black text-amber-700">{fmtC(milestone.remainingAmountAfter || 0, currency)}</span>
-                                        </p>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                                <span className="px-2 py-0.5 bg-white text-amber-700 text-[10px] font-black rounded-full border border-amber-200">View Invoice</span>
+                                    <span className="px-2 py-0.5 bg-white text-amber-700 text-[10px] font-black rounded-full border border-amber-200 whitespace-nowrap">View Invoice</span>
+                                  </div>
+                                </button>
                               </div>
-                            </button>
-                          </div>
                             );
                           })()
                         ))}

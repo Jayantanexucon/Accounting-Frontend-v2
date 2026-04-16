@@ -92,13 +92,19 @@ const ClientPurchaseOrders = () => {
   const getOpenAmount = (po) =>
     Math.max(
       0,
-      Number(
-        po.remainingInvoicableAmount ??
-          ((po.totalAmount || 0) - (po.totalInvoicedAmount || 0)),
-      ),
+      (po.totalAmount || 0) - (po.totalInvoicedAmount || 0),
     );
   const shouldShowClosedPaidAmount = (po, openAmount) =>
     po.status === "CLOSED" && openAmount === 0;
+
+  const getDerivedStatus = (po) => {
+    if (po.status === "CLOSED") return "CLOSED";
+    const invoiced = po.totalInvoicedAmount || 0;
+    const total = po.totalAmount || 0;
+    if (invoiced >= total && total > 0) return "FULLY_INVOICED";
+    if (invoiced > 0) return "PARTIALLY_INVOICED";
+    return "OPEN";
+  };
 
   // ---------- Helper: resolve client ID from PO (fallback by name) ----------
   const resolveClientId = (po, clientsList) => {
@@ -119,47 +125,57 @@ const ClientPurchaseOrders = () => {
     return clientId || null;
   };
   // ---------- Fetch client details and POs for this client ----------
-const fetchClientAndPOs = async () => {
-  setLoading(true);
-  setError(null);
-  try {
-    // Get companyId robustly
-    const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
-    const companyId = localStorage.getItem("selectedCompanyId") ||
-                      user?.company?._id ||
-                      selectedCompany?._id;
+  const fetchClientAndPOs = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
+      const companyId = localStorage.getItem("selectedCompanyId") ||
+        user?.company?._id ||
+        selectedCompany?._id;
+      if (!companyId) throw new Error("Company ID missing");
 
-    if (!companyId) throw new Error("Company ID missing");
+      const clientRes = await getClientsApi(companyId);
+      const foundClient = clientRes.data?.find((c) => c._id === clientId);
+      setClient(foundClient);
 
-    const clientRes = await getClientsApi(companyId);
-    const foundClient = clientRes.data?.find((c) => c._id === clientId);
-    setClient(foundClient);
+      const filters = {
+        ...activeFilters,
+        clientId,           // may or may not be respected by backend
+        companyId,
+        limit: 1000,
+      };
+      if (searchQuery) filters.poNumber = searchQuery;
 
-    const filters = {
-      ...activeFilters,
-      clientId,
-      companyId,        // ✅ ADD THIS
-      limit: 1000,
-    };
+      const res = await advancedSearchPurchaseOrdersApi(filters);
+      let allPOs = res.data || [];
 
-    if (searchQuery) filters.poNumber = searchQuery;
+      // ✅ FILTER: keep only POs that belong to this client
+      const clientPOs = allPOs.filter(po => {
+        // match by vendor._id or vendor.name
+        return po.vendor?._id === clientId || po.client?._id === clientId ||
+          po.vendor?.name === foundClient?.clientName ||
+          po.client?.name === foundClient?.clientName;
+      });
 
-    const res = await advancedSearchPurchaseOrdersApi(filters);
-    setPurchaseOrders(res.data || []);
-  } catch (err) {
-    console.error(err);
-    setError("Failed to fetch client purchase orders");
-  } finally {
-    setLoading(false);
-    setLoadingAdvanced(false);
-  }
-};
+      // ✅ SORT: newest first (by createdAt)
+      const sortedPOs = clientPOs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+      setPurchaseOrders(sortedPOs);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to fetch client purchase orders");
+    } finally {
+      setLoading(false);
+      setLoadingAdvanced(false);
+    }
+  };
   useEffect(() => {
     if (user?.company?._id && clientId) {
       fetchClientAndPOs();
     }
   }, [user, clientId, activeFilters, searchQuery]);
-  
+
   // ---------- Stats for this client ----------
   const totalPOs = purchaseOrders.length;
   const totalValue = purchaseOrders.reduce(
@@ -488,44 +504,44 @@ const fetchClientAndPOs = async () => {
                 openAmount,
               );
               return (
-              <div
-                key={po._id}
-                className="bg-white border border-gray-200 rounded-md overflow-hidden"
-              >
-                {/* PO Header – click to expand/collapse */}
                 <div
-                  className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
-                  onClick={() => toggleRowExpand(po._id)}
+                  key={po._id}
+                  className="bg-white border border-gray-200 rounded-md overflow-hidden"
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-neutral-50 p-1.5 rounded-md">
-                      <ShoppingCart className="h-4 w-4 text-neutral-700" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-gray-900">
-                          {po.poNumber}
-                        </span>
-                        <span
-                          className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(po.status)}`}
-                        >
-                          {po.status}
-                        </span>
-                        <Eye
-                          className="h-3 w-3 text-blue-500 inline mr-1 cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewDetails(po);
-                          }}
-                        />
+                  {/* PO Header – click to expand/collapse */}
+                  <div
+                    className="flex items-center justify-between p-3 cursor-pointer hover:bg-gray-50"
+                    onClick={() => toggleRowExpand(po._id)}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-neutral-50 p-1.5 rounded-md">
+                        <ShoppingCart className="h-4 w-4 text-neutral-700" />
                       </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">
-                        <span>PO Date: {formatDate(po.poDate)}</span>
-                        <span>Due: {po.deliveryDate}</span>
-                        <span>{po.items?.length || 0} item(s)</span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-gray-900">
+                            {po.poNumber}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(getDerivedStatus(po))}`}
+                          >
+                            {getDerivedStatus(po)}
+                          </span>
+                          <Eye
+                            className="h-3 w-3 text-blue-500 inline mr-1 cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleViewDetails(po);
+                            }}
+                          />
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-gray-600">
+                          <span>PO Date: {formatDate(po.poDate)}</span>
+                          <span>Due: {po.deliveryDate}</span>
+                          <span>{po.items?.length || 0} item(s)</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
                     <div className="flex items-center space-x-3">
                       <span className="text-sm font-bold text-gray-900">
                         {po.currency} {(po.totalAmount || 0).toFixed(2)}
@@ -542,215 +558,215 @@ const fetchClientAndPOs = async () => {
                       {expandedRows[po._id] ? (
                         <ChevronUp className="h-5 w-5 text-gray-500" />
                       ) : (
-                      <ChevronDown className="h-5 w-5 text-gray-500" />
-                    )}
+                        <ChevronDown className="h-5 w-5 text-gray-500" />
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {/* Expanded Details – unchanged */}
-                {expandedRows[po._id] && (
-                  <div className="border-t border-gray-200 px-4 py-1.5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {/* Vendor Details */}
-                      <div className="space-y-2">
-                        <h4 className="font-semibold text-gray-700 flex items-center text-xs">
-                          <User className="h-3 w-3 mr-1.5" />
-                          Client Details
-                        </h4>
-                        <div className="space-y-1.5">
-                          <div>
-                            <p className="text-[10px] text-gray-500">Client</p>
-                            <p className="font-medium text-xs truncate">
-                              {po.client?.name || "-"}
-                            </p>
-                            <p className="text-[10px] text-gray-600 truncate">
-                              {po.client?.address || "-"}
-                            </p>
-                            <p className="text-[10px] text-gray-600">
-                              GSTIN: {po.client?.GSTIN || "N/A"} | State:{" "}
-                              {po.client?.stateCode || "N/A"}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500">
-                              Deliver To
-                            </p>
-                            <p className="font-medium text-xs truncate">
-                              {po.deliverTo?.name || "-"}
-                            </p>
-                            <p className="text-[10px] text-gray-600 truncate">
-                              {po.deliverTo?.address || "-"}
-                            </p>
-                          </div>
-                          {po.createdBy && (
-                            <p className="text-[10px] text-gray-600">
-                              Created by :{" "}
-                              <span className="font-medium text-gray-800">
-                                {po.createdBy?.name}
-                              </span>
-                            </p>
-                          )}
-
-                          {po.updatedBy && (
-                            <p className="text-[10px] text-gray-600">
-                              Updated by :{" "}
-                              <span className="font-medium text-gray-800">
-                                {po.updatedBy?.name}
-                              </span>
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Financial Details */}
-                      <div className="space-y-2">
-                        <h4 className="font-semibold text-gray-700 flex items-center text-xs">
-                          <CreditCard className="h-3 w-3 mr-1.5" />
-                          Financial Details
-                        </h4>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <p className="text-[10px] text-gray-500">
-                              Taxable Value
-                            </p>
-                            <p className="font-medium text-xs">
-                              {(po.totalTaxableValue || 0).toFixed(2)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500">
-                              Total Tax
-                            </p>
-                            <p className="font-medium text-xs">
-                              {calculateTotalTax(po)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500">
-                              Open Amount
-                            </p>
-                            <p className="font-medium text-xs truncate text-red-600">
-                              {po.currency} {openAmount.toFixed(2)} / {(po.totalAmount || 0).toFixed(2)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-[10px] text-gray-500">
-                              Delivery Date
-                            </p>
-                            <p className="font-medium text-xs">
-                              {formatDate(po.deliveryDate)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Tax Breakdown & Notes */}
-                      <div className="space-y-2">
-                        <div className="flex justify-between">
+                  {/* Expanded Details – unchanged */}
+                  {expandedRows[po._id] && (
+                    <div className="border-t border-gray-200 px-4 py-1.5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {/* Vendor Details */}
+                        <div className="space-y-2">
                           <h4 className="font-semibold text-gray-700 flex items-center text-xs">
-                            <Banknote className="h-3 w-3 mr-1.5" />
-                            Tax Breakdown
+                            <User className="h-3 w-3 mr-1.5" />
+                            Client Details
                           </h4>
-                          {po.auditLogCount > 0 && (
-                            <button
-                              onClick={(e) => handleViewAuditLog(po, e)}
-                              className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
-                            >
-                              <History className="h-3 w-3 mr-1.5" />
-                              Audit Trail ({po.auditLogCount})
-                            </button>
-                          )}
+                          <div className="space-y-1.5">
+                            <div>
+                              <p className="text-[10px] text-gray-500">Client</p>
+                              <p className="font-medium text-xs truncate">
+                                {po.client?.name || "-"}
+                              </p>
+                              <p className="text-[10px] text-gray-600 truncate">
+                                {po.client?.address || "-"}
+                              </p>
+                              <p className="text-[10px] text-gray-600">
+                                GSTIN: {po.client?.GSTIN || "N/A"} | State:{" "}
+                                {po.client?.stateCode || "N/A"}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-gray-500">
+                                Deliver To
+                              </p>
+                              <p className="font-medium text-xs truncate">
+                                {po.deliverTo?.name || "-"}
+                              </p>
+                              <p className="text-[10px] text-gray-600 truncate">
+                                {po.deliverTo?.address || "-"}
+                              </p>
+                            </div>
+                            {po.createdBy && (
+                              <p className="text-[10px] text-gray-600">
+                                Created by :{" "}
+                                <span className="font-medium text-gray-800">
+                                  {po.createdBy?.name}
+                                </span>
+                              </p>
+                            )}
+
+                            {po.updatedBy && (
+                              <p className="text-[10px] text-gray-600">
+                                Updated by :{" "}
+                                <span className="font-medium text-gray-800">
+                                  {po.updatedBy?.name}
+                                </span>
+                              </p>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="space-y-1.5">
-                          <div className="flex justify-between">
-                            <span className="text-[10px] text-gray-600">
-                              CGST
-                            </span>
-                            <span className="font-medium text-xs">
-                              {(po.totalCGSTAmount || 0).toFixed(2)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-[10px] text-gray-600">
-                              SGST
-                            </span>
-                            <span className="font-medium text-xs">
-                              {(po.totalSGSTAmount || 0).toFixed(2)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-[10px] text-gray-600">
-                              IGST
-                            </span>
-                            <span className="font-medium text-xs">
-                              {(po.totalIGSTAmount || 0).toFixed(2)}
-                            </span>
-                          </div>
-                          <div className="border-t pt-1.5">
-                            <div className="flex justify-between font-semibold text-xs">
-                              <span>Total Amount</span>
-                              <span className="text-natural-700">
-                                {po.currency} {(po.totalAmount || 0).toFixed(2)}
-                              </span>
+                        {/* Financial Details */}
+                        <div className="space-y-2">
+                          <h4 className="font-semibold text-gray-700 flex items-center text-xs">
+                            <CreditCard className="h-3 w-3 mr-1.5" />
+                            Financial Details
+                          </h4>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-[10px] text-gray-500">
+                                Taxable Value
+                              </p>
+                              <p className="font-medium text-xs">
+                                {(po.totalTaxableValue || 0).toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-gray-500">
+                                Total Tax
+                              </p>
+                              <p className="font-medium text-xs">
+                                {calculateTotalTax(po)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-gray-500">
+                                Open Amount
+                              </p>
+                              <p className="font-medium text-xs truncate text-red-600">
+                                {po.currency} {openAmount.toFixed(2)} / {(po.totalAmount || 0).toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-gray-500">
+                                Delivery Date
+                              </p>
+                              <p className="font-medium text-xs">
+                                {formatDate(po.deliveryDate)}
+                              </p>
                             </div>
                           </div>
                         </div>
-                        {po.notes && (
-                          <div className="mt-2">
-                            <p className="text-[10px] text-gray-500 mb-1">
-                              Notes
-                            </p>
-                            <p className="text-[10px] text-gray-700 bg-gray-50 p-1.5 rounded">
-                              {po.notes}
-                            </p>
+
+                        {/* Tax Breakdown & Notes */}
+                        <div className="space-y-2">
+                          <div className="flex justify-between">
+                            <h4 className="font-semibold text-gray-700 flex items-center text-xs">
+                              <Banknote className="h-3 w-3 mr-1.5" />
+                              Tax Breakdown
+                            </h4>
+                            {po.auditLogCount > 0 && (
+                              <button
+                                onClick={(e) => handleViewAuditLog(po, e)}
+                                className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
+                              >
+                                <History className="h-3 w-3 mr-1.5" />
+                                Audit Trail ({po.auditLogCount})
+                              </button>
+                            )}
                           </div>
-                        )}
+
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between">
+                              <span className="text-[10px] text-gray-600">
+                                CGST
+                              </span>
+                              <span className="font-medium text-xs">
+                                {(po.totalCGSTAmount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-[10px] text-gray-600">
+                                SGST
+                              </span>
+                              <span className="font-medium text-xs">
+                                {(po.totalSGSTAmount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-[10px] text-gray-600">
+                                IGST
+                              </span>
+                              <span className="font-medium text-xs">
+                                {(po.totalIGSTAmount || 0).toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="border-t pt-1.5">
+                              <div className="flex justify-between font-semibold text-xs">
+                                <span>Total Amount</span>
+                                <span className="text-natural-700">
+                                  {po.currency} {(po.totalAmount || 0).toFixed(2)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          {po.notes && (
+                            <div className="mt-2">
+                              <p className="text-[10px] text-gray-500 mb-1">
+                                Notes
+                              </p>
+                              <p className="text-[10px] text-gray-700 bg-gray-50 p-1.5 rounded">
+                                {po.notes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action Buttons */}
+                      <div className="flex flex-wrap gap-1 mt-4 pt-4 border-t border-gray-200">
+                        <Link
+                          to={`/purchase-order?edit=${po._id}`}
+                          className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"
+                        >
+                          <Edit className="h-3 w-3 mr-1.5" />
+                          Edit
+                        </Link>
+                        <button
+                          onClick={(e) =>
+                            handleDownloadPdf(po._id, po.poNumber, e)
+                          }
+                          className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
+                        >
+                          <Download className="h-3 w-3 mr-1.5" />
+                          PDF
+                        </button>
+                        <button
+                          onClick={(e) =>
+                            handleDownloadWord(po._id, po.poNumber, e)
+                          }
+                          className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
+                        >
+                          <Download className="h-3 w-3 mr-1.5" />
+                          Word
+                        </button>
+                        <button
+                          onClick={(e) => handleDelete(po._id, e)}
+                          className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"
+                        >
+                          <Trash2 className="h-3 w-3 mr-1.5" />
+                          Delete
+                        </button>
+                        <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs">
+                          <Mail className="h-3 w-3 mr-1.5" />
+                          Email
+                        </button>
                       </div>
                     </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex flex-wrap gap-1 mt-4 pt-4 border-t border-gray-200">
-                      <Link
-                        to={`/purchase-order?edit=${po._id}`}
-                        className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"
-                      >
-                        <Edit className="h-3 w-3 mr-1.5" />
-                        Edit
-                      </Link>
-                      <button
-                        onClick={(e) =>
-                          handleDownloadPdf(po._id, po.poNumber, e)
-                        }
-                        className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
-                      >
-                        <Download className="h-3 w-3 mr-1.5" />
-                        PDF
-                      </button>
-                      <button
-                        onClick={(e) =>
-                          handleDownloadWord(po._id, po.poNumber, e)
-                        }
-                        className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
-                      >
-                        <Download className="h-3 w-3 mr-1.5" />
-                        Word
-                      </button>
-                      <button
-                        onClick={(e) => handleDelete(po._id, e)}
-                        className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"
-                      >
-                        <Trash2 className="h-3 w-3 mr-1.5" />
-                        Delete
-                      </button>
-                      <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs">
-                        <Mail className="h-3 w-3 mr-1.5" />
-                        Email
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
               );
             })}
           </div>
