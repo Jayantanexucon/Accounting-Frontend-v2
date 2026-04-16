@@ -21,21 +21,74 @@ const BALANCE_COLORS = {
 const getBC = (t) => BALANCE_COLORS[(t || "").toUpperCase()] || BALANCE_COLORS.NEUTRAL;
 
 /* ─── single entry row ────────────────────────────────── */
-const EntryRow = ({ entry, type, onOpenJournal, isMatch }) => (
+const bankKeywordPattern = /\b(bank|sbi|hdfc|icici|axis|kotak|pnb|canara|bob|boi|union bank|indusind|idfc|yes bank)\b/i;
+
+const isBankLikeLedger = (account) => {
+  const groupName = account?.groupName || "";
+  const accountName = account?.name || "";
+  return bankKeywordPattern.test(groupName) || bankKeywordPattern.test(accountName);
+};
+
+const getReconciliationUi = (entry) => {
+  const unreconciledAmount = Number(entry?.unreconciledAmount || 0);
+  const allocatedAmount = Number(entry?.allocatedAmount || 0);
+
+  if (entry?.isReconciled && unreconciledAmount === 0) {
+    return {
+      label: "Reconciled",
+      badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
+      amountClass: "text-emerald-700",
+      dateClass: "text-emerald-700",
+      timeClass: "text-emerald-500",
+      detail: null,
+    };
+  }
+
+  if (allocatedAmount > 0 && unreconciledAmount > 0) {
+    return {
+      label: "Partially Reconciled",
+      badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+      amountClass: "text-amber-700",
+      dateClass: "text-amber-700",
+      timeClass: "text-amber-500",
+      detail: `Reconciled ${formatCurrency(allocatedAmount)} • Unreconciled ${formatCurrency(unreconciledAmount)}`,
+    };
+  }
+
+  return {
+    label: "Unreconciled",
+    badgeClass: "border-slate-200 bg-slate-50 text-slate-600",
+    amountClass: "text-slate-700",
+    dateClass: "text-slate-700",
+    timeClass: "text-slate-400",
+    detail: null,
+  };
+};
+
+const EntryRow = ({ entry, type, onOpenJournal, isMatch, showReconciliation }) => (
   <>
     {entry.counters?.map((counter, ci) => (
-      <tr
-        key={ci}
-        className={`group transition-colors ${
-          isMatch ? "bg-amber-50/80 border-l-2 border-amber-400" : "hover:bg-slate-50/80"
-        }`}
-      >
+      (() => {
+        const reconciliationUi = showReconciliation ? getReconciliationUi(entry) : null;
+        const amountColorClass = showReconciliation
+          ? reconciliationUi?.amountClass || "text-slate-700"
+          : type === "debit"
+            ? "text-blue-700"
+            : "text-violet-700";
+
+        return (
+          <tr
+            key={ci}
+            className={`group transition-colors ${
+              isMatch ? "bg-amber-50/80 border-l-2 border-amber-400" : "hover:bg-slate-50/80"
+            }`}
+          >
         {/* Date */}
         <td className="px-4 py-3 whitespace-nowrap align-top">
-          <div className="text-[11px] font-bold text-slate-700">
+          <div className={`text-[11px] font-bold ${reconciliationUi?.dateClass || "text-slate-700"}`}>
             {new Date(entry.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
           </div>
-          <div className="text-[10px] text-slate-400 font-mono">
+          <div className={`text-[10px] font-mono ${reconciliationUi?.timeClass || "text-slate-400"}`}>
             {new Date(entry.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
           </div>
         </td>
@@ -70,20 +123,16 @@ const EntryRow = ({ entry, type, onOpenJournal, isMatch }) => (
           {entry.externalDocNo && (
             <div className="text-[10px] text-slate-400 font-mono">Ref: {entry.externalDocNo}</div>
           )}
-          {entry.reconciliationStatus && (
+          {showReconciliation && (
             <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
-              <span className={`rounded-full border px-2 py-0.5 font-bold ${
-                entry.reconciliationStatus === "MATCHED"
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                  : entry.reconciliationStatus === "PARTIAL"
-                    ? "border-amber-200 bg-amber-50 text-amber-700"
-                    : "border-slate-200 bg-slate-50 text-slate-600"
-              }`}>
-                {entry.reconciliationStatus}
+              <span className={`rounded-full border px-2 py-0.5 font-bold ${reconciliationUi.badgeClass}`}>
+                {reconciliationUi.label}
               </span>
-              <span className="text-slate-500">
-                Unreconciled: {formatCurrency(entry.unreconciledAmount || 0)}
-              </span>
+              {reconciliationUi.detail ? (
+                <span className={`font-bold ${reconciliationUi.amountClass}`}>
+                  {reconciliationUi.detail}
+                </span>
+              ) : null}
             </div>
           )}
           {isMatch && (
@@ -95,13 +144,13 @@ const EntryRow = ({ entry, type, onOpenJournal, isMatch }) => (
 
         {/* Amount */}
         <td className="px-4 py-3 text-right whitespace-nowrap align-top">
-          <span className={`text-[12px] font-black tabular-nums ${
-            type === "debit" ? "text-blue-700" : "text-violet-700"
-          }`}>
+          <span className={`text-[12px] font-black tabular-nums ${amountColorClass}`}>
             {formatCurrency(type === "debit" ? counter.credit : counter.debit)}
           </span>
         </td>
-      </tr>
+          </tr>
+        );
+      })()
     ))}
   </>
 );
@@ -157,7 +206,7 @@ const Section = ({ title, badge, badgeColor = "slate", children, defaultOpen = t
 };
 
 /* ─── entry table ─────────────────────────────────────── */
-const EntryTable = ({ entries, type, onOpenJournal, matchFn, hasFilter }) => {
+const EntryTable = ({ entries, type, onOpenJournal, matchFn, hasFilter, showReconciliation }) => {
   if (!entries.length) return null;
   const total = entries.reduce((s, e) => s + (type === "debit" ? e.debit : e.credit), 0);
   return (
@@ -178,6 +227,7 @@ const EntryTable = ({ entries, type, onOpenJournal, matchFn, hasFilter }) => {
               type={type}
               onOpenJournal={onOpenJournal}
               isMatch={hasFilter && matchFn(entry)}
+              showReconciliation={showReconciliation}
             />
           ))}
         </tbody>
@@ -213,6 +263,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
   const [loading, setLoading]             = useState(false);
   const [journalSearch, setJournalSearch] = useState("");
   const [openJournalPopup, setOpenJournalPopup] = useState(false);
+  const dateRange = advancedFilters?.dateRange;
 
   /* ── guard: don't render if no account ──────────────── */
   /* (also prevents the _id null crash)                   */
@@ -222,17 +273,23 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
   useEffect(() => {
     if (!accountId) return;           // ← null guard fixes the crash
     const ctrl = new AbortController();
-    setLoading(true);
-    setLedgerData(null);
-    getLedgerApi(accountId, user?.company?._id, ctrl.signal, advancedFilters?.dateRange)
-      .then((res) => setLedgerData(res.data))
-      .catch((err) => {
+    const loadLedger = async () => {
+      setLoading(true);
+      setLedgerData(null);
+      try {
+        const res = await getLedgerApi(accountId, user?.company?._id, ctrl.signal, dateRange);
+        setLedgerData(res.data);
+      } catch (err) {
         if (err?.name !== "CanceledError" && err?.name !== "AbortError")
           toast.error(`Cannot fetch ledger for ${account?.name}`);
-      })
-      .finally(() => setLoading(false));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadLedger();
     return () => ctrl.abort();
-  }, [accountId, advancedFilters?.dateRange?.from, advancedFilters?.dateRange?.to, user?.company?._id, account?.name]);
+  }, [accountId, dateRange, user?.company?._id, account?.name]);
 
   /* ── filter helpers ────────────────────────────────── */
   const hasActiveFilters = useMemo(() => {
@@ -293,7 +350,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
     if (!account?.code) return;
     navigator.clipboard.writeText(account.code);
     toast.success("Account code copied!");
-  }, [account?.code]);
+  }, [account]);
 
   /* ── early return AFTER all hooks ─────────────────── */
   if (!account) return null;
@@ -303,6 +360,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
   const totalCredit  = allCredit.reduce((s, e) => s + e.credit, 0);
   const closingBalance = ledgerData?.closingBalance ?? 0;
   const closingType    = ledgerData?.closingType    ?? "Dr";
+  const showReconciliation = isBankLikeLedger(account);
 
   /* ════════════════════════════════════════════════════
      RENDER
@@ -573,6 +631,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
                       onOpenJournal={handleOpenJournal}
                       matchFn={matchesAdvancedFilters}
                       hasFilter={hasActiveFilters}
+                      showReconciliation={showReconciliation}
                     />
                   </Section>
                 )}
@@ -591,6 +650,7 @@ export default function LedgerDetailModal({ account, onClose, onUpdate, advanced
                       onOpenJournal={handleOpenJournal}
                       matchFn={matchesAdvancedFilters}
                       hasFilter={hasActiveFilters}
+                      showReconciliation={showReconciliation}
                     />
                   </Section>
                 )}

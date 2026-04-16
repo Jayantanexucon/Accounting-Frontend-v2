@@ -111,7 +111,11 @@ export const allJournalApi = async (companyId, params = {}, signal) => {
     signal,
   });
 
-  const filtered = applyJournalFilters(data.data || [], params);
+  const filtered = applyJournalFilters(data.data || [], params).sort((left, right) => {
+    const leftTime = new Date(left.createdAt || 0).getTime();
+    const rightTime = new Date(right.createdAt || 0).getTime();
+    return rightTime - leftTime;
+  });
   const page = Number.parseInt(params.page, 10) || 1;
   const limit = Number.parseInt(params.limit, 10) || filtered.length || 1;
   const startIndex = (page - 1) * limit;

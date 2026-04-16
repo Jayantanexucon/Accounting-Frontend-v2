@@ -64,6 +64,7 @@ const toLegacyLedgerData = (report = {}) => {
   const openingType = report?.account?.normalBalance || "Debit";
   const closingBalance = Number(report?.summary?.closingBalance || 0);
   const transactions = report?.transactions || [];
+  const isBankLedger = (report?.account?.groupName || "").toUpperCase().includes("BANK");
 
   return {
     account: report.account,
@@ -93,10 +94,10 @@ const toLegacyLedgerData = (report = {}) => {
           credit: Number(transaction.debit || 0),
         },
       ],
-      reconciliationStatus: transaction.reconciliationStatus || "UNMATCHED",
-      isReconciled: Boolean(transaction.isReconciled),
-      allocatedAmount: Number(transaction.allocatedAmount || 0),
-      unreconciledAmount: Number(transaction.unreconciledAmount || 0),
+      reconciliationStatus: isBankLedger ? (transaction.reconciliationStatus || "UNMATCHED") : null,
+      isReconciled: isBankLedger ? Boolean(transaction.isReconciled) : false,
+      allocatedAmount: isBankLedger ? Number(transaction.allocatedAmount || 0) : 0,
+      unreconciledAmount: isBankLedger ? Number(transaction.unreconciledAmount || 0) : 0,
     })),
   };
 };
