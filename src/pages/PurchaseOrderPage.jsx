@@ -295,8 +295,9 @@ export default function PurchaseOrderPage() {
           setForm(prev => ({
             ...prev,
             vendor: vendorObj,
-            deliverTo: sameAsDeliverTo ? vendorObj : prev.deliverTo,
+            deliverTo: vendorObj,  // Also set deliverTo to vendor
           }));
+          setSameAsDeliverTo(true); // Optional: mark as same
         })
         .catch(console.error);
     }
@@ -434,9 +435,18 @@ export default function PurchaseOrderPage() {
 
   const selectEntity = (entity) => {
     if (mode === "client") {
-      setForm(prev => ({ ...prev, client: entity, deliverTo: sameAsDeliverTo ? entity : prev.deliverTo }));
+      setForm(prev => ({
+        ...prev,
+        client: entity,
+        deliverTo: sameAsDeliverTo ? entity : prev.deliverTo
+      }));
     } else {
-      setForm(prev => ({ ...prev, vendor: entity, deliverTo: sameAsDeliverTo ? entity : prev.deliverTo }));
+      // For vendor mode (payable), auto-set deliverTo to the vendor
+      setForm(prev => ({
+        ...prev,
+        vendor: entity,
+        deliverTo: entity
+      }));
     }
     setEntityDropdownOpen(false);
     setEntitySearch("");
@@ -589,17 +599,17 @@ export default function PurchaseOrderPage() {
       // Map client/vendor based on mode for backend
       // Backend always expects 'vendor' field (the party we're transacting with)
       const vendorForBackend = mode === "client" ? form.client : form.vendor;
-      
+
       const poData = {
         ...form,
         vendor: vendorForBackend,  // Always send the correct party as 'vendor'
         billingModel: { milestone: "milestone", monthly: "fixed", weekly: "fixed" }[form.paymentTerms] || "fixed",
         poCategory: "project",
       };
-      
+
       // Remove the client field since backend only expects vendor
       delete poData.client;
-      
+
       let result;
       if (isEditing) {
         result = await updatePurchaseOrderApi(editId, poData);
@@ -737,9 +747,9 @@ export default function PurchaseOrderPage() {
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs font-semibold text-slate-800">Deliver To</h3>
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={sameAsDeliverTo} 
+                      <input
+                        type="checkbox"
+                        checked={sameAsDeliverTo}
                         onChange={(e) => {
                           setSameAsDeliverTo(e.target.checked);
                           if (e.target.checked && form.client?._id) {
@@ -762,43 +772,43 @@ export default function PurchaseOrderPage() {
                     <div className={`p-3 rounded-md border ${colors.bg} ${colors.border} space-y-3`}>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Name</label>
-                        <input 
-                          type="text" 
-                          placeholder="Delivery location name" 
-                          value={form.deliverTo.name} 
-                          onChange={(e) => set("deliverTo.name", e.target.value)} 
-                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        <input
+                          type="text"
+                          placeholder="Delivery location name"
+                          value={form.deliverTo.name}
+                          onChange={(e) => set("deliverTo.name", e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                         />
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Address</label>
-                        <input 
-                          type="text" 
-                          placeholder="Delivery address" 
-                          value={form.deliverTo.address} 
-                          onChange={(e) => set("deliverTo.address", e.target.value)} 
-                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        <input
+                          type="text"
+                          placeholder="Delivery address"
+                          value={form.deliverTo.address}
+                          onChange={(e) => set("deliverTo.address", e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                         />
                       </div>
                       <div className="grid sm:grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">State Code</label>
-                          <input 
-                            type="text" 
-                            placeholder="e.g., DL, MH, KA" 
-                            value={form.deliverTo.stateCode} 
-                            onChange={(e) => set("deliverTo.stateCode", e.target.value.toUpperCase())} 
-                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          <input
+                            type="text"
+                            placeholder="e.g., DL, MH, KA"
+                            value={form.deliverTo.stateCode}
+                            onChange={(e) => set("deliverTo.stateCode", e.target.value.toUpperCase())}
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                           />
                         </div>
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">GSTIN</label>
-                          <input 
-                            type="text" 
-                            placeholder="GSTIN" 
-                            value={form.deliverTo.GSTIN} 
-                            onChange={(e) => set("deliverTo.GSTIN", e.target.value)} 
-                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          <input
+                            type="text"
+                            placeholder="GSTIN"
+                            value={form.deliverTo.GSTIN}
+                            onChange={(e) => set("deliverTo.GSTIN", e.target.value)}
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                           />
                         </div>
                       </div>
@@ -944,10 +954,10 @@ export default function PurchaseOrderPage() {
                       <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                         <div
                           className={`h-full transition-all ${form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100
-                              ? "bg-red-500"
-                              : form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) === 100
-                                ? "bg-green-500"
-                                : "bg-blue-500"
+                            ? "bg-red-500"
+                            : form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) === 100
+                              ? "bg-green-500"
+                              : "bg-blue-500"
                             }`}
                           style={{
                             width: `${Math.min(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0), 100)}%`,
