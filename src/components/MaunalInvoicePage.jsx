@@ -759,6 +759,8 @@ const ManualInvoicePage = () => {
         }
 
         const response = await getCompanyByIdApi(companyId);
+        console.log(response.data);
+        
         const companyData = response.data || {};
 
         // Format address from registeredAddress object

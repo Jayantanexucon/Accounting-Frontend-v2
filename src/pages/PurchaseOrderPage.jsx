@@ -152,7 +152,7 @@ export default function PurchaseOrderPage() {
         taxableValue: 0,
         gstRate: 18,
         gstAmount: 0,
-        total: 0,
+        totalAmount: 0,
       },
     ],
     milestones: [],
@@ -515,7 +515,7 @@ export default function PurchaseOrderPage() {
   const addItem = () => {
     setForm(prev => ({
       ...prev,
-      items: [...prev.items, { description: "", hsnSac: "", hsnId: null, quantity: 1, unit: "each", rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, total: 0 }],
+      items: [...prev.items, { description: "", hsnSac: "", hsnId: null, quantity: 1, unit: "each", rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, totalAmount: 0 }],
     }));
   };
 
@@ -530,13 +530,13 @@ export default function PurchaseOrderPage() {
       if (field === "quantity" || field === "rate") {
         items[idx].taxableValue = items[idx].quantity * items[idx].rate;
         items[idx].gstAmount = (items[idx].taxableValue * items[idx].gstRate) / 100;
-        items[idx].total = items[idx].taxableValue + items[idx].gstAmount;
+        items[idx].totalAmount = items[idx].taxableValue + items[idx].gstAmount;
       }
       let totalTaxable = 0, totalGST = 0, totalAmount = 0;
       items.forEach(item => {
         totalTaxable += Number(item.taxableValue) || 0;
         totalGST += Number(item.gstAmount) || 0;
-        totalAmount += Number(item.total) || 0;
+        totalAmount += Number(item.totalAmount) || 0;
       });
       return {
         ...prev,

@@ -127,10 +127,17 @@ export default function NavbarComponent() {
     if (!selectedCompany) return false;
 
     return user.permissions.some((permission) => {
+      // Handle both string and object formats for entity
       const permissionEntityId = typeof permission.entity === "object" ? permission.entity._id : permission.entity;
+      
+      // Handle both string and object formats for company
+      const permissionCompanyId = typeof permission.company === "object" 
+        ? permission.company._id 
+        : permission.company;
+      
       return (
         permissionEntityId?.toString() === entityId?.toString() &&
-        permission.company?._id?.toString() === selectedCompany._id?.toString() &&
+        permissionCompanyId?.toString() === selectedCompany._id?.toString() &&
         permission.actions.includes("VIEW")
       );
     });
