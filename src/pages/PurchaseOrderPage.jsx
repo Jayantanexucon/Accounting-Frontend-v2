@@ -147,6 +147,7 @@ export default function PurchaseOrderPage() {
         hsnSac: "",
         hsnId: null,
         quantity: 1,
+        unit: "each",
         rate: 0,
         taxableValue: 0,
         gstRate: 18,
@@ -514,7 +515,7 @@ export default function PurchaseOrderPage() {
   const addItem = () => {
     setForm(prev => ({
       ...prev,
-      items: [...prev.items, { description: "", hsnSac: "", hsnId: null, quantity: 1, rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, total: 0 }],
+      items: [...prev.items, { description: "", hsnSac: "", hsnId: null, quantity: 1, unit: "each", rate: 0, taxableValue: 0, gstRate: 18, gstAmount: 0, total: 0 }],
     }));
   };
 
@@ -553,7 +554,12 @@ export default function PurchaseOrderPage() {
   const canProceed = () => {
     switch (step) {
       case 1:
-        return mode === "client" ? !!form.client?._id : !!form.vendor?._id;
+        const hasEntity = mode === "client" ? !!form.client?._id : !!form.vendor?._id;
+        // For client mode, also ensure deliverTo.name is filled
+        if (mode === "client" && hasEntity) {
+          return !!form.deliverTo?.name?.trim();
+        }
+        return hasEntity;
       case 2:
         return form.poDate && form.deliveryDate &&
           form.items.some(i => i.description && i.description.trim() !== "" && i.quantity > 0 && i.rate > 0);
@@ -580,11 +586,20 @@ export default function PurchaseOrderPage() {
     setLoading(true);
     setError(null);
     try {
+      // Map client/vendor based on mode for backend
+      // Backend always expects 'vendor' field (the party we're transacting with)
+      const vendorForBackend = mode === "client" ? form.client : form.vendor;
+      
       const poData = {
         ...form,
+        vendor: vendorForBackend,  // Always send the correct party as 'vendor'
         billingModel: { milestone: "milestone", monthly: "fixed", weekly: "fixed" }[form.paymentTerms] || "fixed",
         poCategory: "project",
       };
+      
+      // Remove the client field since backend only expects vendor
+      delete poData.client;
+      
       let result;
       if (isEditing) {
         result = await updatePurchaseOrderApi(editId, poData);
@@ -593,7 +608,7 @@ export default function PurchaseOrderPage() {
       }
       setSuccess(true);
       setCreatedPOId(result?.data?._id || result?._id);
-      setTimeout(() => navigate("/purchase-orders"), 1500);
+      setTimeout(() => navigate("/purchaseorder-data"), 1500);
     } catch (err) {
       setError(err.message || "Failed to save purchase order");
       console.error(err);
@@ -634,7 +649,7 @@ export default function PurchaseOrderPage() {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-6">
-          <button onClick={() => navigate("/purchase-orders")} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-800 mb-3">
+          <button onClick={() => navigate("/purchaseorder-data")} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-slate-800 mb-3">
             <ArrowLeft size={14} /> Back
           </button>
           <h1 className="text-xl font-bold text-slate-800 mb-0.5">
@@ -715,6 +730,101 @@ export default function PurchaseOrderPage() {
                   </div>
                 </div>
               )}
+
+              {/* DELIVER TO SECTION - Only for Client Mode */}
+              {mode === "client" && (
+                <div className="mt-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-slate-800">Deliver To</h3>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={sameAsDeliverTo} 
+                        onChange={(e) => {
+                          setSameAsDeliverTo(e.target.checked);
+                          if (e.target.checked && form.client?._id) {
+                            set("deliverTo", {
+                              _id: form.client._id,
+                              name: form.client.name,
+                              address: form.client.address,
+                              stateCode: form.client.stateCode,
+                              GSTIN: form.client.GSTIN
+                            });
+                          }
+                        }}
+                        className="w-4 h-4 border border-slate-300 rounded cursor-pointer"
+                      />
+                      <span className="text-xs text-slate-600">Same as Client</span>
+                    </label>
+                  </div>
+
+                  {!sameAsDeliverTo && (
+                    <div className={`p-3 rounded-md border ${colors.bg} ${colors.border} space-y-3`}>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Name</label>
+                        <input 
+                          type="text" 
+                          placeholder="Delivery location name" 
+                          value={form.deliverTo.name} 
+                          onChange={(e) => set("deliverTo.name", e.target.value)} 
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Address</label>
+                        <input 
+                          type="text" 
+                          placeholder="Delivery address" 
+                          value={form.deliverTo.address} 
+                          onChange={(e) => set("deliverTo.address", e.target.value)} 
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        />
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">State Code</label>
+                          <input 
+                            type="text" 
+                            placeholder="e.g., DL, MH, KA" 
+                            value={form.deliverTo.stateCode} 
+                            onChange={(e) => set("deliverTo.stateCode", e.target.value.toUpperCase())} 
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">GSTIN</label>
+                          <input 
+                            type="text" 
+                            placeholder="GSTIN" 
+                            value={form.deliverTo.GSTIN} 
+                            onChange={(e) => set("deliverTo.GSTIN", e.target.value)} 
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {sameAsDeliverTo && form.client?._id && (
+                    <div className={`mt-3 p-3 rounded-md border ${colors.bg} ${colors.border}`}>
+                      <p className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${colors.text}`}>Delivery Address</p>
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div><p className="text-[10px] text-slate-500 mb-0.5">Name</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.name}</p></div>
+                        <div><p className="text-[10px] text-slate-500 mb-0.5">GSTIN</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.GSTIN || "—"}</p></div>
+                        {form.deliverTo.stateCode && <div><p className="text-[10px] text-slate-500 mb-0.5">State Code</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.stateCode}</p></div>}
+                        <div className={`${form.deliverTo.stateCode ? "" : "sm:col-span-2"}`}><p className="text-[10px] text-slate-500 mb-0.5">Address</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.address || "—"}</p></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {!sameAsDeliverTo && !form.deliverTo?.name?.trim() && form.client?._id && (
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-md flex items-start gap-2">
+                      <span className="text-base text-amber-600 mt-0">⚠</span>
+                      <p className="text-xs text-amber-800"><strong>Required:</strong> Please enter a delivery location name to proceed.</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -743,7 +853,8 @@ export default function PurchaseOrderPage() {
                     <div className="col-span-4">Description</div>
                     <div className="col-span-1">HSN/SAC</div>
                     <div className="col-span-1">{getQtyLabel()}</div>
-                    <div className="col-span-2">{getRateLabel()}</div>
+                    <div className="col-span-1">Unit</div>
+                    <div className="col-span-1">{getRateLabel()}</div>
                     <div className="col-span-1">GST %</div>
                     <div className="col-span-2">Total (₹)</div>
                     <div className="col-span-1"></div>
@@ -768,7 +879,13 @@ export default function PurchaseOrderPage() {
                         </select>
                       </div>
                       <div className="sm:col-span-1"><input type="number" min="0" value={item.quantity} onChange={(e) => updateItem(i, "quantity", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
-                      <div className="sm:col-span-2"><input type="number" min="0" value={item.rate} onChange={(e) => updateItem(i, "rate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
+                      <div className="sm:col-span-1">
+                        <select value={item.unit || "each"} onChange={(e) => updateItem(i, "unit", e.target.value)} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none">
+                          <option value="each">Each</option>
+                          <option value="hour">Hour</option>
+                        </select>
+                      </div>
+                      <div className="sm:col-span-1"><input type="number" min="0" value={item.rate} onChange={(e) => updateItem(i, "rate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
                       <div className="sm:col-span-1"><input type="number" min="0" max="28" value={item.gstRate} onChange={(e) => updateItem(i, "gstRate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
                       <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
                       <div className="sm:col-span-1 flex justify-end">{form.items.length > 1 && <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={15} /></button>}</div>
@@ -1123,6 +1240,7 @@ export default function PurchaseOrderPage() {
                           <tr className="border-b border-slate-200 bg-slate-100">
                             <th className="px-2 py-1.5 text-left font-medium text-slate-600">Description</th>
                             <th className="px-2 py-1.5 text-center font-medium text-slate-600">Qty</th>
+                            <th className="px-2 py-1.5 text-center font-medium text-slate-600">Unit</th>
                             <th className="px-2 py-1.5 text-right font-medium text-slate-600">Rate</th>
                             <th className="px-2 py-1.5 text-right font-medium text-slate-600">GST %</th>
                             <th className="px-2 py-1.5 text-right font-medium text-slate-600">Total</th>
@@ -1133,6 +1251,7 @@ export default function PurchaseOrderPage() {
                             <tr key={idx} className="border-b border-slate-200 last:border-b-0">
                               <td className="px-2 py-1.5 text-slate-700">{item.description}</td>
                               <td className="px-2 py-1.5 text-center text-slate-700">{item.quantity}</td>
+                              <td className="px-2 py-1.5 text-center text-slate-700 capitalize">{item.unit || "each"}</td>
                               <td className="px-2 py-1.5 text-right text-slate-700">₹ {item.rate?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                               <td className="px-2 py-1.5 text-right text-slate-700">{item.gstRate}%</td>
                               <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
