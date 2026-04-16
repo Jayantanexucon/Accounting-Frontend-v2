@@ -21,7 +21,7 @@ import InvoiceCreatedModal from "../modals/InvoiceCreatedModal";
 import { toast } from "react-toastify";
 
 // Lucide Icons
-import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag } from "lucide-react";
+import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag, Calendar } from "lucide-react";
 import { getCompanyByIdApi } from "../apis/userApi";
 
 const getRemainingPOItemQuantity = (item = {}) => {
@@ -49,6 +49,9 @@ const poHasTaxData = (po) =>
             Number(item?.gstRate || 0) > 0 ||
             Number(item?.gstAmount || 0) > 0,
     );
+
+const unwrapPurchaseOrderPayload = (response) =>
+    response?.data?.data || response?.data || response || null;
 
 const formatDateInput = (dateLike) => {
     const date = new Date(dateLike);
@@ -180,6 +183,58 @@ const getOrderedLinkedInvoices = (po = {}) =>
         (a, b) => new Date(a?.invoiceDate || a?.createdAt || 0) - new Date(b?.invoiceDate || b?.createdAt || 0),
     );
 
+const unwrapInvoicePayload = (response) =>
+    response?.data?.data || response?.data || response || null;
+
+const hydratePurchaseOrderInvoices = async (po = {}) => {
+    const existingLinkedInvoices = Array.isArray(po.linkedInvoices) ? po.linkedInvoices.filter(Boolean) : [];
+    const invoiceIds = Array.isArray(po.invoiceIds) ? po.invoiceIds.filter(Boolean) : [];
+
+    if (existingLinkedInvoices.length > 0 || invoiceIds.length === 0) {
+        const derivedTotalInvoicedAmount =
+            existingLinkedInvoices.length > 0
+                ? roundMoney(
+                    existingLinkedInvoices.reduce(
+                        (sum, invoice) => sum + getInvoiceRaisedAmount(invoice),
+                        0,
+                    ),
+                )
+                : Number(po.totalInvoicedAmount || 0);
+
+        return {
+            ...po,
+            linkedInvoices: existingLinkedInvoices,
+            totalInvoicedAmount: derivedTotalInvoicedAmount,
+        };
+    }
+
+    try {
+        const invoices = await Promise.all(
+            invoiceIds.map(async (invoiceId) => {
+                const response = await getInvoiceByIdApi(invoiceId);
+                return unwrapInvoicePayload(response);
+            }),
+        );
+
+        const linkedInvoices = invoices.filter(Boolean);
+        const totalInvoicedAmount = roundMoney(
+            linkedInvoices.reduce(
+                (sum, invoice) => sum + getInvoiceRaisedAmount(invoice),
+                0,
+            ),
+        );
+
+        return {
+            ...po,
+            linkedInvoices,
+            totalInvoicedAmount,
+        };
+    } catch (error) {
+        console.warn("Failed to hydrate PO invoices:", error);
+        return po;
+    }
+};
+
 const getPoItemMatchKeys = (item = {}) =>
     [
         item.itemId,
@@ -286,59 +341,101 @@ const getMilestoneInvoiceRows = (po) => {
     return rows;
 };
 
-const buildRecurringInvoiceContext = (po = {}) => {
-    const recurringSchedule = buildRecurringTermSchedule(po);
-    if (!recurringSchedule) return null;
+const buildRecurringInvoiceContext = async (po, fetchInvoiceFn) => {
+  const paymentTermType = getNormalizedPaymentTermType(po);
+  if (!['monthly', 'weekly'].includes(paymentTermType)) return null;
 
-    const orderedInvoices = getOrderedLinkedInvoices(po);
-    const actualRaisedAmounts = orderedInvoices.map((invoice) => getInvoiceRaisedAmount(invoice));
-    const actualRaisedTotal = roundMoney(
-        actualRaisedAmounts.reduce((sum, amount) => sum + Number(amount || 0), 0),
-    );
-    const scheduledAmounts = recurringSchedule.terms.map((term) => Number(term.amount || 0));
-    const totalScheduledAmount = roundMoney(
-        scheduledAmounts.reduce((sum, amount) => sum + amount, 0),
-    );
-    const openAmount = roundMoney(
-        Math.max(0, totalScheduledAmount - actualRaisedTotal),
-    );
+  const start = new Date(po.poDate || po.referenceDate);
+  const end = new Date(po.deliveryDate || po.dueDate || po.poDate || po.referenceDate);
+  if (isNaN(start) || isNaN(end)) return null;
 
-    if (openAmount <= 0) {
-        return null;
+  const totalDays = getDateDiffInDays(start, end);
+  const totalTerms = paymentTermType === 'monthly'
+    ? Math.max(1, Math.ceil(totalDays / 30))
+    : Math.max(1, Math.ceil(totalDays / 7));
+  const scheduledAmounts = distributeAmountAcrossTerms(po.totalAmount || 0, totalTerms);
+
+  // ---- Get already invoiced amount ----
+  let invoicedTotal = 0;
+  const linkedInvoices = getOrderedLinkedInvoices(po);
+
+  // 1) Prefer actual linked invoice totals when available.
+  if (linkedInvoices.length > 0) {
+    invoicedTotal = linkedInvoices.reduce((sum, invoice) => sum + getInvoiceRaisedAmount(invoice), 0);
+  }
+  // 2) Use po.totalInvoicedAmount if available
+  else if (po.totalInvoicedAmount > 0) {
+    invoicedTotal = po.totalInvoicedAmount;
+  }
+  // 3) Otherwise fetch from invoiceIds
+  else if (po.invoiceIds?.length && typeof fetchInvoiceFn === "function") {
+    try {
+      const invoices = await Promise.all(po.invoiceIds.map(id => fetchInvoiceFn(id)));
+      invoicedTotal = invoices.reduce((sum, inv) => sum + getInvoiceRaisedAmount(inv), 0);
+    } catch (err) {
+      console.warn('Failed to fetch invoices', err);
     }
+  }
 
-    const currentInstallmentNo = Math.min(
-        recurringSchedule.totalTerms,
-        Math.max(1, orderedInvoices.length + 1),
-    );
-    const currentTermIndex = currentInstallmentNo - 1;
-    const currentTerm = recurringSchedule.terms[currentTermIndex] || null;
-    const scheduledTillPrevious = roundMoney(
-        scheduledAmounts.slice(0, currentTermIndex).reduce((sum, amount) => sum + amount, 0),
-    );
-    const scheduledTillCurrent = roundMoney(
-        scheduledAmounts.slice(0, currentInstallmentNo).reduce((sum, amount) => sum + amount, 0),
-    );
-    const carryForwardAmount = roundMoney(
-        Math.max(0, scheduledTillPrevious - actualRaisedTotal),
-    );
-    const currentTermAmount = roundMoney(
-        Math.max(0, scheduledTillCurrent - Math.max(actualRaisedTotal, scheduledTillPrevious)),
-    );
+  const openAmount = Math.max(0, (po.totalAmount || 0) - invoicedTotal);
+  if (openAmount <= 0) return null;
 
-    return {
-        ...recurringSchedule,
-        currentTermIndex,
-        currentTermNumber: currentInstallmentNo,
-        currentTerm,
-        carryForwardAmount,
-        currentTermAmount,
-        currentWindowStart: currentTerm?.startDate || formatDateInput(po.poDate || po.referenceDate),
-        currentWindowEnd: currentTerm?.endDate || formatDateInput(po.deliveryDate || po.dueDate || po.poDate),
-        label: currentTerm
-            ? `${currentTerm.label}${carryForwardAmount > 0 ? " + previous remaining" : ""}`
-            : `Previous remaining only`,
-    };
+  // ---- Find the current term (the first term that is not fully invoiced) ----
+  let currentTermIndex = 0;
+  let cumulative = 0;
+  for (let i = 0; i < totalTerms; i++) {
+    cumulative += scheduledAmounts[i];
+    if (cumulative > invoicedTotal) {
+      currentTermIndex = i;
+      break;
+    }
+    currentTermIndex = i + 1;
+  }
+  if (currentTermIndex >= totalTerms) currentTermIndex = totalTerms - 1;
+
+  const scheduledTillPrevious = scheduledAmounts.slice(0, currentTermIndex).reduce((a, b) => a + b, 0);
+  const scheduledTillCurrent = scheduledTillPrevious + scheduledAmounts[currentTermIndex];
+  const carryForward = Math.max(0, scheduledTillPrevious - invoicedTotal);
+  const currentTermAmount = Math.max(0, scheduledTillCurrent - Math.max(invoicedTotal, scheduledTillPrevious));
+
+  // Build term list for display (optional)
+  const terms = [];
+  let cursor = new Date(start);
+  for (let i = 0; i < totalTerms; i++) {
+    let termEnd;
+    if (paymentTermType === 'monthly') {
+      const nextStart = addMonths(cursor, 1);
+      termEnd = nextStart ? addDays(nextStart, -1) : new Date(end);
+    } else {
+      termEnd = addDays(cursor, 6);
+    }
+    if (termEnd > end) termEnd = new Date(end);
+    terms.push({
+      termNumber: i + 1,
+      startDate: formatDateInput(cursor),
+      endDate: formatDateInput(termEnd),
+      amount: scheduledAmounts[i],
+      label: paymentTermType === 'monthly' ? `Month ${i+1} of ${totalTerms}` : `Week ${i+1} of ${totalTerms}`,
+      shortLabel: paymentTermType === 'monthly' ? `Month ${i+1}` : `Week ${i+1}`,
+    });
+    cursor = paymentTermType === 'monthly'
+      ? (addMonths(cursor, 1) || new Date(end))
+      : (addDays(termEnd, 1) || new Date(end));
+  }
+
+  return {
+    paymentTermType,
+    totalTerms,
+    terms,
+    currentTermIndex,
+    currentTermNumber: currentTermIndex + 1,
+    currentTerm: terms[currentTermIndex] || null,
+    carryForwardAmount: carryForward,
+    currentTermAmount,
+    currentWindowStart: terms[currentTermIndex]?.startDate || formatDateInput(start),
+    currentWindowEnd: terms[currentTermIndex]?.endDate || formatDateInput(end),
+    label: `${terms[currentTermIndex]?.label || 'Term'}${carryForward > 0 ? ' + previous remaining' : ''}`,
+  };
 };
 
 const calculateScheduledInvoiceParts = ({
@@ -1099,33 +1196,45 @@ const ManualInvoicePage = () => {
 
     // Auto-select PO from URL parameter (if present)
     useEffect(() => {
-        // Only run if we have a poId in the URL and we haven't already selected it
-        if (poIdFromUrl && !autoSelectedPoId) {
-            const po = purchaseOrders.find(p => p._id === poIdFromUrl);
-            if (po) {
-                // PO is already in the list, select it directly
-                handleSelectPO(po);
-                setAutoSelectedPoId(poIdFromUrl);
-            } else {
-                // PO not in the list (maybe fully invoiced), fetch it directly
-                const fetchAndSelectPO = async () => {
-                    try {
-                        const response = await getPurchaseOrderApi(poIdFromUrl);
-                        if (response?.data) {
-                            handleSelectPO(response.data);
-                            setAutoSelectedPoId(poIdFromUrl);
-                        } else {
-                            toast.error("Failed to load purchase order details");
-                        }
-                    } catch (err) {
-                        console.error("Error fetching PO for auto-select:", err);
-                        toast.error("Failed to load purchase order");
-                    }
-                };
-                fetchAndSelectPO();
-            }
+        // Wait until the PO list has finished loading before attempting auto-select.
+        // Without this guard the effect fires immediately with an empty list,
+        // falls through to the fallback fetch, and then fires *again* once the
+        // list arrives — causing duplicate calls and a race condition.
+        if (!poIdFromUrl || autoSelectedPoId || loadingPOs) return;
+
+        const stateSelectedPO = location.state?.selectedPO;
+        if (stateSelectedPO?._id === poIdFromUrl) {
+            handleSelectPO(stateSelectedPO);
+            setAutoSelectedPoId(poIdFromUrl);
+            return;
         }
-    }, [poIdFromUrl, purchaseOrders, autoSelectedPoId]);
+
+        const po = purchaseOrders.find(p => p._id === poIdFromUrl);
+        if (po) {
+            // PO is already in the active list – select it directly.
+            handleSelectPO(po);
+            setAutoSelectedPoId(poIdFromUrl);
+        } else {
+            // PO not in the active list (e.g. FULLY_INVOICED / CLOSED) –
+            // fetch it directly from the API.
+            const fetchAndSelectPO = async () => {
+                try {
+                    const response = await getPurchaseOrderApi(poIdFromUrl);
+                    const poData = unwrapPurchaseOrderPayload(response);
+                    if (poData?._id) {
+                        handleSelectPO(poData);
+                        setAutoSelectedPoId(poIdFromUrl);
+                    } else {
+                        toast.error("Failed to load purchase order details");
+                    }
+                } catch (err) {
+                    console.error("Error fetching PO for auto-select:", err);
+                    toast.error("Failed to load purchase order");
+                }
+            };
+            fetchAndSelectPO();
+        }
+    }, [poIdFromUrl, purchaseOrders, autoSelectedPoId, loadingPOs, location.state]);
     // Filter POs based on search
     useEffect(() => {
         if (poSearch) {
@@ -1663,10 +1772,11 @@ const ManualInvoicePage = () => {
         let selectedPO = po;
         try {
             const poResponse = await getPOProgressApi(po._id, companyId);
-            selectedPO = poResponse?.data || po;
+            selectedPO = unwrapPurchaseOrderPayload(poResponse) || po;
         } catch (err) {
             console.error("Error fetching fresh PO progress:", err);
         }
+        selectedPO = await hydratePurchaseOrderInvoices(selectedPO);
 
         const poCategory = selectedPO.poCategory || "project";
         const billingModel = selectedPO.billingModel || "fixed";
@@ -1765,12 +1875,18 @@ const ManualInvoicePage = () => {
             };
         }
         else if (["monthly", "weekly"].includes(paymentTermType) && poCategory !== "staffing") {
-            const recurringContext = buildRecurringInvoiceContext(selectedPO);
-            if (!recurringContext) {
-                setError(`All ${paymentTermType} installments for this PO are already invoiced.`);
-                setPoDropdownOpen(false);
-                return;
-            }
+    const recurringContext = await buildRecurringInvoiceContext(
+        selectedPO,
+        async (invoiceId) => {
+            const response = await getInvoiceByIdApi(invoiceId);
+            return unwrapInvoicePayload(response);
+        },
+    );
+    if (!recurringContext) {
+        setError(`All ${paymentTermType} installments for this PO are already invoiced.`);
+        setPoDropdownOpen(false);
+        return;
+    }
 
             const previousInvoices = getOrderedLinkedInvoices(selectedPO);
             const items = Array.isArray(selectedPO.items) ? selectedPO.items : [];
@@ -2077,10 +2193,10 @@ const ManualInvoicePage = () => {
     };
 
     useEffect(() => {
-        if (!selectedPoId || editableInvoiceId || isFromPO) return;
+        if (!selectedPoId || poIdFromUrl || editableInvoiceId || isFromPO) return;
 
         handleSelectPO({ _id: selectedPoId });
-    }, [selectedPoId, editableInvoiceId, isFromPO]);
+    }, [selectedPoId, poIdFromUrl, editableInvoiceId, isFromPO]);
 
     useEffect(() => {
         if (!isFromPO || invoice.poType !== "contract") return;

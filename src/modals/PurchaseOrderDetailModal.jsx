@@ -473,7 +473,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const handleCreateInvoice = () => {
     if (po?._id) {
       onClose?.();
-      navigate(`/master-data/manual-invoice?poId=${po._id}`);
+      navigate(`/master-data/manual-invoice?poId=${po._id}`, {
+        state: { selectedPO: po },
+      });
     }
   };
 

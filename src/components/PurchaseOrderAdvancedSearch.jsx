@@ -139,7 +139,7 @@ const PurchaseOrderAdvancedSearch = ({
       const poParams = { q: "", companyId };
       if (clientId) poParams.clientId = clientId; // 👈 add clientId when in client context
 if (preselectedClientName) poParams.clientName = preselectedClientName;
-      const poRes = await API.get("/purchase-orders/search/number", {
+      const poRes = await API.get("/invoices/purchase-order/search/number", {
         params: poParams,
       });
       const poNumbers = poRes.data?.map((item) => item.label) || [];
@@ -207,10 +207,14 @@ useEffect(() => {
       const params = { q: poSearchQuery, companyId };
       if (clientId) params.clientId = clientId;
       if (preselectedClientName) params.clientName = preselectedClientName;
-      const res = await API.get("/purchase-orders/search/number", { params });
+      const res = await API.get("/invoices/purchase-order/search/number", { params });
       const filtered = res.data?.map((item) => item.label) || [];
       setFilteredPoNumbers(filtered);
     } catch (error) {
+      if (error?.response?.status === 404) {
+        setFilteredPoNumbers([]);
+        return;
+      }
       console.error("Error searching PO numbers:", error);
     }
   };
