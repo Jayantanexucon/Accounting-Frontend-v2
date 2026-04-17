@@ -82,6 +82,88 @@ const colorMap = {
 
 const today = () => new Date().toISOString().split("T")[0];
 
+const formatAddressLines = (address = {}) =>
+  [
+    address.line1,
+    address.line2,
+    address.city,
+    address.state,
+    address.country,
+    address.pinCode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+const buildTaxDetails = (entity = {}) => {
+  const normalizedTaxDetails = Array.isArray(entity.taxDetails)
+    ? entity.taxDetails
+        .map((tax) => ({
+          label: tax?.label || tax?.taxType || "",
+          taxType: tax?.taxType || tax?.label || "",
+          taxNumber: tax?.taxNumber || "",
+        }))
+        .filter((tax) => tax.label && tax.taxNumber)
+    : [];
+
+  const legacyTaxFields = [
+    ["GST", entity.GSTIN || entity.gstNumber || entity.gstin],
+    ["PAN", entity.panNumber],
+    ["VAT", entity.vatNumber],
+    ["EIN", entity.einNumber],
+    ["SSN", entity.ssnNumber],
+    ["Company No.", entity.companyNumber],
+    ["National ID", entity.nationalIdNumber],
+    [entity.taxIdentifierType || "Tax ID", entity.taxIdentificationNumber],
+  ]
+    .filter(([, value]) => value)
+    .map(([label, taxNumber]) => ({
+      label,
+      taxType: label,
+      taxNumber,
+    }));
+
+  const seen = new Set();
+  return [...normalizedTaxDetails, ...legacyTaxFields].filter((tax) => {
+    const key = `${tax.label}-${tax.taxNumber}`;
+    if (!tax.taxNumber || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildAddressOption = (address = {}, fallbackEntity = {}) => {
+  const taxDetails = buildTaxDetails({
+    taxDetails: address.taxDetails,
+    gstNumber: address.taxNumber,
+    GSTIN: address.taxNumber,
+  });
+
+  return {
+    _id: address._id || fallbackEntity._id,
+    label: address.label || "",
+    type: address.type || (address.isShipTo ? "SHIP_TO" : address.isDefault ? "DEFAULT" : "OTHER"),
+    name:
+      address.label ||
+      address.name ||
+      fallbackEntity.clientName ||
+      fallbackEntity.vendorName ||
+      fallbackEntity.name ||
+      "",
+    address: formatAddressLines(address) || fallbackEntity.address || "",
+    line1: address.line1 || "",
+    line2: address.line2 || "",
+    city: address.city || "",
+    state: address.state || "",
+    country: address.country || fallbackEntity.clientCountry || fallbackEntity.country || "",
+    pinCode: address.pinCode || "",
+    stateCode: address.stateCode || address.gstStateCode || fallbackEntity.stateCode || "",
+    GSTIN: address.taxNumber || fallbackEntity.GSTIN || "",
+    taxDetails,
+    isDefault: !!address.isDefault,
+    isShipTo: !!address.isShipTo,
+  };
+};
+
 const STEPS = [
   { id: 1, label: "Entity", icon: Building },
   { id: 2, label: "PO Details & Items", icon: FileText },
@@ -126,6 +208,8 @@ export default function PurchaseOrderPage() {
   const [companyInfo, setCompanyInfo] = useState(null);
   const [entitySearch, setEntitySearch] = useState("");
   const [entityDropdownOpen, setEntityDropdownOpen] = useState(false);
+  const [deliverToSearch, setDeliverToSearch] = useState("");
+  const [deliverToDropdownOpen, setDeliverToDropdownOpen] = useState(false);
   const [distributionBreakdown, setDistributionBreakdown] = useState([]);
 
   const [form, setForm] = useState({
@@ -138,9 +222,9 @@ export default function PurchaseOrderPage() {
     deliveryDate: today(),
     poreferencevalue: "",
     currency: "INR",
-    client: { _id: "", name: "", address: "", stateCode: "", GSTIN: "" },
-    vendor: { _id: "", name: "", address: "", stateCode: "", GSTIN: "" },
-    deliverTo: { name: "", address: "", stateCode: "", GSTIN: "" },
+    client: { _id: "", name: "", address: "", stateCode: "", GSTIN: "", taxDetails: [], currencySymbol: "₹", currencyCode: "INR", currencyName: "Indian Rupee", defaultAddress: null, addressOptions: [] },
+    vendor: { _id: "", name: "", address: "", stateCode: "", GSTIN: "", taxDetails: [], currencySymbol: "₹", currencyCode: "INR", currencyName: "Indian Rupee", defaultAddress: null, addressOptions: [] },
+    deliverTo: { name: "", address: "", stateCode: "", GSTIN: "", taxDetails: [], country: "", line1: "", line2: "", city: "", state: "", pinCode: "" },
     items: [
       {
         description: "",
@@ -177,6 +261,57 @@ export default function PurchaseOrderPage() {
     return (Number(hsn.cgst) || 0) + (Number(hsn.sgst) || 0);
   };
 
+  const normalizeStateCode = (value = "") => {
+    const normalized = String(value || "").trim().toUpperCase();
+    if (!normalized) return "";
+    const digitMatch = normalized.match(/^(\d{2})/);
+    if (digitMatch) return digitMatch[1];
+    const alphaMatch = normalized.match(/^([A-Z]{2})/);
+    return alphaMatch ? alphaMatch[1] : normalized;
+  };
+
+  const getCompanyStateCode = () => {
+    const companyGstin =
+      companyInfo?.taxDetails?.gstin ||
+      companyInfo?.taxDetails?.gstNumber ||
+      companyInfo?.gstin ||
+      companyInfo?.gstNumber ||
+      "";
+    return normalizeStateCode(companyGstin);
+  };
+
+  const calculateGstTotals = (items = []) => {
+    let totalTaxable = 0;
+    let totalGST = 0;
+    let totalAmount = 0;
+
+    items.forEach((item) => {
+      totalTaxable += Number(item.taxableValue) || 0;
+      totalGST += Number(item.gstAmount) || 0;
+      totalAmount += Number(item.totalAmount) || 0;
+    });
+
+    const companyStateCode = getCompanyStateCode();
+    const shipToStateCode = normalizeStateCode(form.deliverTo?.stateCode);
+    const isIntraState =
+      !!companyStateCode &&
+      !!shipToStateCode &&
+      companyStateCode === shipToStateCode;
+
+    const totalCGSTAmount = isIntraState ? Math.round((totalGST / 2) * 100) / 100 : 0;
+    const totalSGSTAmount = isIntraState ? Math.round((totalGST / 2) * 100) / 100 : 0;
+    const totalIGSTAmount = isIntraState ? 0 : Math.round(totalGST * 100) / 100;
+
+    return {
+      totalTaxableValue: Math.round(totalTaxable * 100) / 100,
+      totalGSTAmount: Math.round(totalGST * 100) / 100,
+      totalCGSTAmount,
+      totalSGSTAmount,
+      totalIGSTAmount,
+      totalAmount: Math.round(totalAmount * 100) / 100,
+    };
+  };
+
   // Initialize milestones when paymentTerms becomes "milestone"
   useEffect(() => {
     if (form.paymentTerms === "milestone" && form.milestones.length === 0) {
@@ -207,24 +342,47 @@ export default function PurchaseOrderPage() {
           if (clientsRes?.data?.clients) clientsArray = clientsRes.data.clients;
           else if (clientsRes?.clients) clientsArray = clientsRes.clients;
           else if (Array.isArray(clientsRes)) clientsArray = clientsRes;
-          const normalized = clientsArray.map((c) => ({
-            _id: c._id,
-            name: c.name || c.clientName || c.contactPerson || "",
-            address: c.address || c.clientAddress || c.billingAddress?.line1 || "",
-            stateCode: c.stateCode || c.gstStateCode || c.clientState || "",
-            GSTIN: c.GSTIN || c.gstNumber || "",
-            taxNumber: c.taxNumber || c.gstNumber || "",
-            clientName: c.clientName || c.name,
-            clientCode: c.clientCode,
-            clientCountry: c.clientCountry || c.country,
-          }));
+          const normalized = clientsArray.map((c) => {
+            const defaultAddress = c.defaultAddress || {};
+            const allAddresses = [
+              buildAddressOption({ ...defaultAddress, isDefault: true, type: defaultAddress.type || "DEFAULT" }, c),
+              ...((c.additionalAddresses || c.addresses || []).map((address) => buildAddressOption(address, c))),
+            ].filter((address, index, list) => address.address && list.findIndex((candidate) => candidate._id === address._id && candidate.address === address.address) === index);
+            const shipToAddress =
+              allAddresses.find((address) => address?.type === "SHIP_TO" || address?.isShipTo) || {};
+            const entityTaxDetails = buildTaxDetails(c);
+
+            return {
+              _id: c._id,
+              name: c.name || c.clientName || c.contactPerson || "",
+              address: c.address || c.clientAddress || formatAddressLines(defaultAddress) || "",
+              stateCode: c.stateCode || c.gstStateCode || defaultAddress.stateCode || c.clientState || "",
+              GSTIN: c.GSTIN || c.gstNumber || "",
+              taxNumber: c.taxNumber || c.gstNumber || "",
+              taxDetails: entityTaxDetails,
+              clientName: c.clientName || c.name,
+              clientCode: c.clientCode,
+              clientCountry: c.clientCountry || c.country,
+              currencyCode: c.currencyCode || c.currency || "INR",
+              currencySymbol: c.currencySymbol || c.currency?.symbol || "₹",
+              currencyName: c.currencyName || c.currency?.name || "Indian Rupee",
+              defaultAddress: allAddresses[0] || null,
+              shipToAddress: shipToAddress.address ? shipToAddress : null,
+              addressOptions: allAddresses,
+            };
+          });
           setClients(normalized);
         } else {
           const vendorRes = await getVendors(companyId);
           let vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
           const normalized = vendorList.map((v) => {
-            let address = v.address || v.vendorAddress || v.billingAddress?.line1 || v.registeredAddress || "";
-            let stateCode = v.stateCode || v.gstStateCode || v.vendorState || "";
+            const defaultAddress = v.defaultAddress || v.billingAddress || {};
+            const allAddresses = [
+              buildAddressOption({ ...defaultAddress, isDefault: true, type: defaultAddress.type || "DEFAULT" }, v),
+              ...((v.additionalAddresses || v.addresses || []).map((address) => buildAddressOption(address, v))),
+            ].filter((address, index, list) => address.address && list.findIndex((candidate) => candidate._id === address._id && candidate.address === address.address) === index);
+            let address = v.address || v.vendorAddress || formatAddressLines(defaultAddress) || v.registeredAddress || "";
+            let stateCode = v.stateCode || v.gstStateCode || defaultAddress.stateCode || v.vendorState || "";
             let gstin = v.gstNumber || v.gstin || v.GSTIN || "";
             return {
               _id: v._id,
@@ -233,10 +391,16 @@ export default function PurchaseOrderPage() {
               stateCode: stateCode,
               GSTIN: gstin,
               taxNumber: gstin || v.panNumber || "",
+              taxDetails: buildTaxDetails(v),
               vendorName: v.vendorName,
               vendorCode: v.vendorCode,
               country: v.country || "",
               email: v.email || "",
+              currencyCode: v.currencyCode || v.currency || "INR",
+              currencySymbol: v.currencySymbol || v.currency?.symbol || "₹",
+              currencyName: v.currencyName || v.currency?.name || "Indian Rupee",
+              defaultAddress: allAddresses[0] || null,
+              addressOptions: allAddresses,
             };
           });
           setVendors(normalized);
@@ -277,20 +441,37 @@ export default function PurchaseOrderPage() {
       if (found) {
         setForm(prev => ({
           ...prev,
-          client: found,
-          deliverTo: sameAsDeliverTo ? found : prev.deliverTo,
+          client: {
+            ...found,
+            address: found.defaultAddress?.address || found.address,
+            stateCode: found.defaultAddress?.stateCode || found.stateCode,
+          },
+          deliverTo: sameAsDeliverTo
+            ? (found.defaultAddress?.address ? found.defaultAddress : found)
+            : (found.shipToAddress?.address ? found.shipToAddress : prev.deliverTo),
         }));
       }
     } else if (prefilledVendorId && mode === "vendor") {
       getVendorById(prefilledVendorId)
         .then(res => {
           const vendor = res.data?.data || res.data;
+          const defaultAddress = vendor.defaultAddress || vendor.billingAddress || {};
+          const allAddresses = [
+            buildAddressOption({ ...defaultAddress, isDefault: true, type: defaultAddress.type || "DEFAULT" }, vendor),
+            ...((vendor.additionalAddresses || vendor.addresses || []).map((address) => buildAddressOption(address, vendor))),
+          ].filter((address, index, list) => address.address && list.findIndex((candidate) => candidate._id === address._id && candidate.address === address.address) === index);
           const vendorObj = {
             _id: vendor._id,
             name: vendor.vendorName || vendor.name,
-            address: vendor.address || vendor.vendorAddress || vendor.billingAddress?.line1 || "",
-            stateCode: vendor.stateCode || vendor.gstStateCode || "",
+            address: vendor.address || vendor.vendorAddress || formatAddressLines(defaultAddress) || "",
+            stateCode: vendor.stateCode || vendor.gstStateCode || defaultAddress.stateCode || "",
             GSTIN: vendor.gstNumber || vendor.gstin || "",
+            taxDetails: buildTaxDetails(vendor),
+            currencyCode: vendor.currencyCode || vendor.currency || "INR",
+            currencySymbol: vendor.currencySymbol || vendor.currency?.symbol || "₹",
+            currencyName: vendor.currencyName || vendor.currency?.name || "Indian Rupee",
+            defaultAddress: allAddresses[0] || null,
+            addressOptions: allAddresses,
           };
           setForm(prev => ({
             ...prev,
@@ -411,7 +592,38 @@ export default function PurchaseOrderPage() {
   const filteredEntities = (mode === "client" ? clients : vendors).filter(e => {
     if (!entitySearch.trim()) return true;
     const q = entitySearch.toLowerCase();
-    return (e.name || "").toLowerCase().includes(q) || (e.taxNumber || "").toLowerCase().includes(q);
+    return (
+      (e.name || "").toLowerCase().includes(q) ||
+      (e.taxNumber || "").toLowerCase().includes(q) ||
+      (e.clientCode || e.vendorCode || "").toLowerCase().includes(q) ||
+      (e.address || "").toLowerCase().includes(q) ||
+      (e.taxDetails || []).some((tax) => `${tax.label} ${tax.taxNumber}`.toLowerCase().includes(q))
+    );
+  });
+
+  const selectedEntity = mode === "client" ? form.client : form.vendor;
+  const currencySymbol = selectedEntity?.currencySymbol || "₹";
+  const currencyCode = selectedEntity?.currencyCode || form.currency || "INR";
+  const currencyName = selectedEntity?.currencyName || "Indian Rupee";
+  const formatMoney = (value) =>
+    `${currencySymbol} ${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+  const getTaxDisplay = (entity) =>
+    (entity?.taxDetails || []).filter((tax) => tax?.label && tax?.taxNumber);
+  const getTaxLabel = () => {
+    if (Number(form.totalIGSTAmount) > 0) return "IGST Amount";
+    if (Number(form.totalCGSTAmount) > 0 || Number(form.totalSGSTAmount) > 0) return "CGST + SGST Amount";
+    return "GST Amount";
+  };
+  const selectedEntityTaxDetails = getTaxDisplay(selectedEntity);
+  const deliverToOptions = mode === "client" ? (form.client?.addressOptions || []) : [];
+  const filteredDeliverToOptions = deliverToOptions.filter((address) => {
+    if (!deliverToSearch.trim()) return true;
+    const q = deliverToSearch.toLowerCase();
+    return (
+      `${address.name} ${address.label} ${address.address} ${address.stateCode} ${address.GSTIN}`
+        .toLowerCase()
+        .includes(q)
+    );
   });
 
   // ─────────────────────────────────────────────────────────────
@@ -434,9 +646,24 @@ export default function PurchaseOrderPage() {
 
   const selectEntity = (entity) => {
     if (mode === "client") {
-      setForm(prev => ({ ...prev, client: entity, deliverTo: sameAsDeliverTo ? entity : prev.deliverTo }));
+      const defaultAddress = entity.defaultAddress?.address ? entity.defaultAddress : entity;
+      const shipToAddress = entity.shipToAddress?.address ? entity.shipToAddress : null;
+      setForm(prev => ({
+        ...prev,
+        client: {
+          ...entity,
+          name: entity.name,
+          address: defaultAddress.address || entity.address,
+          stateCode: defaultAddress.stateCode || entity.stateCode,
+        },
+        deliverTo: sameAsDeliverTo
+          ? defaultAddress
+          : (shipToAddress || prev.deliverTo),
+        currency: entity.currencyCode || prev.currency,
+      }));
+      setDeliverToSearch(shipToAddress?.label || shipToAddress?.name || "");
     } else {
-      setForm(prev => ({ ...prev, vendor: entity, deliverTo: sameAsDeliverTo ? entity : prev.deliverTo }));
+      setForm(prev => ({ ...prev, vendor: entity, deliverTo: sameAsDeliverTo ? entity.defaultAddress || entity : prev.deliverTo, currency: entity.currencyCode || prev.currency }));
     }
     setEntityDropdownOpen(false);
     setEntitySearch("");
@@ -527,29 +754,31 @@ export default function PurchaseOrderPage() {
     setForm(prev => {
       const items = [...prev.items];
       items[idx] = { ...items[idx], [field]: value };
-      if (field === "quantity" || field === "rate") {
+      if (field === "quantity" || field === "rate" || field === "gstRate") {
         items[idx].taxableValue = items[idx].quantity * items[idx].rate;
         items[idx].gstAmount = (items[idx].taxableValue * items[idx].gstRate) / 100;
         items[idx].totalAmount = items[idx].taxableValue + items[idx].gstAmount;
       }
-      let totalTaxable = 0, totalGST = 0, totalAmount = 0;
-      items.forEach(item => {
-        totalTaxable += Number(item.taxableValue) || 0;
-        totalGST += Number(item.gstAmount) || 0;
-        totalAmount += Number(item.totalAmount) || 0;
-      });
+      const totals = calculateGstTotals(items);
       return {
         ...prev,
         items,
-        totalTaxableValue: Math.round(totalTaxable * 100) / 100,
-        totalGSTAmount: Math.round(totalGST * 100) / 100,
-        totalCGSTAmount: Math.round((totalGST / 2) * 100) / 100,
-        totalSGSTAmount: Math.round((totalGST / 2) * 100) / 100,
-        totalAmount: Math.round(totalAmount * 100) / 100,
-        valueInWords: numberToWords(Math.round(totalAmount * 100) / 100),
+        ...totals,
+        valueInWords: numberToWords(totals.totalAmount),
       };
     });
   };
+
+  useEffect(() => {
+    setForm((prev) => {
+      const totals = calculateGstTotals(prev.items);
+      return {
+        ...prev,
+        ...totals,
+        valueInWords: numberToWords(totals.totalAmount),
+      };
+    });
+  }, [companyInfo, form.deliverTo?.stateCode]);
 
   const canProceed = () => {
     switch (step) {
@@ -640,8 +869,8 @@ export default function PurchaseOrderPage() {
     return "Quantity";
   };
   const getRateLabel = () => {
-    if (form.paymentTerms === "weekly") return "Rate/Hour (₹)";
-    return "Rate (₹)";
+    if (form.paymentTerms === "weekly") return `Rate/Hour (${currencySymbol})`;
+    return `Rate (${currencySymbol})`;
   };
 
   return (
@@ -711,8 +940,21 @@ export default function PurchaseOrderPage() {
                     <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg z-50 max-h-56 overflow-y-auto">
                       {filteredEntities.map((entity) => (
                         <button key={entity._id} onClick={() => selectEntity(entity)} className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition">
-                          <div className="font-medium text-slate-800 text-xs">{entity.name}</div>
-                          <div className="text-[10px] text-slate-500 mt-0.5">{entity.GSTIN || entity.taxNumber || "No Tax ID"}</div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="font-medium text-slate-800 text-xs">{entity.name}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">{entity.clientCode || entity.vendorCode || entity.defaultAddress?.label || "Primary Record"}</div>
+                            </div>
+                            <div className="text-[10px] font-medium text-slate-600">{entity.currencySymbol || "₹"} {entity.currencyCode || "INR"}</div>
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-1">{entity.defaultAddress?.address || entity.address || "No Address"}</div>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {getTaxDisplay(entity).length > 0 ? getTaxDisplay(entity).map((tax) => (
+                              <span key={`${entity._id}-${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
+                                {tax.label}: {tax.taxNumber}
+                              </span>
+                            )) : <span className="text-[10px] text-slate-400">No Tax ID</span>}
+                          </div>
                         </button>
                       ))}
                     </div>
@@ -724,9 +966,10 @@ export default function PurchaseOrderPage() {
                   <p className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${colors.text}`}>{mode === "client" ? "Client" : "Vendor"} Details</p>
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div><p className="text-[10px] text-slate-500 mb-0.5">Name</p><p className="font-medium text-slate-800 text-xs">{mode === "client" ? form.client.name : form.vendor.name}</p></div>
-                    <div><p className="text-[10px] text-slate-500 mb-0.5">GSTIN</p><p className="font-medium text-slate-800 text-xs">{(mode === "client" ? form.client.GSTIN : form.vendor.GSTIN) || "—"}</p></div>
+                    <div><p className="text-[10px] text-slate-500 mb-0.5">Currency</p><p className="font-medium text-slate-800 text-xs">{currencySymbol} {currencyCode} {currencyName}</p></div>
                     {(mode === "client" ? form.client.stateCode : form.vendor.stateCode) && <div><p className="text-[10px] text-slate-500 mb-0.5">State Code</p><p className="font-medium text-slate-800 text-xs">{mode === "client" ? form.client.stateCode : form.vendor.stateCode}</p></div>}
-                    <div className={`${(mode === "client" ? form.client.stateCode : form.vendor.stateCode) ? "" : "sm:col-span-2"}`}><p className="text-[10px] text-slate-500 mb-0.5">Address</p><p className="font-medium text-slate-800 text-xs">{(mode === "client" ? form.client.address : form.vendor.address) || "—"}</p></div>
+                    <div className={`${(mode === "client" ? form.client.stateCode : form.vendor.stateCode) ? "" : "sm:col-span-2"}`}><p className="text-[10px] text-slate-500 mb-0.5">Default Address</p><p className="font-medium text-slate-800 text-xs">{selectedEntity?.defaultAddress?.address || selectedEntity?.address || "—"}</p></div>
+                    <div className="sm:col-span-2"><p className="text-[10px] text-slate-500 mb-0.5">Tax Details</p><div className="flex flex-wrap gap-1.5">{selectedEntityTaxDetails.length > 0 ? selectedEntityTaxDetails.map((tax) => <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">{tax.label}: {tax.taxNumber}</span>) : <p className="font-medium text-slate-800 text-xs">—</p>}</div></div>
                   </div>
                 </div>
               )}
@@ -745,9 +988,9 @@ export default function PurchaseOrderPage() {
                           if (e.target.checked && form.client?._id) {
                             set("deliverTo", {
                               _id: form.client._id,
-                              name: form.client.name,
-                              address: form.client.address,
-                              stateCode: form.client.stateCode,
+                              name: form.client.defaultAddress?.name || form.client.name,
+                              address: form.client.defaultAddress?.address || form.client.address,
+                              stateCode: form.client.defaultAddress?.stateCode || form.client.stateCode,
                               GSTIN: form.client.GSTIN
                             });
                           }
@@ -760,6 +1003,42 @@ export default function PurchaseOrderPage() {
 
                   {!sameAsDeliverTo && (
                     <div className={`p-3 rounded-md border ${colors.bg} ${colors.border} space-y-3`}>
+                      <div className="relative">
+                        <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Search Ship To Address</label>
+                        <input
+                          type="text"
+                          placeholder="Search by label, address, state code, GSTIN..."
+                          value={deliverToSearch}
+                          onChange={(e) => { setDeliverToSearch(e.target.value); setDeliverToDropdownOpen(true); }}
+                          onFocus={() => setDeliverToDropdownOpen(true)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
+                        />
+                        {deliverToDropdownOpen && filteredDeliverToOptions.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-md shadow-lg z-50 max-h-56 overflow-y-auto">
+                            {filteredDeliverToOptions.map((address, idx) => (
+                              <button
+                                key={`${address._id || "address"}-${idx}`}
+                                onClick={() => {
+                                  set("deliverTo", address);
+                                  setDeliverToSearch(address.label || address.name || address.address);
+                                  setDeliverToDropdownOpen(false);
+                                }}
+                                className="w-full text-left px-3 py-2 hover:bg-slate-50 border-b border-slate-100 last:border-b-0 transition"
+                              >
+                                <div className="font-medium text-slate-800 text-xs">{address.label || address.name || `Address ${idx + 1}`}</div>
+                                <div className="text-[10px] text-slate-500 mt-0.5">{address.address || "No address"}</div>
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {getTaxDisplay(address).length > 0 ? getTaxDisplay(address).map((tax) => (
+                                    <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-600">
+                                      {tax.label}: {tax.taxNumber}
+                                    </span>
+                                  )) : <span className="text-[10px] text-slate-400">No Tax ID</span>}
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Name</label>
                         <input 
@@ -802,6 +1081,16 @@ export default function PurchaseOrderPage() {
                           />
                         </div>
                       </div>
+                      <div>
+                        <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Selected Address Tax Details</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {getTaxDisplay(form.deliverTo).length > 0 ? getTaxDisplay(form.deliverTo).map((tax) => (
+                            <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">
+                              {tax.label}: {tax.taxNumber}
+                            </span>
+                          )) : <span className="text-xs text-slate-500">No saved tax details for this ship-to address.</span>}
+                        </div>
+                      </div>
                     </div>
                   )}
 
@@ -813,6 +1102,7 @@ export default function PurchaseOrderPage() {
                         <div><p className="text-[10px] text-slate-500 mb-0.5">GSTIN</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.GSTIN || "—"}</p></div>
                         {form.deliverTo.stateCode && <div><p className="text-[10px] text-slate-500 mb-0.5">State Code</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.stateCode}</p></div>}
                         <div className={`${form.deliverTo.stateCode ? "" : "sm:col-span-2"}`}><p className="text-[10px] text-slate-500 mb-0.5">Address</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.address || "—"}</p></div>
+                        <div className="sm:col-span-2"><p className="text-[10px] text-slate-500 mb-0.5">Tax Details</p><div className="flex flex-wrap gap-1.5">{getTaxDisplay(form.deliverTo).length > 0 ? getTaxDisplay(form.deliverTo).map((tax) => <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">{tax.label}: {tax.taxNumber}</span>) : <p className="font-medium text-slate-800 text-xs">—</p>}</div></div>
                       </div>
                     </div>
                   )}
@@ -856,7 +1146,7 @@ export default function PurchaseOrderPage() {
                     <div className="col-span-1">Unit</div>
                     <div className="col-span-1">{getRateLabel()}</div>
                     <div className="col-span-1">GST %</div>
-                    <div className="col-span-2">Total (₹)</div>
+                    <div className="col-span-2">{`Total (${currencySymbol})`}</div>
                     <div className="col-span-1"></div>
                   </div>
                   {form.items.map((item, i) => (
@@ -887,17 +1177,18 @@ export default function PurchaseOrderPage() {
                       </div>
                       <div className="sm:col-span-1"><input type="number" min="0" value={item.rate} onChange={(e) => updateItem(i, "rate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
                       <div className="sm:col-span-1"><input type="number" min="0" max="28" value={item.gstRate} onChange={(e) => updateItem(i, "gstRate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
-                      <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
+                      <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">{formatMoney(item.totalAmount ?? item.total)}</span></div>
                       <div className="sm:col-span-1 flex justify-end">{form.items.length > 1 && <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={15} /></button>}</div>
                     </div>
                   ))}
                   <div className="px-4 py-3 border-b border-slate-100"><button onClick={addItem} className={`flex items-center gap-1.5 text-sm text-slate-400 transition ${colors.dashed}`}><Plus size={14} /> Add Line Item</button></div>
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl px-4 py-4 space-y-1.5 text-sm">
-                  <div className="flex justify-between text-slate-600"><span>Subtotal (taxable)</span><span>₹ {form.totalTaxableValue?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>CGST</span><span>₹ {form.totalCGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>SGST</span><span>₹ {form.totalSGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
-                  <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200"><span>Total</span><span>₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>Subtotal (taxable)</span><span>{formatMoney(form.totalTaxableValue)}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>CGST</span><span>{formatMoney(form.totalCGSTAmount)}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>SGST</span><span>{formatMoney(form.totalSGSTAmount)}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>IGST</span><span>{formatMoney(form.totalIGSTAmount)}</span></div>
+                  <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200"><span>Total</span><span>{formatMoney(form.totalAmount)}</span></div>
                 </div>
               </div>
             </div>
@@ -969,7 +1260,7 @@ export default function PurchaseOrderPage() {
                       <div className="col-span-4">Milestone Name</div>
                       <div className="col-span-2">Due Date</div>
                       <div className="col-span-2">Percentage (%)</div>
-                      <div className="col-span-2">Amount (₹)</div>
+                      <div className="col-span-2">{`Amount (${currencySymbol})`}</div>
                       <div className="col-span-2">Description</div>
                       <div className="col-span-1"></div>
                     </div>
@@ -1052,7 +1343,7 @@ export default function PurchaseOrderPage() {
                             <tr className="border-b border-slate-200">
                               <th className="px-2 py-1.5 text-left font-medium text-slate-600">Milestone</th>
                               <th className="px-2 py-1.5 text-right font-medium text-slate-600">%</th>
-                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">Amount (₹)</th>
+                              <th className="px-2 py-1.5 text-right font-medium text-slate-600">{`Amount (${currencySymbol})`}</th>
                               <th className="px-2 py-1.5 text-left font-medium text-slate-600">Due Date</th>
                             </tr>
                           </thead>
@@ -1061,7 +1352,7 @@ export default function PurchaseOrderPage() {
                               <tr key={idx} className="border-b border-slate-200 last:border-b-0">
                                 <td className="px-2 py-1.5 text-slate-700">{item.period}</td>
                                 <td className="px-2 py-1.5 text-right text-slate-600">{item.percentage}%</td>
-                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
                                 <td className="px-2 py-1.5 text-slate-600">{item.dueDate ? dayjs(item.dueDate).format("DD MMM YYYY") : "—"}</td>
                               </tr>
                             ))}
@@ -1069,7 +1360,7 @@ export default function PurchaseOrderPage() {
                         </table>
                       </div>
                       <div className="mt-2 text-right text-xs font-semibold text-slate-800">
-                        Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        {`Total: ${formatMoney(form.totalAmount)}`}
                       </div>
                     </div>
                   )}
@@ -1085,12 +1376,12 @@ export default function PurchaseOrderPage() {
                     {distributionBreakdown.length > 0 && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
-                          <thead><tr className="border-b border-blue-200"><th className="px-2 py-1.5 text-left font-medium text-blue-900">Month</th><th className="px-2 py-1.5 text-left font-medium text-blue-900">Period</th><th className="px-2 py-1.5 text-right font-medium text-blue-900">Amount (₹)</th></tr></thead>
-                          <tbody>{distributionBreakdown.map((item, idx) => (<tr key={idx} className="border-b border-blue-100 last:border-b-0"><td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td><td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td><td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>))}</tbody>
+                          <thead><tr className="border-b border-blue-200"><th className="px-2 py-1.5 text-left font-medium text-blue-900">Month</th><th className="px-2 py-1.5 text-left font-medium text-blue-900">Period</th><th className="px-2 py-1.5 text-right font-medium text-blue-900">{`Amount (${currencySymbol})`}</th></tr></thead>
+                          <tbody>{distributionBreakdown.map((item, idx) => (<tr key={idx} className="border-b border-blue-100 last:border-b-0"><td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td><td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td><td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td></tr>))}</tbody>
                         </table>
                       </div>
                     )}
-                    <div className="mt-2 text-right text-xs font-semibold text-slate-800">Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+                    <div className="mt-2 text-right text-xs font-semibold text-slate-800">{`Total: ${formatMoney(form.totalAmount)}`}</div>
                   </div>
                 </div>
               )}
@@ -1104,12 +1395,12 @@ export default function PurchaseOrderPage() {
                     {distributionBreakdown.length > 0 && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
-                          <thead><tr className="border-b border-blue-200"><th className="px-2 py-1.5 text-left font-medium text-blue-900">Week</th><th className="px-2 py-1.5 text-left font-medium text-blue-900">Period</th><th className="px-2 py-1.5 text-right font-medium text-blue-900">Amount (₹)</th></tr></thead>
-                          <tbody>{distributionBreakdown.map((item, idx) => (<tr key={idx} className="border-b border-blue-100 last:border-b-0"><td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td><td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td><td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>))}</tbody>
+                          <thead><tr className="border-b border-blue-200"><th className="px-2 py-1.5 text-left font-medium text-blue-900">Week</th><th className="px-2 py-1.5 text-left font-medium text-blue-900">Period</th><th className="px-2 py-1.5 text-right font-medium text-blue-900">{`Amount (${currencySymbol})`}</th></tr></thead>
+                          <tbody>{distributionBreakdown.map((item, idx) => (<tr key={idx} className="border-b border-blue-100 last:border-b-0"><td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td><td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td><td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td></tr>))}</tbody>
                         </table>
                       </div>
                     )}
-                    <div className="mt-2 text-right text-xs font-semibold text-slate-800">Total: ₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</div>
+                    <div className="mt-2 text-right text-xs font-semibold text-slate-800">{`Total: ${formatMoney(form.totalAmount)}`}</div>
                   </div>
                 </div>
               )}
@@ -1142,16 +1433,26 @@ export default function PurchaseOrderPage() {
                       <p className="font-medium text-slate-800">{mode === "client" ? form.client.name : form.vendor.name}</p>
                     </div>
                     <div>
-                      <p className="text-slate-600">GSTIN</p>
-                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.GSTIN : form.vendor.GSTIN || "—"}</p>
+                      <p className="text-slate-600">Currency</p>
+                      <p className="font-medium text-slate-800">{currencySymbol} {currencyCode} {currencyName}</p>
                     </div>
                     <div className="col-span-2">
-                      <p className="text-slate-600">Address</p>
-                      <p className="font-medium text-slate-800">{mode === "client" ? form.client.address : form.vendor.address}</p>
+                      <p className="text-slate-600">Default Address</p>
+                      <p className="font-medium text-slate-800">{selectedEntity?.defaultAddress?.address || selectedEntity?.address || "—"}</p>
                     </div>
                     <div>
                       <p className="text-slate-600">State Code</p>
                       <p className="font-medium text-slate-800">{mode === "client" ? form.client.stateCode : form.vendor.stateCode}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-slate-600">Tax Details</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {selectedEntityTaxDetails.length > 0 ? selectedEntityTaxDetails.map((tax) => (
+                          <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">
+                            {tax.label}: {tax.taxNumber}
+                          </span>
+                        )) : <p className="font-medium text-slate-800">—</p>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1186,6 +1487,16 @@ export default function PurchaseOrderPage() {
                       <div>
                         <p className="text-slate-600">GSTIN</p>
                         <p className="font-medium text-slate-800">{form.deliverTo.GSTIN || "—"}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-slate-600">Tax Details</p>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {getTaxDisplay(form.deliverTo).length > 0 ? getTaxDisplay(form.deliverTo).map((tax) => (
+                            <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">
+                              {tax.label}: {tax.taxNumber}
+                            </span>
+                          )) : <p className="font-medium text-slate-800">—</p>}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1252,9 +1563,9 @@ export default function PurchaseOrderPage() {
                               <td className="px-2 py-1.5 text-slate-700">{item.description}</td>
                               <td className="px-2 py-1.5 text-center text-slate-700">{item.quantity}</td>
                               <td className="px-2 py-1.5 text-center text-slate-700 capitalize">{item.unit || "each"}</td>
-                              <td className="px-2 py-1.5 text-right text-slate-700">₹ {item.rate?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                              <td className="px-2 py-1.5 text-right text-slate-700">{formatMoney(item.rate)}</td>
                               <td className="px-2 py-1.5 text-right text-slate-700">{item.gstRate}%</td>
-                              <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.total?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                              <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.totalAmount ?? item.total)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1266,15 +1577,15 @@ export default function PurchaseOrderPage() {
                   <div className="border-t border-slate-200 pt-2 space-y-1 text-xs">
                     <div className="flex justify-between">
                       <span className="text-slate-600">Taxable Value</span>
-                      <span className="font-medium text-slate-800">₹ {form.totalTaxableValue?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                      <span className="font-medium text-slate-800">{formatMoney(form.totalTaxableValue)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-600">GST Amount</span>
-                      <span className="font-medium text-slate-800">₹ {form.totalGSTAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                      <span className="text-slate-600">{getTaxLabel()}</span>
+                      <span className="font-medium text-slate-800">{formatMoney(form.totalGSTAmount)}</span>
                     </div>
                     <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
                       <span className="font-semibold text-slate-800">Total Amount</span>
-                      <span className="font-semibold text-slate-800">₹ {form.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span>
+                      <span className="font-semibold text-slate-800">{formatMoney(form.totalAmount)}</span>
                     </div>
                     <div className="flex justify-between pt-1 italic text-slate-600">
                       <span>In Words</span>
@@ -1320,7 +1631,7 @@ export default function PurchaseOrderPage() {
                               <tr key={idx} className="border-b border-slate-200 last:border-b-0">
                                 <td className="px-2 py-1.5 text-slate-700">{item.period}</td>
                                 <td className="px-2 py-1.5 text-right text-slate-600">{item.percentage}%</td>
-                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
                                 <td className="px-2 py-1.5 text-slate-600">{item.dueDate ? dayjs(item.dueDate).format("DD MMM YYYY") : "—"}</td>
                               </tr>
                             ))}
@@ -1348,7 +1659,7 @@ export default function PurchaseOrderPage() {
                               <tr key={idx} className="border-b border-slate-200 last:border-b-0">
                                 <td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td>
                                 <td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td>
-                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
                               </tr>
                             ))}
                           </tbody>
@@ -1375,7 +1686,7 @@ export default function PurchaseOrderPage() {
                               <tr key={idx} className="border-b border-slate-200 last:border-b-0">
                                 <td className="px-2 py-1.5 font-medium text-slate-800">{item.period}</td>
                                 <td className="px-2 py-1.5 text-slate-600">{item.startDate} – {item.endDate}</td>
-                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.amount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                                <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.amount)}</td>
                               </tr>
                             ))}
                           </tbody>
