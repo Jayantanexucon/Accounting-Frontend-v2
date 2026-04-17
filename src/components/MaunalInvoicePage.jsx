@@ -121,71 +121,80 @@ const getMilestoneInvoiceRows = (po) => {
 };
 
 // ==================================================================================
-// FIX 2: CALCULATE MONTHLY TERM SCHEDULE
+// FIX 2: CALCULATE TERM SCHEDULE (MONTHLY OR WEEKLY)
 // ==================================================================================
 /**
- * For monthly-based POs:
- * - Calculates total months between PO date and due date
- * - Determines current month based on linked invoices
- * - Calculates monthly amount (total / months)
+ * For term-based POs (monthly or weekly):
+ * - Calculates total terms between PO date and delivery date
+ * - Determines current term based on linked invoices
+ * - Calculates installment amount (total / installments)
  */
-const calculateMonthlyTermSchedule = (po = {}) => {
+const calculateTermSchedule = (po = {}) => {
   const startDate = new Date(po.poDate);
   const endDate = new Date(po.deliveryDate || po.dueDate);
+  const paymentTerms = po.paymentTerms || "monthly";
 
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
     return {
-      totalMonths: 1,
-      currentMonth: 1,
-      monthlyAmount: po.totalAmount || 0,
-      monthLabel: "Monthly",
+      totalInstallments: 1,
+      currentInstallment: 1,
+      installmentAmount: po.totalAmount || 0,
+      label: "General",
       termStartDate: new Date(),
       termEndDate: new Date(),
     };
   }
 
-  // Calculate total months between dates (inclusive)
-  const totalMonths = Math.max(1, Math.ceil(
-    (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-    (endDate.getMonth() - startDate.getMonth()) + 1
-  ));
+  let totalInstallments = 1;
+  if (paymentTerms === "monthly") {
+    // Calculate total months between dates (inclusive)
+    totalInstallments = Math.max(1, Math.ceil(
+      (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+      (endDate.getMonth() - startDate.getMonth()) + 1
+    ));
+  } else if (paymentTerms === "weekly") {
+    // Calculate total weeks (7-day blocks)
+    const diffTime = Math.abs(endDate - startDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    totalInstallments = Math.max(1, Math.ceil(diffDays / 7));
+  }
 
-  // Current month = number of linked invoices + 1, capped at totalMonths
+  // Current term = number of linked invoices + 1, capped at totalInstallments
   const linkedInvoices = Array.isArray(po.linkedInvoices) ? po.linkedInvoices : [];
-  const currentMonth = Math.min(totalMonths, linkedInvoices.length + 1);
+  const currentInstallment = Math.min(totalInstallments, linkedInvoices.length + 1);
 
-  // Monthly amount is total amount divided by total months
-  const monthlyAmount = roundMoney(Number(po.totalAmount || 0) / Math.max(1, totalMonths));
+  // Installment amount is total amount divided by total installments
+  const installmentAmount = roundMoney(Number(po.totalAmount || 0) / Math.max(1, totalInstallments));
 
   return {
-    totalMonths,
-    currentMonth,
-    monthlyAmount,
-    monthLabel: `Monthly (Month ${currentMonth} of ${totalMonths})`,
+    totalInstallments,
+    currentInstallment,
+    installmentAmount,
+    label: `${paymentTerms === "monthly" ? "Month" : "Week"} ${currentInstallment} of ${totalInstallments}`,
     termStartDate: startDate,
     termEndDate: endDate,
   };
 };
 
 // ==================================================================================
-// FIX 3: CHECK FOR PARTIAL MONTHLY INVOICE (carry-forward)
+// FIX 3: CHECK FOR PARTIAL TERM INVOICE (carry-forward)
 // ==================================================================================
 /**
- * For monthly POs, computes how much from previous months is still un-invoiced.
- * Logic: expected invoiced = (completedMonths * monthlyAmount), actual = totalInvoicedAmount
- * If actual < expected, there is carry-forward from previous incomplete months.
+ * For term-based POs, computes how much from previous terms is still un-invoiced.
+ * Logic: expected invoiced = (completedTerms * installmentAmount), actual = totalInvoicedAmount
+ * If actual < expected, there is carry-forward from previous incomplete terms.
  */
-const getPartialMonthlyCarryForward = (po = {}, monthlySchedule = {}) => {
+const getPartialTermCarryForward = (po = {}, schedule = {}) => {
   const totalInvoiced = Number(po.totalInvoicedAmount || 0);
-  const completedMonths = Math.max(0, monthlySchedule.currentMonth - 1);
-  const expectedInvoiced = roundMoney(completedMonths * (monthlySchedule.monthlyAmount || 0));
+  const completedTerms = Math.max(0, schedule.currentInstallment - 1);
+  const expectedInvoiced = roundMoney(completedTerms * (schedule.installmentAmount || 0));
 
   const carryForwardAmount = roundMoney(Math.max(0, expectedInvoiced - totalInvoiced));
 
   if (carryForwardAmount > 0) {
     return {
       remainingAmount: carryForwardAmount,
-      fromBillingMonth: completedMonths,
+      fromBillingTerm: completedTerms,
     };
   }
 
@@ -1593,6 +1602,11 @@ const ManualInvoicePage = () => {
     // CASE 1 – MILESTONE billing (FIXED: uses linked invoices)
     // ──────────────────────────────────────────────────────────
     if (billingModel === "milestone" && Array.isArray(selectedPO.milestones) && selectedPO.milestones.length > 0) {
+      // 1. Determine default HSN and GST rate from PO items if possible
+      const firstItem = selectedPO.items?.[0] || {};
+      const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
+      const defaultGstRate = Number(firstItem.gstRate || 0);
+
       // Helper: compute how much of a milestone has already been invoiced
       const getInvoicedAmountForMilestone = (milestoneId) => {
         const linkedInvoices = selectedPO.linkedInvoices || [];
@@ -1670,9 +1684,9 @@ const ManualInvoicePage = () => {
         remainingAmountBefore: m._remaining,
         remainingAmountAfter: 0,
         amount: m._remaining,
-        hsnSac: "",
-        gstRate: 0,
-        gstAmount: 0,
+        hsnSac: defaultHsn,
+        gstRate: defaultGstRate,
+        gstAmount: defaultGstRate > 0 ? roundMoney((m._remaining * defaultGstRate) / (100 + defaultGstRate)) : 0,
         total: m._remaining,
         selected: true,
         isCarryForward: m._isCarryForward,
@@ -1697,81 +1711,88 @@ const ManualInvoicePage = () => {
       }));
     }
     // ──────────────────────────────────────────────────────────
-    // CASE 2 – MONTHLY billing (project/fixed PO billed monthly)
-    // Only applies to non-staffing POs with monthly billing model
+    // CASE 2 – TERM-BASED billing (monthly / weekly)
     // ──────────────────────────────────────────────────────────
-    else if (billingModel === "monthly" && poCategory !== "staffing") {
-      const monthlySchedule = calculateMonthlyTermSchedule(selectedPO);
+    else if ((selectedPO.paymentTerms === "monthly" || selectedPO.paymentTerms === "weekly") && poCategory !== "staffing") {
+      const schedule = calculateTermSchedule(selectedPO);
 
-      if (monthlySchedule.currentMonth > monthlySchedule.totalMonths) {
-        setError("All monthly installments for this PO are already invoiced.");
+      if (schedule.currentInstallment > schedule.totalInstallments) {
+        setError(`All ${selectedPO.paymentTerms} installments for this PO are already invoiced.`);
         setPoDropdownOpen(false);
         return;
       }
 
-      // CHECK FOR PARTIAL INVOICE CARRY-FORWARD from previous months
-      const carryForward = getPartialMonthlyCarryForward(selectedPO, monthlySchedule);
+      // Detect default HSN/GST from items
+      const firstItem = selectedPO.items?.[0] || {};
+      const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
+      const defaultGstRate = Number(firstItem.gstRate || 0);
+
+      // CHECK FOR PARTIAL INVOICE CARRY-FORWARD from previous terms
+      const carryForward = getPartialTermCarryForward(selectedPO, schedule);
 
       const items = selectedPO.items || [];
       const hasItems = items.length > 0;
 
       if (hasItems) {
-        // Build per-item monthly portions
+        // Build per-item term portions
         derivedItems = items.map((item) => {
           const baseTotal = Number(item.totalAmount || item.total || 0);
-          const monthlyPortionBase = roundMoney(baseTotal / monthlySchedule.totalMonths);
+          const termPortionBase = roundMoney(baseTotal / schedule.totalInstallments);
 
           const gstRate = Number(item.gstRate || 0);
-          const monthlyTaxable = gstRate > 0
-            ? roundMoney(monthlyPortionBase / (1 + gstRate / 100))
-            : monthlyPortionBase;
-          const monthlyGst = roundMoney(monthlyPortionBase - monthlyTaxable);
+          const termTaxable = gstRate > 0
+            ? roundMoney(termPortionBase / (1 + gstRate / 100))
+            : termPortionBase;
+          const termGst = roundMoney(termPortionBase - termTaxable);
 
           return {
             itemId: item.itemId || item._id,
             poItemId: item.itemId || item._id,
-            description: `${item.description || ""} (Month ${monthlySchedule.currentMonth}/${monthlySchedule.totalMonths})`,
+            description: `${item.description || ""} (${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment}/${schedule.totalInstallments})`,
             hsnSac: item.hsnSac || item.hsnCode || "",
             quantity: 1,
             baseQuantity: Number(item.quantity || 0),
             baseRate: Number(item.rate || 0),
             poRemainingQuantity: getRemainingPOItemQuantity(item),
-            rate: monthlyPortionBase,
-            taxableValue: monthlyTaxable,
+            rate: termPortionBase,
+            taxableValue: termTaxable,
             gstRate,
-            gstAmount: monthlyGst,
-            total: monthlyPortionBase,
+            gstAmount: termGst,
+            total: termPortionBase,
             combinedGstRate: item.combinedGstRate || gstRate,
             totalManuallyEdited: false,
-            isMonthlyPortion: true,
+            isTermPortion: true,
           };
         });
       } else {
-        // No line items – use totalAmount divided by months
-        const monthlyTotal = monthlySchedule.monthlyAmount;
+        // No line items – use totalAmount divided by terms
+        const termTotal = schedule.installmentAmount;
+        const termTaxable = defaultGstRate > 0 ? roundMoney(termTotal / (1 + defaultGstRate / 100)) : termTotal;
+        const termGst = roundMoney(termTotal - termTaxable);
+
         derivedItems = [{
-          itemId: "monthly-" + monthlySchedule.currentMonth,
+          itemId: "term-" + schedule.currentInstallment,
           poItemId: "",
-          description: `Services – Month ${monthlySchedule.currentMonth} of ${monthlySchedule.totalMonths}`,
-          hsnSac: "",
+          description: `Services – ${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment} of ${schedule.totalInstallments}`,
+          hsnSac: defaultHsn,
           quantity: 1,
-          rate: monthlyTotal,
-          taxableValue: monthlyTotal,
-          gstRate: 0,
-          gstAmount: 0,
-          total: monthlyTotal,
-          combinedGstRate: 0,
+          rate: termTotal,
+          taxableValue: termTaxable,
+          gstRate: defaultGstRate,
+          gstAmount: termGst,
+          total: termTotal,
+          combinedGstRate: defaultGstRate,
           totalManuallyEdited: false,
-          isMonthlyPortion: true,
+          isTermPortion: true,
         }];
       }
 
-      // Prepend carry-forward line if any previous month had a shortfall
+      // Prepend carry-forward line if any previous term had a shortfall
       if (carryForward) {
         derivedItems.unshift({
-          itemId: "carryforward-m" + carryForward.fromBillingMonth,
+          itemId: "carryforward-t" + carryForward.fromBillingTerm,
           poItemId: "carryforward",
-          description: `Carry-forward balance from Month ${carryForward.fromBillingMonth}`,
+          description: `Carry-forward balance from previous terms`,
           quantity: 1,
           rate: carryForward.remainingAmount,
           taxableValue: carryForward.remainingAmount,
@@ -1785,8 +1806,8 @@ const ManualInvoicePage = () => {
       }
 
       paymentTermSchedule = {
-        ...monthlySchedule,
-        label: monthlySchedule.monthLabel,
+        ...schedule,
+        label: schedule.label,
       };
     }
 
@@ -1800,6 +1821,11 @@ const ManualInvoicePage = () => {
       const billingUnitLabel = billingModel === "daily" ? "Days"
         : billingModel === "hourly" ? "Hours"
           : "Months";
+
+      // Detect default HSN/GST from items
+      const firstItem = selectedPO.items?.[0] || {};
+      const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
+      const defaultGstRate = Number(firstItem.gstRate || 0);
 
       const rows = selectedPO.resources
         .filter((r) => r.isActive !== false)
@@ -1818,11 +1844,11 @@ const ManualInvoicePage = () => {
             billingUnit: billingUnitLabel,
             rate,
             quantity: 1, // user enters actual days/hours/months
-            hsnSac: "",
-            gstRate: 0,
-            gstAmount: 0,
-            taxableValue: rate * 1,
-            total: rate * 1,
+            hsnSac: defaultHsn,
+            gstRate: defaultGstRate,
+            gstAmount: defaultGstRate > 0 ? roundMoney((rate * defaultGstRate) / (100 + defaultGstRate)) : 0,
+            taxableValue: defaultGstRate > 0 ? roundMoney(rate / (1 + defaultGstRate / 100)) : rate,
+            total: rate,
           };
         });
 
