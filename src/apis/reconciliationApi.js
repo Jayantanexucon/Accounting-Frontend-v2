@@ -7,6 +7,13 @@ export const getReconciliationOverviewApi = async (companyId, params = {}) => {
   return data;
 };
 
+export const getMonthlyReconciliationReportApi = async (companyId, params = {}) => {
+  const { data } = await API.get(`/accounting/bank-reconciliation/report/monthly/${companyId}`, {
+    params,
+  });
+  return data;
+};
+
 export const uploadBankStatementApi = async (payload) => {
   const { data } = await API.post("/accounting/bank-reconciliation/bank/import", payload);
   return data;
