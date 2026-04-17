@@ -1,0 +1,152 @@
+/* Tally-Style Report Print Styles */
+
+@media print {
+  /* Page setup */
+  @page {
+    margin: 0.5cm;
+    size: A4 landscape;
+  }
+
+  /* Hide non-printable elements */
+  .print\:hidden,
+  button,
+  input,
+  select {
+    display: none !important;
+  }
+
+  /* Reset page */
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 9pt !important;
+  }
+
+  /* Ensure content fits on page */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Table styles */
+  table {
+    page-break-inside: auto;
+    border-collapse: collapse !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  /* Ensure borders are visible */
+  th,
+  td {
+    border: 1px solid #cbd5e1 !important;
+    padding: 4px 8px !important;
+  }
+
+  /* Header styling */
+  thead th {
+    background-color: #f1f5f9 !important;
+    font-weight: bold !important;
+  }
+
+  /* Alternating row colors */
+  tbody tr:nth-child(even) {
+    background-color: #f8fafc !important;
+  }
+
+  tbody tr:nth-child(odd) {
+    background-color: white !important;
+  }
+
+  /* Total row highlighting */
+  tfoot tr {
+    background-color: #fef9c3 !important;
+    font-weight: bold !important;
+    border-top: 2px solid #64748b !important;
+  }
+
+  /* Status colors - keep them visible */
+  .bg-emerald-50,
+  .text-emerald-700 {
+    color: #059669 !important;
+  }
+
+  .bg-amber-50,
+  .text-amber-700 {
+    color: #d97706 !important;
+  }
+
+  .bg-rose-50,
+  .text-rose-700 {
+    color: #dc2626 !important;
+  }
+
+  /* Remove shadows */
+  * {
+    box-shadow: none !important;
+  }
+
+  /* Compact spacing for print */
+  .space-y-4 > * + * {
+    margin-top: 0.5rem !important;
+  }
+
+  /* Adjust font sizes */
+  h1,
+  h2,
+  h3 {
+    font-size: 11pt !important;
+  }
+
+  /* Make sure numbers are right-aligned */
+  td[class*="text-right"] {
+    text-align: right !important;
+  }
+
+  /* Summary boxes */
+  .border-slate-300 {
+    border-color: #94a3b8 !important;
+  }
+
+  .bg-slate-100 {
+    background-color: #f1f5f9 !important;
+  }
+
+  /* Ensure page breaks work properly */
+  .page-break-before {
+    page-break-before: always;
+  }
+
+  .page-break-after {
+    page-break-after: always;
+  }
+
+  .page-break-avoid {
+    page-break-inside: avoid;
+  }
+}
+
+/* Screen-only styles for better on-screen viewing */
+@media screen {
+  /* Smooth hover effects */
+  tbody tr:hover {
+    background-color: #fef3c7 !important;
+    transition: background-color 0.15s ease;
+  }
+
+  /* Table scrolling */
+  .overflow-x-auto {
+    overflow-x: auto;
+  }
+}
