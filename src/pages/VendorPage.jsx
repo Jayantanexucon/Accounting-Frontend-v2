@@ -18,7 +18,6 @@ export default function VendorPage() {
   const { user } = useAuth();
   const companyId = user?.company?._id;
 
-  const [selectedVendor, setSelectedVendor] = useState(null);
   const [openForm, setOpenForm]             = useState(false);
   const [editData, setEditData]             = useState(null);
   const [searchTerm, setSearchTerm]         = useState("");
@@ -165,7 +164,7 @@ export default function VendorPage() {
                 {/* New Vendor — same gradient + glow as HomePage CTA */}
                 {checkAuthorization(user, "VENDOR", "CREATE") && (
                   <button
-                    onClick={() => { setEditData(null); setOpenForm(true); setSelectedVendor(null); }}
+                    onClick={() => { setEditData(null); setOpenForm(true); }}
                     className="flex items-center gap-1.5 px-4 py-2.5 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all"
                     style={{
                       background: "linear-gradient(135deg,#1e40af,#3b82f6)",
@@ -331,14 +330,9 @@ export default function VendorPage() {
             {!loading && checkAuthorization(user, "VENDOR", "VIEW") && filteredVendors.length > 0 && (
               <VendorTable
                 vendors={filteredVendors}
-                selectedVendor={selectedVendor}
-                onSelect={(vendorId) =>
-                  setSelectedVendor(selectedVendor === vendorId ? null : vendorId)
-                }
                 onEdit={(v) => {
                   setEditData(v);
                   setOpenForm(true);
-                  setSelectedVendor(null);
                 }}
               />
             )}
@@ -428,7 +422,6 @@ export default function VendorPage() {
                 onSuccess={() => {
                   setOpenForm(false);
                   setEditData(null);
-                  setSelectedVendor(null);
                   refreshVendors();
                 }}
               />

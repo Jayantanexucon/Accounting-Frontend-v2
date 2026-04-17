@@ -18,7 +18,6 @@ export default function ClientPage() {
     ? JSON.parse(localStorage.getItem("selectedCompany"))
     : null;
 
-  const [expandedId, setExpandedId]   = useState(null);
   const [selectedClient, setSelectedClient] = useState(null);
   const [searchTerm, setSearchTerm]   = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -60,8 +59,6 @@ const activeCount = clientData.filter((c) => c.isActive).length;
   const hasActiveFilters = searchTerm || statusFilter !== "all" || countryFilter !== "all";
 
   const toggleModal  = useCallback((key) => setOpenModal((p) => ({ ...p, [key]: !p[key] })), []);
-  const toggleClient = useCallback((id) => setExpandedId((p) => (p === id ? null : id)), []);
-
   const handleEditClient = (client) => {
     setSelectedClient(client);
     toggleModal("editClient");
@@ -222,8 +219,6 @@ const activeCount = clientData.filter((c) => c.isActive).length;
               <ClientComponent
                 key={client._id}
                 client={client}
-                expanded={expandedId === client._id}
-                onToggle={toggleClient}
                 onEdit={handleEditClient}
               />
             ))}
