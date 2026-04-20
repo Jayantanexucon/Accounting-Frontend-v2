@@ -386,12 +386,13 @@ const PurchaseOrderData = () => {
       return;
     }
     try {
-      const clientRes = await getClientsApi(companyId);
+      // Fetch all clients (global master data) - no companyId filter
+      const clientRes = await getClientsApi();
       const clientsList = Array.isArray(clientRes?.data) ? clientRes.data : [];
       setClients(clientsList.filter((c) => c.isActive !== false));
 
-      // Fetch vendors with enhanced address mapping
-      const vendorRes = await getVendors(companyId);
+      // Fetch all vendors (global master data) - no companyId filter
+      const vendorRes = await getVendors();
       let vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
       const normalizedVendors = vendorList.map((v) => {
         let address = v.address || v.vendorAddress || v.billingAddress?.line1 || v.registeredAddress || "";

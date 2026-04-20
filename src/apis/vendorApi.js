@@ -1,7 +1,7 @@
 import { API } from "./api";
 
-// GET ALL vendors of one company
-export const getVendors = (companyId) => API.get(`/masterData/vendor/${companyId}`);
+// GET ALL vendors (global master data - no companyId filter)
+export const getVendors = () => API.get(`/masterData/vendor`);
 
 // CREATE vendor (companyId needed)
 export const createVendor = (companyId, data) =>
@@ -27,8 +27,9 @@ export const deleteVendor = (vendorId) =>
 export const completeVendor = (vendorId) =>
   API.put(`/masterData/vendor/complete/${vendorId}`);
 
-export const getPaginatedVendors = async (companyId, page, limit) => {
-  const res = await API.get(`/masterData/vendor/${companyId}?page=${page}&limit=${limit}`);
+export const getPaginatedVendors = async (page, limit) => {
+  // Always fetch all vendors (global master data) - no companyId filter
+  const res = await API.get(`/masterData/vendor?page=${page}&limit=${limit}`);
   return res.data;
 };
 

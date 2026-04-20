@@ -109,15 +109,15 @@ export default function BulkPurchaseOrderPage() {
   const [dragActive, setDragActive] = useState(false);
   const [preselectedClient, setPreselectedClient] = useState(null);
 
-  // Fetch master data
+  // Fetch master data (global - no companyId filter)
   useEffect(() => {
-    if (!companyId) return;
     const fetchData = async () => {
       setLoadingData(true);
       try {
+        // Always fetch all data (global master data) - no companyId filter
         const [clientsRes, hsnRes] = await Promise.all([
-          getClientsApi(companyId),
-          getallhsn(companyId),
+          getClientsApi(),
+          getallhsn(),
         ]);
         setClients(clientsRes.data || []);
         setHsnList(hsnRes.data || []);
@@ -128,7 +128,7 @@ export default function BulkPurchaseOrderPage() {
       }
     };
     fetchData();
-  }, [companyId]);
+  }, []);
 
   // Find preselected client from the loaded clients list
   useEffect(() => {

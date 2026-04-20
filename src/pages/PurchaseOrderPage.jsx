@@ -373,7 +373,7 @@ export default function PurchaseOrderPage() {
           });
           setClients(normalized);
         } else {
-          const vendorRes = await getVendors(companyId);
+          const vendorRes = await getVendors();
           let vendorList = vendorRes.data?.data?.vendors || vendorRes.data?.vendors || [];
           const normalized = vendorList.map((v) => {
             const defaultAddress = v.defaultAddress || v.billingAddress || {};
@@ -413,18 +413,17 @@ export default function PurchaseOrderPage() {
   }, [companyId, mode]);
 
   useEffect(() => {
-    if (companyId) {
-      getallhsn(companyId)
-        .then(res => {
-          let hsnArray = [];
-          if (res?.data?.data) hsnArray = res.data.data;
-          else if (res?.data) hsnArray = res.data;
-          else if (Array.isArray(res)) hsnArray = res;
-          setHsnList(hsnArray);
-        })
-        .catch(console.error);
-    }
-  }, [companyId]);
+    // Always fetch all HSN codes (global master data) - no companyId filter
+    getallhsn()
+      .then(res => {
+        let hsnArray = [];
+        if (res?.data?.data) hsnArray = res.data.data;
+        else if (res?.data) hsnArray = res.data;
+        else if (Array.isArray(res)) hsnArray = res;
+        setHsnList(hsnArray);
+      })
+      .catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (companyId) {

@@ -18,7 +18,8 @@ export default function InvoiceGeneratorPage() {
   useEffect(() => {
     async function loadHsnData() {
       try {
-        const res = await getallhsn(user.company._id);
+        // Always fetch all HSN codes (global master data) - no companyId filter
+        const res = await getallhsn();
         setHsmList(res.data);
       } catch (err) {
         console.error("HSM load error:", err);
@@ -172,7 +173,8 @@ export default function InvoiceGeneratorPage() {
     async function getAllClients() {
       try {
         setLoading(true);
-        const response = await getClientsApi(user?.company?._id);
+        // Always fetch all clients (global master data) - no companyId filter
+        const response = await getClientsApi();
         setClients(response?.data || []);
       } catch (error) {
         console.error("fetch error:", error);
@@ -182,12 +184,10 @@ export default function InvoiceGeneratorPage() {
       }
     }
 
-    if (user?.company?._id) {
-      getAllClients();
-    }
+    getAllClients();
 
     return () => controller.abort();
-  }, [user?.company?._id]);
+  }, []);
 
   useEffect(() => {
     if (form.invoiceDate) {

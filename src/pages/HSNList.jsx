@@ -45,12 +45,12 @@ export default function HSNList() {
   const queryClient = useQueryClient();
 
   const { data: list = [], isLoading } = useQuery({
-    queryKey: ["hsn", companyId],
+    queryKey: ["hsn"],
     queryFn: async () => {
-      const r = await getallhsn(companyId);
+      // Always fetch all HSN codes (global master data) - no companyId filter
+      const r = await getallhsn();
       return r.data || [];
     },
-    enabled: !!companyId,
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
   });

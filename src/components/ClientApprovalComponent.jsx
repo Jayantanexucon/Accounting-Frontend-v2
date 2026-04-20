@@ -64,7 +64,8 @@ export default function ClientApprovalComponent({ open, onClose, refreshClients 
       if (!open) return;
       try {
         setLoading(true);
-        const res = await pendingApprovalClientApi(user?.company?._id, controller.signal);
+        // Always fetch all pending clients (global master data) - no companyId filter
+        const res = await pendingApprovalClientApi(controller.signal);
         const flat = res?.data?.flatMap((client) =>
           client.ref
             .filter((r) => r.status === "Pending")
