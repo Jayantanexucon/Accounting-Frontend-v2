@@ -21,7 +21,7 @@ import InvoiceCreatedModal from "../modals/InvoiceCreatedModal";
 import { toast } from "react-toastify";
 
 // Lucide Icons
-import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag } from "lucide-react";
+import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag, List } from "lucide-react";
 import { getCompanyByIdApi } from "../apis/userApi";
 
 const getRemainingPOItemQuantity = (item = {}) => {
@@ -71,7 +71,114 @@ const getDateDiffInDays = (start, end) => {
   const startDate = new Date(start);
   const endDate = new Date(end);
   if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return 0;
-  return Math.max(0, Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24)));
+  return Math.max(1, Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24)) + 1);
+};
+
+const formatDateInput = (dateLike) => {
+  const date = new Date(dateLike);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().split("T")[0];
+};
+
+const unwrapPurchaseOrderPayload = (response) =>
+  response?.data?.data || response?.data || response || null;
+
+const unwrapInvoicePayload = (response) =>
+  response?.data?.data || response?.data || response || null;
+
+const getOrderedLinkedInvoices = (po = {}) =>
+  [...(Array.isArray(po.linkedInvoices) ? po.linkedInvoices : [])].sort(
+    (a, b) => new Date(a?.invoiceDate || a?.createdAt || 0) - new Date(b?.invoiceDate || b?.createdAt || 0),
+  );
+
+const hydratePurchaseOrderInvoices = async (po = {}) => {
+  const linkedInvoices = Array.isArray(po.linkedInvoices) ? po.linkedInvoices.filter(Boolean) : [];
+  const invoiceIds = Array.isArray(po.invoiceIds) ? po.invoiceIds.filter(Boolean) : [];
+
+  if (linkedInvoices.length > 0 || invoiceIds.length === 0) {
+    return {
+      ...po,
+      linkedInvoices,
+    };
+  }
+
+  try {
+    const hydratedInvoices = await Promise.all(
+      invoiceIds.map(async (invoiceId) => {
+        const response = await getInvoiceByIdApi(invoiceId);
+        return unwrapInvoicePayload(response);
+      }),
+    );
+
+    return {
+      ...po,
+      linkedInvoices: hydratedInvoices.filter(Boolean),
+    };
+  } catch (error) {
+    console.warn("Failed to hydrate PO invoices:", error);
+    return po;
+  }
+};
+
+const normalizeDescription = (desc = "") => {
+  if (!desc) return "";
+  // Strip out suffix like "(Month 1/12)" or "(Week 2/52)"
+  return desc.replace(/\s*\((Month|Week)\s+\d+\/\d+\)\s*$/gi, "").trim();
+};
+
+const getPoItemMatchKeys = (item = {}, isInvoiceItem = false) => {
+  const keys = [
+    item.itemId,
+    item.poItemId,
+    item._id?.toString?.(),
+  ];
+
+  const desc = item.description?.trim?.();
+  if (desc) {
+    keys.push(desc);
+    // If it's an invoice item, it might have a term suffix. Add normalized version.
+    keys.push(normalizeDescription(desc));
+  }
+
+  return keys
+    .filter(Boolean)
+    .map((value) => String(value));
+};
+
+const getInvoicedTaxableAmountForPoItem = (invoices = [], poItem = {}) => {
+  const matchKeys = new Set(getPoItemMatchKeys(poItem));
+  if (matchKeys.size === 0) return 0;
+
+  return roundMoney(
+    invoices.reduce((invoiceSum, linkedInvoice) => {
+      const invoiceItems = Array.isArray(linkedInvoice.items) ? linkedInvoice.items : [];
+      const matchedItems = invoiceItems.filter((invoiceItem) =>
+        getPoItemMatchKeys(invoiceItem, true).some((key) => matchKeys.has(key)),
+      );
+
+      return (
+        invoiceSum +
+        matchedItems.reduce(
+          (sum, invoiceItem) => sum + Number(invoiceItem.taxableValue || 0),
+          0,
+        )
+      );
+    }, 0),
+  );
+};
+
+const getPoItemBaseTaxableAmount = (item = {}) => {
+  const explicitTaxable = Number(item.taxableValue || 0);
+  if (explicitTaxable > 0) return roundMoney(explicitTaxable);
+
+  const rate = Number(item.rate || 0);
+  const quantity = Number(item.quantity || 0);
+  if (rate > 0 && quantity > 0) return roundMoney(rate * quantity);
+
+  const totalAmount = Number(item.totalAmount || item.total || 0);
+  const gstRate = Number(item.gstRate || 0);
+  return gstRate > 0
+    ? roundMoney(totalAmount / (1 + gstRate / 100))
+    : roundMoney(totalAmount);
 };
 
 // ==================================================================================
@@ -82,13 +189,29 @@ const getDateDiffInDays = (start, end) => {
 // ==================================================================================
 const getMilestoneInvoiceRows = (po) => {
   const milestones = Array.isArray(po.milestones) ? po.milestones : [];
+  const linkedInvoices = getOrderedLinkedInvoices(po);
 
   const rows = [];
 
   // Phase 1: collect partially-invoiced milestones (invoiced > 0 but not fully)
   milestones.forEach((m, idx) => {
     const originalAmount = Number(m.amount || 0);
-    const alreadyInvoiced = Number(m.invoicedAmount || 0);
+    const alreadyInvoiced = roundMoney(
+      Math.max(
+        Number(m.invoicedAmount || 0),
+        linkedInvoices.reduce((sum, invoice) => {
+          const milestoneInInv = Array.isArray(invoice.milestones)
+            ? invoice.milestones.find(
+              (entry) =>
+                String(entry?.milestoneId || "") === String(m?._id || "") ||
+                String(entry?.title || "").trim() === String(m?.title || "").trim(),
+            )
+            : null;
+
+          return sum + Number(milestoneInInv?.invoicedAmount || milestoneInInv?.amount || 0);
+        }, 0),
+      ),
+    );
     const remaining = Math.max(0, originalAmount - alreadyInvoiced);
     if (alreadyInvoiced > 0 && remaining > 0) {
       rows.push({
@@ -103,7 +226,25 @@ const getMilestoneInvoiceRows = (po) => {
   });
 
   // Phase 2: find the NEXT fresh milestone (invoicedAmount === 0)
-  const nextFresh = milestones.findIndex((m) => Number(m.invoicedAmount || 0) === 0);
+  const nextFresh = milestones.findIndex((m) => {
+    const alreadyInvoiced = roundMoney(
+      Math.max(
+        Number(m.invoicedAmount || 0),
+        linkedInvoices.reduce((sum, invoice) => {
+          const milestoneInInv = Array.isArray(invoice.milestones)
+            ? invoice.milestones.find(
+              (entry) =>
+                String(entry?.milestoneId || "") === String(m?._id || "") ||
+                String(entry?.title || "").trim() === String(m?.title || "").trim(),
+            )
+            : null;
+
+          return sum + Number(milestoneInInv?.invoicedAmount || milestoneInInv?.amount || 0);
+        }, 0),
+      ),
+    );
+    return alreadyInvoiced === 0;
+  });
   if (nextFresh !== -1) {
     const m = milestones[nextFresh];
     const originalAmount = Number(m.amount || 0);
@@ -146,25 +287,25 @@ const calculateTermSchedule = (po = {}) => {
   }
 
   let totalInstallments = 1;
-  if (paymentTerms === "monthly") {
-    // Calculate total months between dates (inclusive)
-    totalInstallments = Math.max(1, Math.ceil(
-      (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-      (endDate.getMonth() - startDate.getMonth()) + 1
-    ));
-  } else if (paymentTerms === "weekly") {
-    // Calculate total weeks (7-day blocks)
-    const diffTime = Math.abs(endDate - startDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    totalInstallments = Math.max(1, Math.ceil(diffDays / 7));
+  const totalDays = getDateDiffInDays(startDate, endDate);
+  const termDays = paymentTerms === "weekly" ? 7 : 30;
+
+  if (paymentTerms === "monthly" || paymentTerms === "weekly") {
+    totalInstallments = Math.max(1, Math.ceil(totalDays / termDays));
   }
 
   // Current term = number of linked invoices + 1, capped at totalInstallments
-  const linkedInvoices = Array.isArray(po.linkedInvoices) ? po.linkedInvoices : [];
+  const linkedInvoices = getOrderedLinkedInvoices(po);
   const currentInstallment = Math.min(totalInstallments, linkedInvoices.length + 1);
 
   // Installment amount is total amount divided by total installments
   const installmentAmount = roundMoney(Number(po.totalAmount || 0) / Math.max(1, totalInstallments));
+  const currentTermStartOffset = (currentInstallment - 1) * termDays;
+  const currentWindowStart = addDaysToDateString(startDate, currentTermStartOffset);
+  const currentWindowEnd = addDaysToDateString(
+    startDate,
+    Math.min(totalDays - 1, currentTermStartOffset + termDays - 1),
+  );
 
   return {
     totalInstallments,
@@ -173,6 +314,8 @@ const calculateTermSchedule = (po = {}) => {
     label: `${paymentTerms === "monthly" ? "Month" : "Week"} ${currentInstallment} of ${totalInstallments}`,
     termStartDate: startDate,
     termEndDate: endDate,
+    currentWindowStart,
+    currentWindowEnd,
   };
 };
 
@@ -1306,8 +1449,12 @@ const ManualInvoicePage = () => {
   const handleItemChange = (index, field, value) => {
     const newItems = [...invoice.items];
     newItems[index][field] = value;
-    const maxAllowedTotal = Number(
-      newItems[index].maxAllowedInvoiceAmount ?? newItems[index].total ?? 0,
+    const derivedTaxableLimit =
+      (Number(newItems[index].previousCarryForward || 0) + Number(newItems[index].currentTermAmount || 0)) ||
+      newItems[index].taxableValue ||
+      0;
+    const maxAllowedTaxableValue = Number(
+      newItems[index].maxAllowedTaxableValue ?? derivedTaxableLimit,
     );
 
     if (field === "quantity" && newItems[index].poRemainingQuantity !== undefined) {
@@ -1346,7 +1493,7 @@ const ManualInvoicePage = () => {
       const gstRate = parseFloat(newItems[index].gstRate) || 0;
       const manualTotal = Math.max(
         0,
-        Math.min(parseFloat(value) || 0, maxAllowedTotal || parseFloat(value) || 0),
+        parseFloat(value) || 0,
       );
       const taxableValue = parseFloat(
         (
@@ -1402,23 +1549,18 @@ const ManualInvoicePage = () => {
     let gstAmount = roundMoney((taxableValue * gstRate) / 100);
     let total = roundMoney(taxableValue + gstAmount);
 
-    if (maxAllowedTotal > 0 && total > maxAllowedTotal) {
-      total = maxAllowedTotal;
-      taxableValue = roundMoney(
-        (
-          gstRate > 0
-            ? total / (1 + gstRate / 100)
-            : total
-        ),
-      );
-      gstAmount = Math.max(0, roundMoney(total - taxableValue));
+    if (maxAllowedTaxableValue > 0 && taxableValue > maxAllowedTaxableValue) {
+      taxableValue = maxAllowedTaxableValue;
+      gstAmount = roundMoney((taxableValue * gstRate) / 100);
+      total = roundMoney(taxableValue + gstAmount);
       newItems[index].quantity = rate > 0 ? parseFloat((taxableValue / rate).toFixed(4)) : quantity;
     }
 
-    const currentTermAmount = Number(newItems[index].currentTermAmount || 0);
+    const invoiceableTaxableForThisTerm =
+      Number(newItems[index].previousCarryForward || 0) + Number(newItems[index].currentTermAmount || 0);
     const currentTermRemainingAmount = Math.max(
       0,
-      roundMoney(currentTermAmount - total),
+      roundMoney(invoiceableTaxableForThisTerm - taxableValue),
     );
     const baseRemainingAfterInvoice = Number(
       newItems[index].baseRemainingAfterInvoice ?? newItems[index].remainingAfterInvoice ?? 0,
@@ -1566,10 +1708,11 @@ const ManualInvoicePage = () => {
     let selectedPO = po;
     try {
       const poResponse = await getPOProgressApi(po._id, companyId);
-      selectedPO = poResponse?.data || po;
+      selectedPO = unwrapPurchaseOrderPayload(poResponse) || po;
     } catch (err) {
       console.error("Error fetching fresh PO progress:", err);
     }
+    selectedPO = await hydratePurchaseOrderInvoices(selectedPO);
 
     const poCategory = selectedPO.poCategory || "project";
     const billingModel = selectedPO.billingModel || "fixed";
@@ -1608,57 +1751,83 @@ const ManualInvoicePage = () => {
       const defaultGstRate = Number(firstItem.gstRate || 0);
 
       // Helper: compute how much of a milestone has already been invoiced
-      const getInvoicedAmountForMilestone = (milestoneId) => {
+      const getInvoicedAmountForMilestone = (milestoneId, milestoneTitle) => {
         const linkedInvoices = selectedPO.linkedInvoices || [];
         let totalInvoiced = 0;
+        const mIdStr = milestoneId?.toString();
+        const mTitleNormalized = milestoneTitle?.trim()?.toLowerCase();
+        
         for (const inv of linkedInvoices) {
+          // 1. Check specialized milestones array
           if (inv.milestones && Array.isArray(inv.milestones)) {
-            const milestoneInInv = inv.milestones.find(m => m.milestoneId === milestoneId);
+            const milestoneInInv = inv.milestones.find(
+              (m) => 
+                m.milestoneId?.toString() === mIdStr ||
+                (mTitleNormalized && m.title?.trim()?.toLowerCase() === mTitleNormalized)
+            );
             if (milestoneInInv) {
-              totalInvoiced += Number(milestoneInInv.invoicedAmount || milestoneInInv.amount || 0);
+              totalInvoiced += Number(milestoneInInv.invoicedAmount || milestoneInInv.invoiceAmount || milestoneInInv.amount || 0);
+              continue; // If found here, we assume it's the primary record for this invoice
             }
           }
+
+          // 2. Fallback: Check standard items array (milestones are often saved as line items)
+          if (inv.items && Array.isArray(inv.items)) {
+            const matchedItems = inv.items.filter((item) => {
+              const poItemId = item.poItemId?.toString();
+              const sourceId = item.sourceId?.toString();
+              const itemDesc = item.description?.trim()?.toLowerCase();
+              
+              return (
+                poItemId === mIdStr ||
+                sourceId === mIdStr ||
+                (mTitleNormalized && itemDesc === mTitleNormalized)
+              );
+            });
+
+            matchedItems.forEach(item => {
+              totalInvoiced += Number(item.taxableValue || item.amount || 0);
+            });
+          }
         }
-        return totalInvoiced;
+        return roundMoney(totalInvoiced);
       };
 
       const milestones = selectedPO.milestones;
       const rows = [];
 
-      // 1. Collect partially‑invoiced milestones (already invoiced > 0 but not fully)
+      // 1. Filter out milestones that have a remaining balance
+      let freshAdded = false;
       milestones.forEach((m, idx) => {
         const originalAmount = Number(m.amount || 0);
-        const alreadyInvoiced = getInvoicedAmountForMilestone(m._id);
-        const remaining = Math.max(0, originalAmount - alreadyInvoiced);
-        if (alreadyInvoiced > 0 && remaining > 0) {
-          rows.push({
-            ...m,
-            _milestoneIndex: idx,
-            _originalAmount: originalAmount,
-            _alreadyInvoiced: alreadyInvoiced,
-            _remaining: remaining,
-            _isCarryForward: true,
-          });
+        const alreadyInvoiced = getInvoicedAmountForMilestone(m._id, m.title);
+        const remaining = roundMoney(Math.max(0, originalAmount - alreadyInvoiced));
+        
+        // If there's a significant remaining balance (> 0.01)
+        if (remaining > 0.01) {
+          const isPartial = alreadyInvoiced > 0.01;
+          
+          // Selection Strategy:
+          // - ALWAYS add ALL partially invoiced milestones (to ensure they get completed).
+          // - ADD THE VERY FIRST fresh milestone found in the sequence.
+          if (isPartial || !freshAdded) {
+            rows.push({
+              ...m,
+              _milestoneId: m._id?.toString(),
+              _milestoneIndex: idx,
+              _originalAmount: originalAmount,
+              _alreadyInvoiced: alreadyInvoiced,
+              _remaining: remaining,
+              _isCarryForward: isPartial,
+            });
+            
+            // Mark that we've now added the "next" fresh term
+            if (!isPartial) {
+              freshAdded = true;
+            }
+          }
         }
       });
-
-      // 2. Find the next fresh milestone (never invoiced)
-      const nextFreshIndex = milestones.findIndex((m, idx) => {
-        const alreadyInvoiced = getInvoicedAmountForMilestone(m._id);
-        return alreadyInvoiced === 0;
-      });
-      if (nextFreshIndex !== -1) {
-        const m = milestones[nextFreshIndex];
-        const originalAmount = Number(m.amount || 0);
-        rows.push({
-          ...m,
-          _milestoneIndex: nextFreshIndex,
-          _originalAmount: originalAmount,
-          _alreadyInvoiced: 0,
-          _remaining: originalAmount,
-          _isCarryForward: false,
-        });
-      }
 
       if (rows.length === 0) {
         setError("All milestones for this PO are already fully invoiced.");
@@ -1686,8 +1855,8 @@ const ManualInvoicePage = () => {
         amount: m._remaining,
         hsnSac: defaultHsn,
         gstRate: defaultGstRate,
-        gstAmount: defaultGstRate > 0 ? roundMoney((m._remaining * defaultGstRate) / (100 + defaultGstRate)) : 0,
-        total: m._remaining,
+        gstAmount: roundMoney((m._remaining * defaultGstRate) / 100),
+        total: roundMoney(m._remaining + ((m._remaining * defaultGstRate) / 100)),
         selected: true,
         isCarryForward: m._isCarryForward,
       }));
@@ -1708,7 +1877,24 @@ const ManualInvoicePage = () => {
         totalManuallyEdited: false,
         sourceType: "milestone",
         milestoneIndex: r.milestoneIndex,
+        previousCarryForward: r.isCarryForward ? r.amount : 0,
+        currentTermAmount: r.isCarryForward ? 0 : r.amount,
       }));
+
+      paymentTermSchedule = {
+        ...paymentTermSchedule,
+        totalInstallments: selectedPO.milestones.length,
+        currentInstallmentNo: (rows.find((row) => !row._isCarryForward)?._milestoneIndex ?? rows[0]?._milestoneIndex ?? 0) + 1,
+        currentWindowStart:
+          milestoneRowsUI.find((row) => !row.isCarryForward)?.dueDate ||
+          milestoneRowsUI[0]?.dueDate ||
+          formatDateInput(selectedPO.poDate),
+        currentWindowEnd:
+          milestoneRowsUI.find((row) => !row.isCarryForward)?.dueDate ||
+          milestoneRowsUI[0]?.dueDate ||
+          formatDateInput(selectedPO.deliveryDate || selectedPO.dueDate),
+        label: `Milestone ${(rows.find((row) => !row._isCarryForward)?._milestoneIndex ?? rows[0]?._milestoneIndex ?? 0) + 1} of ${selectedPO.milestones.length}${rows.some((row) => row._isCarryForward) ? " + previous remaining" : ""}`,
+      };
     }
     // ──────────────────────────────────────────────────────────
     // CASE 2 – TERM-BASED billing (monthly / weekly)
@@ -1732,81 +1918,98 @@ const ManualInvoicePage = () => {
 
       const items = selectedPO.items || [];
       const hasItems = items.length > 0;
+      const linkedInvoices = getOrderedLinkedInvoices(selectedPO);
 
       if (hasItems) {
-        // Build per-item term portions
+        // Build per-item current-term portions from taxable base.
         derivedItems = items.map((item) => {
-          const baseTotal = Number(item.totalAmount || item.total || 0);
-          const termPortionBase = roundMoney(baseTotal / schedule.totalInstallments);
-
+          const baseTaxableAmount = getPoItemBaseTaxableAmount(item);
+          const rate = Number(item.rate || 0);
           const gstRate = Number(item.gstRate || 0);
-          const termTaxable = gstRate > 0
-            ? roundMoney(termPortionBase / (1 + gstRate / 100))
-            : termPortionBase;
-          const termGst = roundMoney(termPortionBase - termTaxable);
+          const alreadyInvoicedTaxable = getInvoicedTaxableAmountForPoItem(linkedInvoices, item);
+          const scheduledParts = calculateScheduledInvoiceParts({
+            totalAmount: baseTaxableAmount,
+            alreadyInvoicedAmount: alreadyInvoicedTaxable,
+            totalInstallments: schedule.totalInstallments,
+            currentInstallmentNo: schedule.currentInstallment,
+          });
+          const termTaxable = roundMoney(scheduledParts.recommendedInvoiceAmount);
+          if (termTaxable <= 0) return null;
+
+          const quantity = rate > 0
+            ? parseFloat((termTaxable / rate).toFixed(4))
+            : Number(item.quantity || 1);
+          const termGst = roundMoney((termTaxable * gstRate) / 100);
 
           return {
             itemId: item.itemId || item._id,
             poItemId: item.itemId || item._id,
             description: `${item.description || ""} (${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment}/${schedule.totalInstallments})`,
             hsnSac: item.hsnSac || item.hsnCode || "",
-            quantity: 1,
+            quantity,
             baseQuantity: Number(item.quantity || 0),
-            baseRate: Number(item.rate || 0),
+            baseRate: rate,
             poRemainingQuantity: getRemainingPOItemQuantity(item),
-            rate: termPortionBase,
+            rate,
             taxableValue: termTaxable,
             gstRate,
             gstAmount: termGst,
-            total: termPortionBase,
+            total: roundMoney(termTaxable + termGst),
             combinedGstRate: item.combinedGstRate || gstRate,
             totalManuallyEdited: false,
-            isTermPortion: true,
+            maxAllowedTaxableValue: termTaxable,
+            previousCarryForward: scheduledParts.previousCarryForward,
+            currentTermAmount: scheduledParts.currentTermAmount,
+            currentTermRemainingAmount: 0,
+            baseRemainingAfterInvoice: scheduledParts.remainingAfterInvoice,
+            remainingAfterInvoice: scheduledParts.remainingAfterInvoice,
           };
-        });
+        }).filter(Boolean);
       } else {
-        // No line items – use totalAmount divided by terms
-        const termTotal = schedule.installmentAmount;
-        const termTaxable = defaultGstRate > 0 ? roundMoney(termTotal / (1 + defaultGstRate / 100)) : termTotal;
-        const termGst = roundMoney(termTotal - termTaxable);
+        // No line items – use total taxable divided by terms.
+        const totalTaxable = defaultGstRate > 0
+          ? roundMoney(Number(selectedPO.totalAmount || 0) / (1 + defaultGstRate / 100))
+          : roundMoney(Number(selectedPO.totalTaxableValue || selectedPO.totalAmount || 0));
+        const alreadyInvoicedTaxable = roundMoney(
+          linkedInvoices.reduce((sum, invoice) => sum + Number(invoice.totalTaxableValue || 0), 0),
+        );
+        const scheduledParts = calculateScheduledInvoiceParts({
+          totalAmount: totalTaxable,
+          alreadyInvoicedAmount: alreadyInvoicedTaxable,
+          totalInstallments: schedule.totalInstallments,
+          currentInstallmentNo: schedule.currentInstallment,
+        });
+        const termTaxable = roundMoney(scheduledParts.recommendedInvoiceAmount);
+        const termGst = roundMoney((termTaxable * defaultGstRate) / 100);
 
-        derivedItems = [{
+        derivedItems = termTaxable > 0 ? [{
           itemId: "term-" + schedule.currentInstallment,
           poItemId: "",
           description: `Services – ${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment} of ${schedule.totalInstallments}`,
           hsnSac: defaultHsn,
           quantity: 1,
-          rate: termTotal,
+          rate: termTaxable,
           taxableValue: termTaxable,
           gstRate: defaultGstRate,
           gstAmount: termGst,
-          total: termTotal,
+          total: roundMoney(termTaxable + termGst),
           combinedGstRate: defaultGstRate,
           totalManuallyEdited: false,
-          isTermPortion: true,
-        }];
-      }
-
-      // Prepend carry-forward line if any previous term had a shortfall
-      if (carryForward) {
-        derivedItems.unshift({
-          itemId: "carryforward-t" + carryForward.fromBillingTerm,
-          poItemId: "carryforward",
-          description: `Carry-forward balance from previous terms`,
-          quantity: 1,
-          rate: carryForward.remainingAmount,
-          taxableValue: carryForward.remainingAmount,
-          gstRate: 0,
-          gstAmount: 0,
-          total: carryForward.remainingAmount,
-          combinedGstRate: 0,
-          totalManuallyEdited: false,
-          isCarryForward: true,
-        });
+          maxAllowedTaxableValue: termTaxable,
+          previousCarryForward: scheduledParts.previousCarryForward,
+          currentTermAmount: scheduledParts.currentTermAmount,
+          currentTermRemainingAmount: 0,
+          baseRemainingAfterInvoice: scheduledParts.remainingAfterInvoice,
+          remainingAfterInvoice: scheduledParts.remainingAfterInvoice,
+        }] : [];
       }
 
       paymentTermSchedule = {
-        ...schedule,
+        ...paymentTermSchedule,
+        totalInstallments: schedule.totalInstallments,
+        currentInstallmentNo: schedule.currentInstallment,
+        currentWindowStart: schedule.currentWindowStart,
+        currentWindowEnd: schedule.currentWindowEnd,
         label: schedule.label,
       };
     }
@@ -1869,6 +2072,8 @@ const ManualInvoicePage = () => {
           total: r.total,
           combinedGstRate: r.gstRate,
           totalManuallyEdited: false,
+          previousCarryForward: 0,
+          currentTermAmount: r.rate,
         }));
       }
     }
@@ -1939,7 +2144,7 @@ const ManualInvoicePage = () => {
           );
           const gstAmount = Number((scheduledTotal - taxableValue).toFixed(2));
           const quantity = rate > 0 ? Number((taxableValue / rate).toFixed(4)) : remainingQuantity;
-          const currentTermAmount = scheduledParts.currentTermAmount || scheduledTotal;
+          const currentTermAmount = scheduledParts.currentTermAmount;
           return {
             itemId: item.itemId || item._id,
             poItemId: item.itemId || item._id,
@@ -2022,10 +2227,10 @@ const ManualInvoicePage = () => {
   };
 
   useEffect(() => {
-    if (!selectedPoId || editableInvoiceId || isFromPO) return;
+    if (!selectedPoId || poIdFromUrl || editableInvoiceId || isFromPO) return;
 
     handleSelectPO({ _id: selectedPoId });
-  }, [selectedPoId, editableInvoiceId, isFromPO]);
+  }, [selectedPoId, poIdFromUrl, editableInvoiceId, isFromPO]);
 
   useEffect(() => {
     if (!isFromPO || invoice.poType !== "contract") return;
@@ -3367,6 +3572,42 @@ const ManualInvoicePage = () => {
                     ))}
                   </tbody>
                 </table>
+
+                {/* ── NEW: PO LINE ITEMS REFERENCE SECTION ── */}
+                {/* <div className="mt-8 pt-8 border-t border-slate-100">
+                  <div className="flex items-center gap-2 mb-4">
+                    <List size={18} className="text-slate-500" />
+                    <h3 className="text-sm font-black text-slate-700 uppercase tracking-wider">Purchase Order Line Items Reference</h3>
+                  </div>
+                  <div className="bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
+                    <table className="min-w-full divide-y divide-slate-100">
+                      <thead className="bg-slate-100/50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase">Description</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-bold text-slate-500 uppercase">HSN/SAC</th>
+                          <th className="px-3 py-2 text-right text-[10px] font-bold text-slate-500 uppercase">Qty</th>
+                          <th className="px-3 py-2 text-right text-[10px] font-bold text-slate-500 uppercase">Rate (₹)</th>
+                          <th className="px-3 py-2 text-right text-[10px] font-bold text-slate-500 uppercase">Total (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 italic">
+                        {(selectedPOInfo?.items || []).map((item, i) => (
+                          <tr key={i} className="hover:bg-slate-100/30">
+                            <td className="px-3 py-2 text-xs text-slate-600">{item.description}</td>
+                            <td className="px-3 py-2 text-xs text-slate-500">{item.hsnSac || "—"}</td>
+                            <td className="px-3 py-2 text-xs text-slate-600 text-right">{item.quantity}</td>
+                            <td className="px-3 py-2 text-xs text-slate-600 text-right">{(item.rate || 0).toFixed(2)}</td>
+                            <td className="px-3 py-2 text-xs text-slate-700 text-right font-medium">{(item.totalAmount || item.total || 0).toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 text-[10px] text-slate-400 font-medium">
+                    Note: Line items are shown for reference based on the selected Purchase Order scope.
+                  </p>
+                </div> */}
+
                 <div className="flex justify-end mt-4">
                   <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-4 rounded-xl w-72">
                     <div className="flex justify-between text-sm mb-1">
