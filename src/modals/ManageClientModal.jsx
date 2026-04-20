@@ -98,16 +98,17 @@ export default function ManageClientModal({
   );
 
   useEffect(() => {
-    if (!open || !companyId) return;
+    if (!open) return;
 
-    Promise.all([getCountriesApi(), getStatesApi(), getallhsn(companyId)])
+    // Fetch all master data (global - no companyId filter)
+    Promise.all([getCountriesApi(), getStatesApi(), getallhsn()])
       .then(([countryRes, stateRes, hsnRes]) => {
         setCountries(countryRes?.data || []);
         setStates(stateRes?.data || []);
         setHsnList(hsnRes?.data || []);
       })
       .catch(() => toast.error("Failed to load master data"));
-  }, [open, companyId]);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;

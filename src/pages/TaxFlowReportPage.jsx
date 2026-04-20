@@ -582,13 +582,13 @@ export default function TaxFlowReportPage() {
   };
 
   useEffect(() => {
-    if (!user?.company?._id) return;
     let active = true;
 
     const loadFilterOptions = async () => {
       try {
+        // Fetch all clients (global master data) - no companyId filter
         const [clientResponse, poResponse] = await Promise.all([
-          getClientsApi(user.company._id),
+          getClientsApi(),
           getAllPurchaseOrdersApi(user.company._id),
         ]);
         if (!active) return;

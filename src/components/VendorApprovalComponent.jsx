@@ -64,10 +64,11 @@ export default function VendorApprovalComponent({ open, onClose, refreshVendors 
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      if (!open || !user?.company?._id) return;
+      if (!open) return;
       try {
         setLoading(true);
-        const res     = await getVendors(user.company._id);
+        // Fetch all vendors (global master data) - no companyId filter
+        const res     = await getVendors();
         const vendors = res.data?.data?.vendors || [];
         setAllVendors(vendors);
 
@@ -87,7 +88,7 @@ export default function VendorApprovalComponent({ open, onClose, refreshVendors 
     }
     load();
     return () => controller.abort();
-  }, [open, user?.company?._id]);
+  }, [open]);
 
   const applyFilter = (vendors, filterType) => {
     setStatusFilter(filterType);
@@ -102,7 +103,8 @@ export default function VendorApprovalComponent({ open, onClose, refreshVendors 
   };
 
   const refreshData = async () => {
-    const res     = await getVendors(user.company._id);
+    // Fetch all vendors (global master data) - no companyId filter
+    const res     = await getVendors();
     const vendors = res.data?.data?.vendors || [];
     setAllVendors(vendors);
     applyFilter(vendors, statusFilter);

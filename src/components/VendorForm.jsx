@@ -152,7 +152,8 @@ export default function VendorForm({ companyId, editData = null, onClose, onSucc
   const fetchParentVendors = async () => {
     try {
       setLoadingParents(true);
-      const res = await getVendors(companyId);
+      // Fetch all vendors (global master data) - no companyId filter
+      const res = await getVendors();
       const vendors =
         res?.data?.data?.vendors ||
         res?.data?.data ||

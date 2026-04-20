@@ -129,15 +129,16 @@ const ClientPurchaseOrders = () => {
     setLoading(true);
     setError(null);
     try {
+      // Fetch all clients (global master data) - no companyId filter
+      const clientRes = await getClientsApi();
+      const foundClient = clientRes.data?.find((c) => c._id === clientId);
+      setClient(foundClient);
+
       const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
       const companyId = localStorage.getItem("selectedCompanyId") ||
         user?.company?._id ||
         selectedCompany?._id;
       if (!companyId) throw new Error("Company ID missing");
-
-      const clientRes = await getClientsApi(companyId);
-      const foundClient = clientRes.data?.find((c) => c._id === clientId);
-      setClient(foundClient);
 
       const filters = {
         ...activeFilters,
