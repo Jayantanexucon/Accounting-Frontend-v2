@@ -1,417 +1,169 @@
 import {
   X,
+  User,
   Phone,
   Mail,
   MapPin,
-  Building,
-  Calendar,
-  FileText,
-  Banknote,
+  Building2,
   CreditCard,
+  Wallet,
+  Banknote,
+  FileText,
   CheckCircle,
   XCircle,
   Clock,
-  Download,
 } from "lucide-react";
+import { ensureAddressArray, formatAddressText } from "../utils/masterLocationUtils";
+
+const STATUS_META = {
+  Pending: { icon: Clock, cls: "bg-amber-50 text-amber-700 border-amber-200" },
+  Approved: { icon: CheckCircle, cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  Rejected: { icon: XCircle, cls: "bg-red-50 text-red-700 border-red-200" },
+  Completed: { icon: CheckCircle, cls: "bg-slate-100 text-slate-700 border-slate-200" },
+};
+
+const Field = ({ label, value, mono = false }) => (
+  <div>
+    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{label}</p>
+    <p className={`text-sm ${mono ? "font-mono" : ""} ${value ? "text-slate-800 font-semibold" : "text-slate-300 italic"}`}>
+      {value || "—"}
+    </p>
+  </div>
+);
+
+const Section = ({ title, icon: Icon, children }) => (
+  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    <div className="flex items-center gap-2.5 px-4 py-3 border-b border-slate-100 bg-slate-50">
+      <Icon size={14} className="text-slate-500" />
+      <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest">{title}</p>
+    </div>
+    <div className="p-4">{children}</div>
+  </div>
+);
 
 export default function VendorDetails({ vendor, onClose }) {
-  // Status color mapping
-  const statusColors = {
-    Pending: "bg-yellow-100 text-yellow-800",
-    Approved: "bg-green-100 text-green-800",
-    Rejected: "bg-red-100 text-red-800",
-    Completed: "bg-gray-100 text-gray-800",
-  };
-
-  // Status icon mapping
-  const StatusIcon =
-    {
-      Pending: Clock,
-      Approved: CheckCircle,
-      Rejected: XCircle,
-      Completed: CheckCircle,
-    }[vendor.status] || Clock;
+  const status = STATUS_META[vendor.status] || STATUS_META.Pending;
+  const StatusIcon = status.icon;
+  const addresses = ensureAddressArray(vendor.addresses, vendor);
 
   return (
-    <div className="bg-gray-100 rounded-xl shadow-lg border relative">
-      {/* Close Button */}
-      {/* {onClose && (
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-lg transition-colors z-10"
-          title="Close details"
-        >
-          <X className="w-5 h-5 text-gray-500" />
-        </button>
-      )} */}
-
-      {/* Header with Gradient */}
-      <div className=" p-6 rounded-t-xl border-b">
-        <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
-          <div className="flex-1">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Building className="w-6 h-6 text-blue-600" />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-sm" onClick={onClose}>
+      <div className="relative w-full max-w-5xl max-h-[90vh] overflow-y-auto rounded-3xl shadow-2xl bg-slate-50" onClick={(event) => event.stopPropagation()}>
+        <div className="sticky top-0 z-10 bg-gradient-to-r from-slate-900 via-blue-900 to-blue-500 px-6 py-5 text-white">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center text-lg font-black">
+                {(vendor.vendorName || "V").charAt(0).toUpperCase()}
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {vendor.vendorName}
-                </h2>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-sm text-gray-600 font-medium">
-                    Code: {vendor.vendorCode}
-                  </span>
-                  {vendor.isSubVendor && (
-                    <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">
-                      Sub-vendor
-                    </span>
-                  )}
-                </div>
+                <h2 className="text-lg font-black">{vendor.vendorName}</h2>
+                <p className="text-blue-100 text-xs font-mono mt-1">{vendor.vendorCode}</p>
               </div>
             </div>
-          </div>
-
-          <div className="flex flex-col items-start md:items-end gap-2">
-            <div className="flex items-center gap-2">
-              <StatusIcon
-                className={`w-4 h-4 ${
-                  statusColors[vendor.status]?.split(" ")[1]
-                }`}
-              />
-              <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  statusColors[vendor.status]
-                }`}
-              >
+            <div className="flex items-center gap-3">
+              <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-black border ${status.cls}`}>
+                <StatusIcon size={12} />
                 {vendor.status || "Pending"}
               </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div
-                className={`h-3 w-3 rounded-full ${
-                  vendor.isActive ? "bg-green-500" : "bg-red-500"
-                }`}
-              ></div>
-              <span className="text-sm text-gray-700">
-                {vendor.isActive ? "Active" : "Inactive"}
-              </span>
+              <button onClick={onClose} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 transition-all">
+                <X size={16} />
+              </button>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Content Grid */}
-      <div className="p-6">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Contact Information Card */}
-          <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-              <div className="p-2 bg-blue-50 rounded-lg">
-                <Phone className="w-5 h-5 text-blue-600" />
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {[
+              { label: "Country", value: vendor.country || vendor.defaultAddress?.country || "—" },
+              { label: "Currency", value: [vendor.currencySymbol, vendor.currency, vendor.currencyName].filter(Boolean).join(" ") || "—" },
+              { label: "Payment Terms", value: vendor.paymentTerms || "—" },
+              { label: "Addresses", value: String(addresses.length || 0) },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{item.label}</p>
+                <p className="mt-1 text-sm font-bold text-slate-800">{item.value}</p>
               </div>
-              <h3 className="font-semibold text-gray-800">
-                Contact Information
-              </h3>
-            </div>
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0">
-                  <Phone className="w-4 h-4 text-gray-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Contact Person</p>
-                  <p className="font-medium">{vendor.contactPerson || "—"}</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0">
-                  <Phone className="w-4 h-4 text-gray-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Phone Number</p>
-                  <p className="font-medium">{vendor.phoneNumber || "—"}</p>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center flex-shrink-0">
-                  <Mail className="w-4 h-4 text-gray-500" />
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Email Address</p>
-                  <p className="font-medium break-all">{vendor.email || "—"}</p>
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* Address Card */}
-          <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-              <div className="p-2 bg-green-50 rounded-lg">
-                <MapPin className="w-5 h-5 text-green-600" />
-              </div>
-              <h3 className="font-semibold text-gray-800">Address Details</h3>
+          <Section title="Contact Information" icon={User}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Contact Person" value={vendor.contactPerson} />
+              <Field label="Phone" value={vendor.phoneNumber} />
+              <Field label="Email" value={vendor.email} />
+              <Field label="Website" value={vendor.website} />
+              <Field label="Sub Vendor" value={vendor.isSubVendor ? "Yes" : "No"} />
+              <Field label="Active" value={vendor.isActive ? "Yes" : "No"} />
             </div>
+          </Section>
+
+          <Section title="Addresses" icon={MapPin}>
             <div className="space-y-3">
-              <div className="mb-3">
-                <p className="text-sm text-gray-500 mb-1">Registered Address</p>
-                <p className="text-gray-800 whitespace-pre-line">
-                  {vendor.registeredAddress || "—"}
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-sm text-gray-500">City</p>
-                  <p className="font-medium">{vendor.city || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">State</p>
-                  <p className="font-medium">{vendor.state || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">Country</p>
-                  <p className="font-medium">{vendor.country || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-gray-500">PIN Code</p>
-                  <p className="font-medium">{vendor.pinCode || "—"}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Tax Information Card */}
-          <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-              <div className="p-2 bg-purple-50 rounded-lg">
-                <FileText className="w-5 h-5 text-purple-600" />
-              </div>
-              <h3 className="font-semibold text-gray-800">Tax Information</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-500 mb-1">PAN Number</p>
-                <div className="font-mono font-medium bg-gray-50 p-2 rounded-lg">
-                  {vendor.pan || "—"}
-                </div>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">GSTIN</p>
-                <div className="font-mono font-medium bg-gray-50 p-2 rounded-lg">
-                  {vendor.gstin || "—"}
-                </div>
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Service Type</p>
-                <p className="font-medium">{vendor.serviceType || "—"}</p>
-              </div>
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Goods Type</p>
-                <p className="font-medium">{vendor.goodsType || "—"}</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Payment & Commercial Card */}
-          <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow">
-            <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-              <div className="p-2 bg-amber-50 rounded-lg">
-                <Banknote className="w-5 h-5 text-amber-600" />
-              </div>
-              <h3 className="font-semibold text-gray-800">
-                Payment & Commercial
-              </h3>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm text-gray-500 mb-1">Payment Terms</p>
-                <p className="font-medium">{vendor.paymentTerms || "—"}</p>
-              </div>
-              {vendor.creditLimit > 0 && (
-                <div className="bg-blue-50 p-4 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-gray-500 mb-1">Credit Limit</p>
-                      <p className="text-xl font-bold text-blue-700">
-                        ₹{vendor.creditLimit.toLocaleString()}
-                      </p>
-                    </div>
-                    <CreditCard className="w-8 h-8 text-blue-500" />
+              {addresses.map((address, index) => (
+                <div key={`${address.type}-${index}`} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="text-xs font-black text-slate-800">
+                      {index === 0 ? "Default Address" : address.label || address.type || `Address ${index + 1}`}
+                    </p>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                      {index === 0 ? "Primary" : address.type}
+                    </span>
                   </div>
+                  <p className="text-sm text-slate-700 font-medium">{formatAddressText(address) || "—"}</p>
                 </div>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="Tax Information" icon={CreditCard}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {(vendor.taxDetails || []).map((tax, index) => (
+                <Field key={`${tax.taxType}-${index}`} label={tax.taxType || "Tax"} value={tax.taxNumber} mono />
+              ))}
+              {!vendor.taxDetails?.length && (
+                <>
+                  <Field label="PAN" value={vendor.pan} mono />
+                  <Field label="GST" value={vendor.gstin} mono />
+                  <Field label="Tax ID" value={vendor.taxIdentificationNumber} mono />
+                </>
               )}
             </div>
-          </div>
+          </Section>
 
-          {/* Bank Details Card (if available) */}
-          {(vendor.bankName || vendor.accountNumber || vendor.ifscCode) && (
-            <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow lg:col-span-2">
-              <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-                <div className="p-2 bg-teal-50 rounded-lg">
-                  <Banknote className="w-5 h-5 text-teal-600" />
-                </div>
-                <h3 className="font-semibold text-gray-800">Bank Details</h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                {vendor.bankName && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-1">Bank Name</p>
-                    <p className="font-medium">{vendor.bankName}</p>
-                  </div>
-                )}
-                {vendor.accountNumber && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-1">Account Number</p>
-                    <div className="font-mono font-medium bg-gray-50 p-2 rounded-lg">
-                      {vendor.accountNumber}
-                    </div>
-                  </div>
-                )}
-                {vendor.ifscCode && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-1">IFSC Code</p>
-                    <div className="font-mono font-medium bg-gray-50 p-2 rounded-lg">
-                      {vendor.ifscCode}
-                    </div>
-                  </div>
-                )}
-                {vendor.branchName && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-1">Branch Name</p>
-                    <p className="font-medium">{vendor.branchName}</p>
-                  </div>
-                )}
-              </div>
+          <Section title="Commercial Information" icon={Wallet}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Currency" value={[vendor.currencySymbol, vendor.currency, vendor.currencyName].filter(Boolean).join(" ")} />
+              <Field label="Credit Limit" value={vendor.creditLimit ? `${vendor.currencySymbol || ""} ${vendor.creditLimit}` : ""} />
+              <Field label="Payment Terms" value={vendor.paymentTerms} />
+              <Field label="Service Type" value={vendor.serviceType} />
+              <Field label="Goods Type" value={vendor.goodsType} />
+              <Field label="TDS" value={vendor.tdsApplicable ? `${vendor.tdsRate || 0}% ${vendor.tdsSection || ""}` : ""} />
             </div>
-          )}
+          </Section>
 
-          {/* Agreement Period Card */}
-          {(vendor.agreementStartDate || vendor.agreementEndDate) && (
-            <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow lg:col-span-2">
-              <div className="flex items-center gap-2 mb-4 pb-3 border-b">
-                <div className="p-2 bg-red-50 rounded-lg">
-                  <Calendar className="w-5 h-5 text-red-600" />
-                </div>
-                <h3 className="font-semibold text-gray-800">
-                  Agreement Period
-                </h3>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {vendor.agreementStartDate && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-sm text-gray-500 mb-1">Start Date</p>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-gray-500" />
-                      <p className="font-medium">
-                        {new Date(vendor.agreementStartDate).toLocaleDateString(
-                          "en-IN",
-                          {
-                            weekday: "long",
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          }
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
-                {vendor.agreementEndDate && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <p className="text-sm text-gray-500 mb-1">End Date</p>
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4 text-gray-500" />
-                      <p className="font-medium">
-                        {new Date(vendor.agreementEndDate).toLocaleDateString(
-                          "en-IN",
-                          {
-                            weekday: "long",
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          }
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
+          <Section title="Bank & Audit" icon={Banknote}>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Bank Name" value={vendor.bankName} />
+              <Field label="Account Number" value={vendor.accountNumber} mono />
+              <Field label="IFSC Code" value={vendor.ifscCode} mono />
+              <Field label="Branch Name" value={vendor.branchName} />
+              <Field label="Created At" value={vendor.createdAt ? new Date(vendor.createdAt).toLocaleString() : ""} />
+              <Field label="Updated At" value={vendor.updatedAt ? new Date(vendor.updatedAt).toLocaleString() : ""} />
             </div>
-          )}
+          </Section>
 
-          {/* Compliance Documents Card */}
-          {vendor.complianceDocs && vendor.complianceDocs.length > 0 && (
-            <div className="border rounded-xl p-5 hover:shadow-sm transition-shadow lg:col-span-2">
-              <div className="flex items-center justify-between mb-4 pb-3 border-b">
-                <div className="flex items-center gap-2">
-                  <div className="p-2 bg-teal-50 rounded-lg">
-                    <FileText className="w-5 h-5 text-teal-600" />
-                  </div>
-                  <h3 className="font-semibold text-gray-800">
-                    Compliance Documents
-                  </h3>
-                </div>
-                <span className="text-sm text-gray-500">
-                  {vendor.complianceDocs.length} file(s)
-                </span>
-              </div>
+          {!!vendor.complianceDocs?.length && (
+            <Section title="Compliance Documents" icon={FileText}>
               <div className="space-y-2">
                 {vendor.complianceDocs.map((doc, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                        <FileText className="w-5 h-5 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm truncate max-w-xs">
-                          {doc}
-                        </p>
-                        <p className="text-xs text-gray-500">PDF Document</p>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => window.open(doc, "_blank")}
-                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-1.5 rounded-lg transition-colors"
-                    >
-                      <Download className="w-4 h-4" />
-                      View
-                    </button>
+                  <div key={`${doc}-${index}`} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                    {doc}
                   </div>
                 ))}
               </div>
-            </div>
+            </Section>
           )}
-        </div>
-
-        {/* Footer - Timestamps */}
-        <div className="mt-8 pt-6 border-t">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-gray-500 mb-1">Created On</p>
-              <p className="font-medium">
-                {new Date(vendor.createdAt).toLocaleString("en-IN", {
-                  dateStyle: "long",
-                  timeStyle: "short",
-                })}
-              </p>
-            </div>
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-gray-500 mb-1">Last Updated</p>
-              <p className="font-medium">
-                {new Date(vendor.updatedAt).toLocaleString("en-IN", {
-                  dateStyle: "long",
-                  timeStyle: "short",
-                })}
-              </p>
-            </div>
-          </div>
         </div>
       </div>
     </div>

@@ -103,7 +103,13 @@ const [loadingStats, setLoadingStats] = useState(false);
         
         const res = await allJournalApi(user?.company?._id, params, signal);
         
-        setJournals(res.data || []);
+        const sortedJournals = [...(res.data || [])].sort((left, right) => {
+          const leftTime = new Date(left.createdAt || 0).getTime();
+          const rightTime = new Date(right.createdAt || 0).getTime();
+          return rightTime - leftTime;
+        });
+
+        setJournals(sortedJournals);
         
         // Update pagination from response
         if (res.pagination) {
@@ -450,28 +456,41 @@ const [loadingStats, setLoadingStats] = useState(false);
     const totalPages = pagination.totalPages;
     const currentPage = pagination.page;
 
-    if (totalPages <= 5) {
+    if (totalPages <= 7) {
       for (let i = 1; i <= totalPages; i++) {
         pages.push(i);
       }
     } else {
-      if (currentPage <= 3) {
-        for (let i = 1; i <= 5; i++) {
-          pages.push(i);
-        }
-      } else if (currentPage >= totalPages - 2) {
-        for (let i = totalPages - 4; i <= totalPages; i++) {
-          pages.push(i);
-        }
-      } else {
-        for (let i = currentPage - 2; i <= currentPage + 2; i++) {
-          pages.push(i);
-        }
+      pages.push(1);
+
+      if (currentPage > 3) {
+        pages.push("...");
+      }
+
+      const start = Math.max(2, currentPage - 1);
+      const end = Math.min(totalPages - 1, currentPage + 1);
+
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+
+      if (currentPage < totalPages - 2) {
+        pages.push("...");
+      }
+
+      if (totalPages > 1) {
+        pages.push(totalPages);
       }
     }
 
-    return pages;
+    return pages.filter((page, index, list) => {
+      if (page !== "...") return true;
+      return list[index - 1] !== "...";
+    });
   };
+
+  const paginationStart = pagination.total === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1;
+  const paginationEnd = Math.min(pagination.page * pagination.limit, pagination.total);
 
   // Handle search with page reset
   
@@ -1161,60 +1180,80 @@ const [loadingStats, setLoadingStats] = useState(false);
 
           {/* Pagination */}
           {pagination.totalPages > 1 && (
-            <div className="mt-12 flex flex-col sm:flex-row items-center justify-between gap-6 border-t border-slate-100 pt-8">
-              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Page {pagination.page} of {pagination.totalPages}
-              </div>
-              
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handlePageChange(pagination.page - 1)}
-                  disabled={pagination.page === 1}
-                  className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm cursor-pointer"
-                >
-                  <FiArrowLeft size={18} />
-                </button>
-                
-                {generatePageNumbers().map((page) => (
+            <div className="mt-8 rounded-xl border border-slate-200 bg-white/90 px-3 py-2 shadow-sm">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">
+                    Journal Navigation
+                  </div>
+                  <div className="mt-0.5 text-xs font-semibold text-slate-700">
+                    Showing {paginationStart}-{paginationEnd} of {pagination.total} journals
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
-                    key={page}
-                    onClick={() => handlePageChange(page)}
-                    className={`min-w-[44px] h-[44px] rounded-xl font-bold transition-all shadow-sm cursor-pointer ${
-                      pagination.page === page
-                        ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
-                    }`}
+                    onClick={() => handlePageChange(pagination.page - 1)}
+                    disabled={pagination.page === 1}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {page}
+                    <FiArrowLeft size={14} />
+                    Prev
                   </button>
-                ))}
 
-                <button
-                  onClick={() => handlePageChange(pagination.page + 1)}
-                  disabled={pagination.page === pagination.totalPages}
-                  className="p-2.5 rounded-xl border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 transition-all shadow-sm cursor-pointer"
-                >
-                  <FiChevronRight size={18} />
-                </button>
-              </div>
+                  <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                    {generatePageNumbers().map((page, index) =>
+                      page === "..." ? (
+                        <span
+                          key={`ellipsis-${index}`}
+                          className="inline-flex h-7 min-w-[26px] items-center justify-center px-1 text-[11px] font-semibold text-slate-400"
+                        >
+                          ...
+                        </span>
+                      ) : (
+                        <button
+                          key={page}
+                          onClick={() => handlePageChange(page)}
+                          className={`inline-flex h-7 min-w-[28px] items-center justify-center rounded-md px-1.5 text-[11px] font-semibold transition ${
+                            pagination.page === page
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-600 hover:bg-white hover:text-slate-900"
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      )
+                    )}
+                  </div>
 
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Rows</span>
-                <select
-                  value={pagination.limit}
-                  onChange={(e) => {
-                    setPagination((prev) => ({
-                      ...prev,
-                      limit: parseInt(e.target.value),
-                      page: 1,
-                    }));
-                  }}
-                  className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all shadow-sm"
-                >
-                  {[5, 10, 25, 50].map((size) => (
-                    <option key={size} value={size}>{size}</option>
-                  ))}
-                </select>
+                  <button
+                    onClick={() => handlePageChange(pagination.page + 1)}
+                    disabled={pagination.page === pagination.totalPages}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                    <FiChevronRight size={14} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                  <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-slate-400">Rows</span>
+                  <select
+                    value={pagination.limit}
+                    onChange={(e) => {
+                      setPagination((prev) => ({
+                        ...prev,
+                        limit: parseInt(e.target.value),
+                        page: 1,
+                      }));
+                    }}
+                    className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 outline-none focus:border-slate-400"
+                  >
+                    {[5, 10, 25, 50].map((size) => (
+                      <option key={size} value={size}>{size} / page</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
           )}

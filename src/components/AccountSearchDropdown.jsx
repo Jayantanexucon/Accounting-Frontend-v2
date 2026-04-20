@@ -14,11 +14,13 @@ const AccountSearchDropdown = ({
   const [dropdownStyle, setDropdownStyle] = useState({});
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
+  const dropdownRef = useRef(null);
 
   // Update displayed name when value or options change
   useEffect(() => {
     const account = options.find(acc => acc._id === value);
     setInputDisplay(account ? account.name : '');
+    setSearchText('');
   }, [value, options]);
 
   // Filter options
@@ -30,10 +32,14 @@ const AccountSearchDropdown = ({
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+      const clickedInsideWrapper = wrapperRef.current?.contains(event.target);
+      const clickedInsideDropdown = dropdownRef.current?.contains(event.target);
+
+      if (!clickedInsideWrapper && !clickedInsideDropdown) {
         setShowDropdown(false);
       }
     };
+
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
@@ -63,10 +69,12 @@ const AccountSearchDropdown = ({
 
   const handleInputChange = (e) => {
     setSearchText(e.target.value);
+    setInputDisplay(e.target.value);
     setShowDropdown(true);
   };
 
   const handleInputFocus = () => {
+    setSearchText('');
     setShowDropdown(true);
   };
 
@@ -97,6 +105,7 @@ const AccountSearchDropdown = ({
       {showDropdown &&
         createPortal(
           <div
+            ref={dropdownRef}
             className="fixed z-[99999] bg-white border rounded-lg shadow-2xl max-h-60 overflow-y-auto"
             style={dropdownStyle}
           >

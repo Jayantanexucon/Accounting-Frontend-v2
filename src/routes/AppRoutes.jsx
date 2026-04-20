@@ -8,6 +8,7 @@ import ProtectedRoutes from "./ProtectedRoutes";
 import CompanyGuard from "./CompanyGuard";
 import LoadingComponent from "../components/LoadingComponent";
 import { useAuth } from "../contexts/AuthContext";
+import MonthlyReconciliationReport from "../pages/MonthlyReconciliationReport";
 
 // ==============================
 // Lazy Loaded Pages
@@ -129,6 +130,7 @@ export default function AppRoutes() {
                 path="accounting/bank-reconciliation"
                 element={<BankReconciliationPage />}
               />
+              <Route path="accounting/bank-reconciliation/report" element={<MonthlyReconciliationReport />} />
 
               <Route path="purchase-order" element={<PurchaseOrderPage />} />
               <Route
