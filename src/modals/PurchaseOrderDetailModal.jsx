@@ -24,7 +24,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import dayjs from "dayjs";
-import { getPurchaseOrderApi, downloadPdfPurchaseOrderApi } from "../apis/purchaseOrderApi";
+import { getPurchaseOrderApi, downloadPdfPurchaseOrderApi, downloadWordPurchaseOrderApi } from "../apis/purchaseOrderApi";
 import { motion, AnimatePresence } from "framer-motion";
 import InvoiceDetailsModal from "./InvoiceDetailsModal";
 import { useNavigate } from "react-router-dom";
@@ -373,6 +373,20 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
       link.parentNode.removeChild(link);
     } catch {
       alert("Failed to download PDF");
+    }
+  };
+    const handleDownloadWord = async (poId, poNumber, e) => {
+
+    try {
+      const response = await downloadWordPurchaseOrderApi(poId);
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `PurchaseOrder_${poNumber}.docx`;
+      link.click();
+    } catch (err) {
+      console.error(err);
+      setError("Failed to download Word document");
     }
   };
 
@@ -1344,17 +1358,19 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                             sub: "Official document with signature",
                             accent: "bg-red-50 border-red-100",
                             icon: <FileText size={16} className="text-red-600" />,
+                            type: "pdf",
                           },
                           {
                             label: "Purchase Order Word",
                             sub: "Editable Word document",
                             accent: "bg-blue-50 border-blue-100",
                             icon: <FileText size={16} className="text-blue-600" />,
+                            type: "word",
                           },
                         ].map((d) => (
                           <button
                             key={d.label}
-                            onClick={handleDownloadPDF}
+                            onClick={() => d.type === "word" ? handleDownloadWord(po._id, po.poNumber) : handleDownloadPDF()}
                             className="w-full flex items-center justify-between p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-200 hover:bg-blue-50/30 transition-all group"
                           >
                             <div className="flex items-center gap-3">
