@@ -1076,13 +1076,12 @@ const ManualInvoicePage = () => {
 
   // Fetch clients and existing descriptions from API
   useEffect(() => {
-    if (!user?.company?._id) return;
-
     const fetchInitialData = async () => {
       setLoadingClients(true);
       setLoadingDescriptions(true);
       try {
-        const clientsResponse = await getClientsApi(user.company._id);
+        // Fetch all clients (global master data) - no companyId filter
+        const clientsResponse = await getClientsApi();
         const clientList = clientsResponse?.data || [];
         setClients(clientList);
         setFilteredBillToClients(clientList);
@@ -2675,7 +2674,8 @@ const ManualInvoicePage = () => {
     const fetchHsn = async () => {
       setLoadingHsn(true);
       try {
-        const res = await getallhsn(user.company._id);
+        // Fetch all HSN codes (global master data) - no companyId filter
+        const res = await getallhsn();
         setHsnList(res.data || []);
       } catch (e) {
         console.error("HSN fetch failed", e);

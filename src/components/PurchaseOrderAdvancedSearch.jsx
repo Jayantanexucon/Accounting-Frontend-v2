@@ -93,9 +93,10 @@ const PurchaseOrderAdvancedSearch = ({
   }, [isOpen, initialFilters]);
 
   useEffect(() => {
-    if (isOpen && clientId && companyId) {
+    if (isOpen && clientId) {
       const fetchClientName = async () => {
-        const res = await getClientsApi(companyId);
+        // Fetch all clients (global master data) - no companyId filter
+        const res = await getClientsApi();
         const client = res.data?.find((c) => c._id === clientId);
         if (client) {
           setPreselectedClientName(client.clientName);
@@ -104,7 +105,7 @@ const PurchaseOrderAdvancedSearch = ({
       };
       fetchClientName();
     }
-  }, [isOpen, clientId, companyId]);
+  }, [isOpen, clientId]);
 
   // ------------------------------------------------------------------
   // 2. Reset filters when modal opens (and no initial filters)
@@ -145,7 +146,8 @@ if (preselectedClientName) poParams.clientName = preselectedClientName;
       const poNumbers = poRes.data?.map((item) => item.label) || [];
 
       // --- Clients (using getClientsApi) ---
-      const clientData = await getClientsApi(companyId);
+      // Fetch all clients (global master data) - no companyId filter
+      const clientData = await getClientsApi();
       // Extract client names; fallback to empty array
       const clientNames = Array.isArray(clientData?.data)
         ? clientData.data.map((c) => c.clientName).filter(Boolean)

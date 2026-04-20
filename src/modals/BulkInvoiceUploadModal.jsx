@@ -62,12 +62,12 @@ const BulkInvoiceUploadModal = ({
   // Fetch all required data on mount
   useEffect(() => {
     const fetchData = async () => {
-      if (!open || !companyId) return;
+      if (!open) return;
 
       setLoadingData(true);
       try {
-        // Fetch clients
-        const clientsResponse = await getClientsApi(companyId);
+        // Fetch all clients (global master data) - no companyId filter
+        const clientsResponse = await getClientsApi();
         const clientsData = clientsResponse.data || [];
         setClients(clientsData);
 
@@ -82,8 +82,8 @@ const BulkInvoiceUploadModal = ({
         });
         setClientMap(clientLookup);
 
-        // Fetch HSN data
-        const hsnResponse = await getallhsn(companyId);
+        // Fetch all HSN codes (global master data) - no companyId filter
+        const hsnResponse = await getallhsn();
         const hsnData = hsnResponse.data || [];
         setHsnList(hsnData);
 

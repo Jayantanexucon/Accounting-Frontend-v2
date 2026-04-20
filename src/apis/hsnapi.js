@@ -1,21 +1,18 @@
 import { API } from "./api";
 
 /**
- * GET ALL HSN (company scoped)
+ * GET ALL HSN (global master data - no companyId filter)
  */
-export const getallhsn = async (companyId) => {
-  const { data } = await API.get(`/masterData/hsn/${companyId}`);
-  console.log("===============================================");
-  console.log(data);
-  
+export const getallhsn = async () => {
+  const { data } = await API.get(`/masterData/hsn`);
   return data;
 };
 
 /**
- * GET SINGLE HSN
+ * GET SINGLE HSN (global master data - no companyId filter)
  */
-export const gethsnbyid = async (companyId, id) => {
-  const { data } = await API.get(`/masterData/hsn/${companyId}/${id}`);
+export const gethsnbyid = async (id) => {
+  const { data } = await API.get(`/masterData/hsn/${id}`);
   return data;
 };
 

@@ -10,11 +10,9 @@ export const addClientApi = async (clientData) => {
   return data;
 };
 
-export const getClientsApi = async (companyId, signal) => {
-  const { data } = await API.get(`/masterData/client`, {
-    params: { companyId },
-    signal,
-  });
+export const getClientsApi = async (signal) => {
+  // Always fetch all clients (global master data) - no companyId filter
+  const { data } = await API.get(`/masterData/client`, { signal });
   return data;
 };
 
@@ -33,8 +31,9 @@ export const deleteClientApi = async (clientId) => {
   return data;
 };
 
-export const pendingApprovalClientApi = async (companyId, signal) => {
-  const { data } = await API.get(`/masterData/client/pending/${companyId}`, { signal });
+export const pendingApprovalClientApi = async (signal) => {
+  // Always fetch all pending clients (global master data) - no companyId filter
+  const { data } = await API.get(`/masterData/client/pending`, { signal });
   return data;
 };
 

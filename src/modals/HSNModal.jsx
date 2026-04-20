@@ -48,10 +48,11 @@ export default function HSNModal({ isOpen, onClose, onSaved, editId }) {
 
   /* load master list */
   useEffect(() => {
-    if (!isOpen || !companyId) return;
+    if (!isOpen) return;
     (async () => {
       try {
-        const res = await getallhsn(companyId);
+        // Always fetch all HSN codes (global master data) - no companyId filter
+        const res = await getallhsn();
         const raw = Array.isArray(res.data) ? res.data : [];
         const seen = new Set(); const out = [];
         for (const r of raw) {
@@ -61,16 +62,17 @@ export default function HSNModal({ isOpen, onClose, onSaved, editId }) {
         setMaster(out);
       } catch { toast.error("Failed to load HSN master"); }
     })();
-  }, [isOpen, companyId]);
+  }, [isOpen]);
 
   /* load for edit */
   useEffect(() => {
-    if (!isOpen || !companyId) return;
+    if (!isOpen) return;
     if (!editId) { setForm(init); setQuery(""); setGstLocked(false); return; }
     (async () => {
       setLoading(true);
       try {
-        const res = await gethsnbyid(companyId, editId);
+        // Always fetch HSN by ID (global master data) - no companyId filter
+        const res = await gethsnbyid(editId);
         const d = res.data || {};
         setForm({
           serviceType: d.serviceType || "",
@@ -85,7 +87,7 @@ export default function HSNModal({ isOpen, onClose, onSaved, editId }) {
       } catch { toast.error("Failed to load HSN"); }
       finally { setLoading(false); }
     })();
-  }, [editId, isOpen, companyId]);
+  }, [editId, isOpen]);
 
   /* suggestions */
   const suggestions = useMemo(() => {
