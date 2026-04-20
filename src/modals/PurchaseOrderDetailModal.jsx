@@ -639,7 +639,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                   {/* ── PO Category / Billing info strip (only shown when fields exist) ── */}
                   {(po.poCategory || po.billingModel || po.paymentTerms || po.paymentSchedule) && (
                     <div className="flex items-center gap-2 flex-wrap px-1">
-                      {po.poCategory && (
+                      {/* {po.poCategory && (
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${catBadge[po.poCategory] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
                           {po.poCategory.charAt(0).toUpperCase() + po.poCategory.slice(1)}
                         </span>
@@ -648,17 +648,17 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${modelBadge[po.billingModel] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
                           {po.billingModel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                         </span>
-                      )}
+                      )} */}
                       {po.paymentTerms && (
                         <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-slate-100 text-slate-600 border-slate-200">
                           {po.paymentTerms.replace(/-/g, " ").toUpperCase()}
                         </span>
                       )}
-                      {po.paymentSchedule && (
+                      {/* {po.paymentSchedule && (
                         <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-teal-50 text-teal-700 border-teal-200">
                           {po.paymentSchedule.replace(/_/g, " ").toUpperCase()}
                         </span>
-                      )}
+                      )} */}
                     </div>
                   )}
 
@@ -799,7 +799,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                   {/* ── PO type / model badge strip ── */}
                   {(po.poCategory || po.billingModel || po.paymentTerms || po.paymentSchedule) && (
                     <div className="flex items-center gap-2 flex-wrap">
-                      {po.poCategory && (
+                      {/* {po.poCategory && (
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${catBadge[po.poCategory] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
                           {po.poCategory.charAt(0).toUpperCase() + po.poCategory.slice(1)}
                         </span>
@@ -808,17 +808,17 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${modelBadge[po.billingModel] || "bg-slate-100 text-slate-600 border-slate-200"}`}>
                           {po.billingModel.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
                         </span>
-                      )}
+                      )} */}
                       {po.paymentTerms && (
                         <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-slate-100 text-slate-600 border-slate-200">
                           {po.paymentTerms.replace(/-/g, " ").toUpperCase()}
                         </span>
                       )}
-                      {po.paymentSchedule && (
+                      {/* {po.paymentSchedule && (
                         <span className="px-2.5 py-1 rounded-full text-[10px] font-black border bg-teal-50 text-teal-700 border-teal-200">
                           {po.paymentSchedule.replace(/_/g, " ").toUpperCase()}
                         </span>
-                      )}
+                      )} */}
                     </div>
                   )}
 
