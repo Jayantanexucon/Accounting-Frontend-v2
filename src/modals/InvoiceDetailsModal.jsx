@@ -311,14 +311,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 
   const getInvoiceStatusBadge = (status) => {
     const statusConfig = {
-      DRAFT: { label: "Draft", color: "bg-gray-100 text-gray-800", icon: FileText },
+      PENDING_APPROVAL: { label: "Pending Approval", color: "bg-gray-100 text-gray-800", icon: FileText },
       POSTED: { label: "Posted", color: "bg-blue-100 text-blue-800", icon: FileText },
       PARTIALLY_PAID: { label: "Partially Paid", color: "bg-yellow-100 text-yellow-800", icon: Clock },
       PAID: { label: "Paid", color: "bg-blue-100 text-blue-800", icon: CheckCircle },
       RECONCILED: { label: "Reconciled", color: "bg-green-100 text-green-800", icon: Shield },
     };
 
-    const config = statusConfig[status] || statusConfig.DRAFT;
+    const config = statusConfig[status] || statusConfig.PENDING_APPROVAL;
     const Icon = config.icon;
 
     return (

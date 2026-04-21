@@ -207,6 +207,7 @@ export default function InvoiceApproval({
         return "border-emerald-200 text-emerald-700 bg-emerald-50";
       case "inprogress":
       case "pending":
+      case "pending_approval":
         return "border-amber-200 text-amber-700 bg-amber-50";
       case "inactive":
       case "cancelled":
