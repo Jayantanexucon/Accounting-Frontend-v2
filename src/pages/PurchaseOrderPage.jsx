@@ -1438,7 +1438,7 @@ export default function PurchaseOrderPage() {
                       </div>
                       <div className="sm:col-span-1"><input type="number" min="0" value={item.rate} onChange={(e) => updateItem(i, "rate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
                       <div className="sm:col-span-1"><input type="number" min="0" max="28" value={item.gstRate} onChange={(e) => updateItem(i, "gstRate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
-                      <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">{formatMoney(item.totalAmount ?? item.total)}</span></div>
+                      <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">₹ {item.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
                       <div className="sm:col-span-1 flex justify-end">{form.items.length > 1 && <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={15} /></button>}</div>
                     </div>
                   ))}
@@ -1858,7 +1858,7 @@ export default function PurchaseOrderPage() {
                               <td className="px-2 py-1.5 text-center text-slate-700 capitalize">{item.unit || "each"}</td>
                               <td className="px-2 py-1.5 text-right text-slate-700">{formatMoney(item.rate)}</td>
                               <td className="px-2 py-1.5 text-right text-slate-700">{item.gstRate}%</td>
-                              <td className="px-2 py-1.5 text-right font-medium text-slate-800">{formatMoney(item.totalAmount ?? item.total)}</td>
+                              <td className="px-2 py-1.5 text-right font-medium text-slate-800">₹ {item.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                             </tr>
                           ))}
                         </tbody>
