@@ -65,17 +65,29 @@ export default function AddressListEditor({
         [index]: {
           countryName: "",
           countryCode: "",
-          countryType: "OTHER",
-          currencyName: "",
-          currencyCode: "",
-          currencySymbol: "",
+          dialCode: "",
+          currency: {
+            currencyName: "",
+            currencyCode: "",
+            currencySymbol: "",
+          },
+          taxConfig: {
+            taxSystem: "OTHER",
+            isGSTApplicable: false,
+          },
         },
       }));
       return;
     }
 
     const country = countries.find((item) => item.value === value);
-    updateAddress(index, {
+    // Extract currency and dialCode from embedded country
+    const countryCurrency = country?.currency || {
+      currencyName: country?.currencyName || "",
+      currencyCode: country?.currencyCode || "",
+      currencySymbol: country?.currencySymbol || "",
+    };
+    const updatedAddress = {
       ...addresses[index],
       country: country?.countryName || "",
       countryId: country?.value || "",
@@ -83,7 +95,15 @@ export default function AddressListEditor({
       stateId: "",
       stateCode: "",
       gstStateCode: "",
-    });
+      // Store currency and dialCode info with the address
+      currency: countryCurrency.currencyCode || "",
+      currencyName: countryCurrency.currencyName || "",
+      currencySymbol: countryCurrency.currencySymbol || "",
+      dialCode: country?.dialCode || "",
+    };
+    updateAddress(index, updatedAddress);
+    // Pass the selected country back to parent for dialCode update
+    onChange(addresses.map((addr, i) => i === index ? updatedAddress : addr), country);
     setCountryDrafts((prev) => ({ ...prev, [index]: null }));
   };
 
@@ -116,10 +136,15 @@ export default function AddressListEditor({
     setSavingCountryIndex(index);
     try {
       const country = await onCreateCountry(draft);
+      // Extract currency from the created country (embedded in country.currency)
+      const countryCurrency = country.currency || {};
       updateAddress(index, {
         ...addresses[index],
         country: country.countryName,
         countryId: country._id,
+        currency: countryCurrency.currencyCode || "",
+        currencyName: countryCurrency.currencyName || "",
+        currencySymbol: countryCurrency.currencySymbol || "",
       });
       setCountryDrafts((prev) => ({ ...prev, [index]: null }));
     } finally {
@@ -349,13 +374,20 @@ export default function AddressListEditor({
                   />
                 </div>
                 <div>
-                  <label className={labelCls}>Country Type</label>
+                  <label className={labelCls}>Tax System</label>
                   <select
-                    value={countryDrafts[index].countryType}
+                    value={countryDrafts[index].taxConfig?.taxSystem || "OTHER"}
                     onChange={(e) =>
                       setCountryDrafts((prev) => ({
                         ...prev,
-                        [index]: { ...prev[index], countryType: e.target.value },
+                        [index]: { 
+                          ...prev[index], 
+                          taxConfig: { 
+                            ...prev[index].taxConfig, 
+                            taxSystem: e.target.value,
+                            isGSTApplicable: e.target.value === "GST",
+                          } 
+                        },
                       }))
                     }
                     className={inputCls}
@@ -369,14 +401,35 @@ export default function AddressListEditor({
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Currency Symbol</label>
+                  <label className={labelCls}>Dial Code</label>
                   <input
                     type="text"
-                    value={countryDrafts[index].currencySymbol}
+                    value={countryDrafts[index].dialCode || ""}
                     onChange={(e) =>
                       setCountryDrafts((prev) => ({
                         ...prev,
-                        [index]: { ...prev[index], currencySymbol: e.target.value },
+                        [index]: { ...prev[index], dialCode: e.target.value },
+                      }))
+                    }
+                    className={inputCls}
+                    placeholder="+91"
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>Currency Symbol</label>
+                  <input
+                    type="text"
+                    value={countryDrafts[index].currency?.currencySymbol || ""}
+                    onChange={(e) =>
+                      setCountryDrafts((prev) => ({
+                        ...prev,
+                        [index]: { 
+                          ...prev[index], 
+                          currency: { 
+                            ...prev[index].currency, 
+                            currencySymbol: e.target.value 
+                          } 
+                        },
                       }))
                     }
                     className={inputCls}
@@ -387,11 +440,17 @@ export default function AddressListEditor({
                   <label className={labelCls}>Currency Code</label>
                   <input
                     type="text"
-                    value={countryDrafts[index].currencyCode}
+                    value={countryDrafts[index].currency?.currencyCode || ""}
                     onChange={(e) =>
                       setCountryDrafts((prev) => ({
                         ...prev,
-                        [index]: { ...prev[index], currencyCode: e.target.value.toUpperCase() },
+                        [index]: { 
+                          ...prev[index], 
+                          currency: { 
+                            ...prev[index].currency, 
+                            currencyCode: e.target.value.toUpperCase() 
+                          } 
+                        },
                       }))
                     }
                     className={inputCls}
@@ -402,11 +461,17 @@ export default function AddressListEditor({
                   <label className={labelCls}>Currency Name</label>
                   <input
                     type="text"
-                    value={countryDrafts[index].currencyName}
+                    value={countryDrafts[index].currency?.currencyName || ""}
                     onChange={(e) =>
                       setCountryDrafts((prev) => ({
                         ...prev,
-                        [index]: { ...prev[index], currencyName: e.target.value },
+                        [index]: { 
+                          ...prev[index], 
+                          currency: { 
+                            ...prev[index].currency, 
+                            currencyName: e.target.value 
+                          } 
+                        },
                       }))
                     }
                     className={inputCls}

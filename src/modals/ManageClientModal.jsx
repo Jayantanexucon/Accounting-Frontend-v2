@@ -32,6 +32,7 @@ const emptyForm = {
   contactPerson: "",
   contactNumber: "",
   altContactNumber: "",
+  dialCode: "+91", // Default to India
   email: "",
   website: "",
   paymentTerms: "",
@@ -139,12 +140,19 @@ export default function ManageClientModal({
   };
 
   const handleCreateCountry = async (payload) => {
+    // Currency is now nested inside country - extract from payload.currency
     const response = await createCountryApi({
-      ...payload,
-      currency: {
-        currencyName: payload.currencyName,
-        currencyCode: payload.currencyCode,
-        currencySymbol: payload.currencySymbol,
+      countryName: payload.countryName,
+      countryCode: payload.countryCode,
+      dialCode: payload.dialCode || "",
+      currency: payload.currency || {
+        currencyName: payload.currencyName || payload.countryName,
+        currencyCode: payload.currencyCode || payload.countryCode,
+        currencySymbol: payload.currencySymbol || "",
+      },
+      taxConfig: payload.taxConfig || {
+        taxSystem: payload.taxConfig?.taxSystem || "OTHER",
+        isGSTApplicable: payload.taxConfig?.taxSystem === "GST",
       },
     });
     const createdCountry = response?.data;
@@ -256,7 +264,24 @@ export default function ManageClientModal({
             <SectionHead title="Contact Information" accent="linear-gradient(180deg,#2563eb,#60a5fa)" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label="Contact Person" name="contactPerson" value={form.contactPerson} onChange={handleChange} placeholder="Full name" className={inputCls} labelCls={labelCls} />
-              <Field label="Contact Number" name="contactNumber" value={form.contactNumber} onChange={handleChange} placeholder="+91 XXXXX XXXXX" className={inputCls} labelCls={labelCls} />
+              <div>
+                <label className={labelCls}>Contact Number</label>
+                <div className="flex items-center gap-2">
+                  {form.dialCode && (
+                    <span className="px-3 py-2 text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-xl">
+                      {form.dialCode}
+                    </span>
+                  )}
+                  <input
+                    name="contactNumber"
+                    value={form.contactNumber}
+                    onChange={handleChange}
+                    placeholder="9876543210"
+                    className={inputCls}
+                    style={{ flex: 1 }}
+                  />
+                </div>
+              </div>
               <Field label="Alternate Contact" name="altContactNumber" value={form.altContactNumber} onChange={handleChange} placeholder="Alternate number" className={inputCls} labelCls={labelCls} />
               <Field label="Email Address" name="email" value={form.email} onChange={handleChange} placeholder="email@example.com" type="email" className={inputCls} labelCls={labelCls} />
               <Field label="Website" name="website" value={form.website} onChange={handleChange} placeholder="https://example.com" className={inputCls} labelCls={labelCls} />
@@ -267,11 +292,23 @@ export default function ManageClientModal({
             <SectionHead title="Address Information" accent="linear-gradient(180deg,#d97706,#fbbf24)" />
             <AddressListEditor
               addresses={form.addresses}
-              onChange={(addresses) => setForm((prev) => ({ ...prev, addresses }))}
+              onChange={(addresses, selectedCountry) => {
+                // Update addresses and dialCode based on selected country
+                const defaultAddress = addresses[0] || {};
+                const dialCode = selectedCountry?.dialCode || "+91";
+                setForm((prev) => ({ 
+                  ...prev, 
+                  addresses,
+                  dialCode 
+                }));
+              }}
               countries={countries.map((country) => ({
                 value: country._id,
                 label: country.countryName,
                 countryName: country.countryName,
+                dialCode: country.dialCode || "",
+                currency: country.currency || null,
+                taxConfig: country.taxConfig || null,
                 taxTypes: country.taxTypes || [],
                 countryType: country.countryType,
               }))}
