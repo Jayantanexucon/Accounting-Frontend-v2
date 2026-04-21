@@ -277,8 +277,22 @@ export default function PurchaseOrderPage() {
       normalized === "in" ||
       normalized === "ind"
     ) return "IN";
-    // Try to extract ISO code from something like 'US', 'USA', 'United States'
-    // We store countryCode on client/vendor — if provided use first word
+    
+    // Attempt exact dictionary match using the fetched master data
+    // to map strings like "United States" to "US" correctly.
+    if (countryTaxList && countryTaxList.length > 0) {
+      const match = countryTaxList.find((ct) => 
+        ct.countryName.toLowerCase() ===  normalized || 
+        ct.countryCode.toLowerCase() === normalized
+      );
+      if (match) return match.countryCode.toUpperCase();
+    }
+
+    // Try to extract ISO code from something like 'US', 'USA'
+    // Fallback for missing configurations
+    if (normalized === "usa" || normalized === "united states") return "US";
+    if (normalized === "uk" || normalized === "united kingdom") return "GB";
+    
     return countryStr.trim().toUpperCase().substring(0, 2);
   };
 
@@ -310,7 +324,7 @@ export default function PurchaseOrderPage() {
   /**
    * Determine the applicable tax type for the current PO.
    *
-   * Returns one of: 'GST' | 'SALES_TAX' | 'RCM' | 'NONE'
+   * Returns one of: 'GST' | 'RCM' | 'NONE' | <Dynamic from CountryTaxMaster>
    */
   const determineTaxType = () => {
     const companyCountry = getCompanyCountry();
@@ -322,8 +336,11 @@ export default function PurchaseOrderPage() {
     // Case 1: India → India → GST
     if (isCompanyIndia && isPartyIndia) return "GST";
 
-    // Case 2: India → Foreign → SALES_TAX (look up country master)
-    if (isCompanyIndia && !isPartyIndia) return "SALES_TAX";
+    // Case 2: India → Foreign → Retrieve from Country Tax Master (e.g. VAT, SALES_TAX, etc.)
+    if (isCompanyIndia && !isPartyIndia) {
+      const ct = getForeignCountryTax(partyCountry);
+      return ct ? ct.taxType : "SALES_TAX"; // fallback if missing
+    }
 
     // Case 3: Foreign → India → RCM
     if (!isCompanyIndia && isPartyIndia) return "RCM";
@@ -345,6 +362,35 @@ export default function PurchaseOrderPage() {
           ct.isActive
       ) || null
     );
+  };
+
+  /**
+   * Returns a display label for the current tax regime (e.g. "GST", "Sales Tax", "VAT")
+   */
+  const getTaxLabel = (short = false) => {
+    const taxType = determineTaxType();
+    let label = "Tax";
+    if (taxType === "GST") label = "GST";
+    else if (taxType === "RCM") label = "RCM";
+    else if (taxType === "NONE") label = "Tax";
+    else {
+      const partyCountry = getPartyCountry();
+      const ct = getForeignCountryTax(partyCountry);
+      if (ct && ct.taxLabel) label = ct.taxLabel;
+      else if (ct && ct.taxType) label = ct.taxType.replace("_", " ");
+      else label = taxType.replace("_", " ");
+    }
+    if (short && label.length > 3) {
+      return label.substring(0, 3).toUpperCase();
+    }
+    return label;
+  };
+
+  const getTaxIdLabel = () => {
+    const country = getPartyCountry();
+    if (country === "IN") return "GSTIN";
+    if (country === "US") return "EIN / SSN";
+    return "Tax ID";
   };
 
   const normalizeStateCode = (value = "") => {
@@ -712,11 +758,6 @@ export default function PurchaseOrderPage() {
     `${currencySymbol} ${Number(value || 0).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
   const getTaxDisplay = (entity) =>
     (entity?.taxDetails || []).filter((tax) => tax?.label && tax?.taxNumber);
-  const getTaxLabel = () => {
-    if (Number(form.totalIGSTAmount) > 0) return "IGST Amount";
-    if (Number(form.totalCGSTAmount) > 0 || Number(form.totalSGSTAmount) > 0) return "CGST + SGST Amount";
-    return "GST Amount";
-  };
   const selectedEntityTaxDetails = getTaxDisplay(selectedEntity);
   const deliverToOptions = mode === "client" ? (form.client?.addressOptions || []) : [];
   const filteredDeliverToOptions = deliverToOptions.filter((address) => {
@@ -748,26 +789,90 @@ export default function PurchaseOrderPage() {
   };
 
   const selectEntity = (entity) => {
-    if (mode === "client") {
-      const defaultAddress = entity.defaultAddress?.address ? entity.defaultAddress : entity;
-      const shipToAddress = entity.shipToAddress?.address ? entity.shipToAddress : null;
-      setForm(prev => ({
-        ...prev,
-        client: {
-          ...entity,
-          name: entity.name,
-          address: defaultAddress.address || entity.address,
-          stateCode: defaultAddress.stateCode || entity.stateCode,
-        },
-        deliverTo: sameAsDeliverTo
-          ? defaultAddress
-          : (shipToAddress || prev.deliverTo),
-        currency: entity.currencyCode || prev.currency,
-      }));
-      setDeliverToSearch(shipToAddress?.label || shipToAddress?.name || "");
-    } else {
-      setForm(prev => ({ ...prev, vendor: entity, deliverTo: sameAsDeliverTo ? entity.defaultAddress || entity : prev.deliverTo, currency: entity.currencyCode || prev.currency }));
-    }
+    setForm(prev => {
+      let updatedForm = { ...prev };
+      
+      if (mode === "client") {
+        const defaultAddress = entity.defaultAddress?.address ? entity.defaultAddress : entity;
+        const shipToAddress = entity.shipToAddress?.address ? entity.shipToAddress : null;
+        updatedForm = {
+          ...updatedForm,
+          client: {
+            ...entity,
+            name: entity.name,
+            address: defaultAddress.address || entity.address,
+            stateCode: defaultAddress.stateCode || entity.stateCode,
+          },
+          deliverTo: sameAsDeliverTo
+            ? defaultAddress
+            : (shipToAddress || prev.deliverTo),
+          currency: entity.currencyCode || prev.currency,
+        };
+        setDeliverToSearch(shipToAddress?.label || shipToAddress?.name || "");
+      } else {
+        updatedForm = {
+          ...updatedForm,
+          vendor: entity,
+          deliverTo: sameAsDeliverTo ? entity.defaultAddress || entity : prev.deliverTo,
+          currency: entity.currencyCode || prev.currency
+        };
+      }
+
+      // --- RECALCULATE ALL ITEMS TAX BASED ON NEW ENTITY ---
+      const companyCountry = getCompanyCountry();
+      // Use the newly selected entity's country
+      const rawPartyCountry = entity.clientCountry || entity.country || entity.defaultAddress?.country || "";
+      const partyCountryCode = getCountryFlag(rawPartyCountry);
+      
+      const isCompanyIndia = companyCountry === "IN";
+      const isPartyIndia = partyCountryCode === "IN" || partyCountryCode === "";
+
+      let newTaxType = "NONE";
+      if (isCompanyIndia && isPartyIndia) newTaxType = "GST";
+      else if (isCompanyIndia && !isPartyIndia) newTaxType = "SALES_TAX"; // Placeholder, will fix rate below
+      else if (!isCompanyIndia && isPartyIndia) newTaxType = "RCM";
+
+      if (newTaxType === "SALES_TAX") {
+        const ct = getForeignCountryTax(partyCountryCode);
+        newTaxType = ct ? ct.taxType : "SALES_TAX";
+      }
+
+      const updatedItems = updatedForm.items.map(item => {
+        const taxableValue = (Number(item.quantity) || 0) * (Number(item.rate) || 0);
+        let gstRate = item.gstRate;
+        let gstAmount = 0;
+        let totalAmount = taxableValue;
+
+        if (newTaxType === "GST") {
+          // Keep item's HSN rate if possible, or 18 default
+          gstAmount = (taxableValue * gstRate) / 100;
+          totalAmount = taxableValue + gstAmount;
+        } else if (newTaxType === "RCM") {
+          gstAmount = (taxableValue * gstRate) / 100;
+          totalAmount = taxableValue; // Buyer pays tax
+        } else if (newTaxType === "NONE") {
+          gstRate = 0;
+          gstAmount = 0;
+          totalAmount = taxableValue;
+        } else {
+          // Foreign (Sales Tax, VAT, etc)
+          const ct = getForeignCountryTax(partyCountryCode);
+          gstRate = ct ? ct.taxRate : 18;
+          gstAmount = (taxableValue * gstRate) / 100;
+          totalAmount = taxableValue + gstAmount;
+        }
+
+        return { ...item, gstRate, gstAmount, totalAmount, taxableValue };
+      });
+
+      updatedForm.items = updatedItems;
+      const finalTotals = calculateGstTotals(updatedItems); 
+      // Note: calculateGstTotals needs to be called within this logic or slightly adjusted.
+      // But we can just use setForm's dependency injection or just merge.
+      
+      return { ...updatedForm, ...finalTotals };
+    });
+
     setEntityDropdownOpen(false);
     setEntitySearch("");
   };
@@ -868,25 +973,25 @@ export default function PurchaseOrderPage() {
           items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
           items[idx].totalAmount = taxableValue + items[idx].gstAmount;
 
-        } else if (taxType === "SALES_TAX") {
-          // ✅ India→Foreign: use country tax rate from master
+        } else if (taxType === "RCM") {
+          // ✅ Foreign→India: RCM — buyer pays tax (record for reference)
+          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
+          items[idx].totalAmount = taxableValue; // RCM: tax not added to invoice amount
+
+        } else if (taxType === "NONE") {
+          // NONE: Foreign→Foreign
+          items[idx].gstAmount   = 0;
+          items[idx].gstRate     = 0;
+          items[idx].totalAmount = taxableValue;
+          
+        } else {
+          // ✅ India→Foreign (any mapped tax logic: VAT, SALES_TAX, custom)
           const partyCountry   = getPartyCountry();
           const countryTax     = getForeignCountryTax(partyCountry);
           const taxRate        = countryTax ? countryTax.taxRate : 0;
           items[idx].gstRate   = taxRate;
           items[idx].gstAmount = (taxableValue * taxRate) / 100;
           items[idx].totalAmount = taxableValue + items[idx].gstAmount;
-
-        } else if (taxType === "RCM") {
-          // ✅ Foreign→India: RCM — buyer pays tax (record for reference)
-          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
-          items[idx].totalAmount = taxableValue; // RCM: tax not added to invoice amount
-
-        } else {
-          // NONE: Foreign→Foreign
-          items[idx].gstAmount   = 0;
-          items[idx].gstRate     = 0;
-          items[idx].totalAmount = taxableValue;
         }
       }
 
@@ -1230,7 +1335,7 @@ export default function PurchaseOrderPage() {
                       <p className={`text-[10px] font-semibold uppercase tracking-wider mb-2 ${colors.text}`}>Delivery Address</p>
                       <div className="grid sm:grid-cols-2 gap-3">
                         <div><p className="text-[10px] text-slate-500 mb-0.5">Name</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.name}</p></div>
-                        <div><p className="text-[10px] text-slate-500 mb-0.5">GSTIN</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.GSTIN || "—"}</p></div>
+                        <div><p className="text-[10px] text-slate-500 mb-0.5">{getTaxIdLabel()}</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.GSTIN || "—"}</p></div>
                         {form.deliverTo.stateCode && <div><p className="text-[10px] text-slate-500 mb-0.5">State Code</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.stateCode}</p></div>}
                         <div className={`${form.deliverTo.stateCode ? "" : "sm:col-span-2"}`}><p className="text-[10px] text-slate-500 mb-0.5">Address</p><p className="font-medium text-slate-800 text-xs">{form.deliverTo.address || "—"}</p></div>
                         <div className="sm:col-span-2"><p className="text-[10px] text-slate-500 mb-0.5">Tax Details</p><div className="flex flex-wrap gap-1.5">{getTaxDisplay(form.deliverTo).length > 0 ? getTaxDisplay(form.deliverTo).map((tax) => <span key={`${tax.label}-${tax.taxNumber}`} className="inline-flex items-center px-2 py-1 rounded bg-white/80 border border-slate-200 text-[10px] text-slate-700">{tax.label}: {tax.taxNumber}</span>) : <p className="font-medium text-slate-800 text-xs">—</p>}</div></div>
@@ -1276,7 +1381,7 @@ export default function PurchaseOrderPage() {
                     <div className="col-span-1">{getQtyLabel()}</div>
                     <div className="col-span-1">Unit</div>
                     <div className="col-span-1">{getRateLabel()}</div>
-                    <div className="col-span-1">GST %</div>
+                    <div className="col-span-1">{getTaxLabel(true)} %</div>
                     <div className="col-span-2">{`Total (${currencySymbol})`}</div>
                     <div className="col-span-1"></div>
                   </div>
@@ -1286,13 +1391,38 @@ export default function PurchaseOrderPage() {
                       <div className="sm:col-span-1 relative z-50">
                         <select value={item.hsnId || ""} onChange={(e) => {
                           const id = e.target.value;
-                          if (!id) { updateItem(i, "hsnId", null); updateItem(i, "hsnSac", ""); updateItem(i, "gstRate", 18); return; }
+                          const taxType = determineTaxType();
+                          if (!id) { 
+                            updateItem(i, "hsnId", null); 
+                            updateItem(i, "hsnSac", ""); 
+                            
+                            // Set default rate based on tax type
+                            if (taxType === "GST") {
+                              updateItem(i, "gstRate", 18);
+                            } else {
+                              const partyCountry = getPartyCountry();
+                              const ct = getForeignCountryTax(partyCountry);
+                              updateItem(i, "gstRate", ct ? ct.taxRate : 0);
+                            }
+                            return; 
+                          }
                           const hsn = hsnList.find(h => h._id === id);
                           if (hsn) {
                             updateItem(i, "hsnId", id);
                             updateItem(i, "hsnSac", hsn.hsnCode);
                             if (!item.description.trim()) updateItem(i, "description", hsn.serviceType);
-                            updateItem(i, "gstRate", getTotalGstRate(hsn));
+                            
+                            // Determine correct rate to set
+                            if (taxType === "GST" || taxType === "RCM") {
+                              updateItem(i, "gstRate", getTotalGstRate(hsn));
+                            } else if (taxType === "NONE") {
+                              updateItem(i, "gstRate", 0);
+                            } else {
+                              // Foreign
+                              const partyCountry = getPartyCountry();
+                              const ct = getForeignCountryTax(partyCountry);
+                              updateItem(i, "gstRate", ct ? ct.taxRate : 0);
+                            }
                           }
                         }} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none">
                           <option value="">HSN</option>
@@ -1316,9 +1446,18 @@ export default function PurchaseOrderPage() {
                 </div>
                 <div className="bg-white border border-slate-200 rounded-xl px-4 py-4 space-y-1.5 text-sm">
                   <div className="flex justify-between text-slate-600"><span>Subtotal (taxable)</span><span>{formatMoney(form.totalTaxableValue)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>CGST</span><span>{formatMoney(form.totalCGSTAmount)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>SGST</span><span>{formatMoney(form.totalSGSTAmount)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>IGST</span><span>{formatMoney(form.totalIGSTAmount)}</span></div>
+                  {determineTaxType() === "GST" ? (
+                    <>
+                      <div className="flex justify-between text-slate-600"><span>CGST</span><span>{formatMoney(form.totalCGSTAmount)}</span></div>
+                      <div className="flex justify-between text-slate-600"><span>SGST</span><span>{formatMoney(form.totalSGSTAmount)}</span></div>
+                      <div className="flex justify-between text-slate-600"><span>IGST</span><span>{formatMoney(form.totalIGSTAmount)}</span></div>
+                    </>
+                  ) : determineTaxType() !== "NONE" ? (
+                    <div className="flex justify-between text-slate-600">
+                      <span>{getTaxLabel()}</span>
+                      <span>{formatMoney(form.totalGSTAmount)}</span>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between font-semibold text-slate-800 pt-1.5 border-t border-slate-200"><span>Total</span><span>{formatMoney(form.totalAmount)}</span></div>
                 </div>
               </div>
@@ -1332,7 +1471,30 @@ export default function PurchaseOrderPage() {
               <p className="text-[11px] text-slate-500 mb-4">Select how the invoicing will be structured</p>
               <div className="grid gap-2 mb-6">
                 {PAYMENT_TERMS_OPTIONS.map(opt => (
-                  <button key={opt.key} onClick={() => set("paymentTerms", opt.key)} className={`p-3 rounded-lg border transition-all text-left ${form.paymentTerms === opt.key ? `${colors.bg} ${colors.border} ring-1 ${colors.ring}` : "bg-white border-slate-200 hover:border-slate-300"}`}>
+                  <button key={opt.key} onClick={() => {
+                    set("paymentTerms", opt.key);
+                    if (opt.key === "milestone") {
+                      const count = window.prompt("How many milestones would you like to create?", "3");
+                      const numCount = parseInt(count);
+                      if (!isNaN(numCount) && numCount > 0) {
+                        const newMilestones = Array.from({ length: numCount }, (_, i) => ({
+                          title: `Milestone ${i + 1}`,
+                          description: "",
+                          amount: Number((form.totalAmount / numCount).toFixed(2)),
+                          percentage: Number((100 / numCount).toFixed(2)),
+                          dueDate: today(),
+                          status: "pending",
+                        }));
+                        // Adjust the last one to ensure 100% and total accuracy
+                        const totalPercentSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.percentage, 0);
+                        const totalAmountSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.amount, 0);
+                        newMilestones[newMilestones.length - 1].percentage = Number((100 - totalPercentSoFar).toFixed(2));
+                        newMilestones[newMilestones.length - 1].amount = Number((form.totalAmount - totalAmountSoFar).toFixed(2));
+                        
+                        setForm(prev => ({ ...prev, milestones: newMilestones }));
+                      }
+                    }
+                  }} className={`p-3 rounded-lg border transition-all text-left ${form.paymentTerms === opt.key ? `${colors.bg} ${colors.border} ring-1 ${colors.ring}` : "bg-white border-slate-200 hover:border-slate-300"}`}>
                     <div className="flex items-start gap-2.5">
                       <opt.icon size={15} className={form.paymentTerms === opt.key ? colors.text : "text-slate-400"} />
                       <div><p className={`font-semibold text-xs ${form.paymentTerms === opt.key ? colors.text : "text-slate-700"}`}>{opt.label}</p><p className="text-[10px] text-slate-500 mt-0.5">{opt.hint}</p></div>
@@ -1388,7 +1550,7 @@ export default function PurchaseOrderPage() {
                   {/* Milestone Table */}
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
                     <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-2 bg-slate-50 border-b border-slate-100 text-xs font-medium text-slate-500">
-                      <div className="col-span-4">Milestone Name</div>
+                      <div className="col-span-3">Milestone Name</div>
                       <div className="col-span-2">Due Date</div>
                       <div className="col-span-2">Percentage (%)</div>
                       <div className="col-span-2">{`Amount (${currencySymbol})`}</div>
@@ -1397,7 +1559,7 @@ export default function PurchaseOrderPage() {
                     </div>
                     {form.milestones.map((milestone, idx) => (
                       <div key={idx} className="grid sm:grid-cols-12 gap-2 px-4 py-3 border-b border-slate-100 items-center">
-                        <div className="sm:col-span-4">
+                        <div className="sm:col-span-3">
                           <input
                             type="text"
                             placeholder="e.g., Design Phase"
@@ -1616,7 +1778,7 @@ export default function PurchaseOrderPage() {
                         <p className="font-medium text-slate-800">{form.deliverTo.stateCode}</p>
                       </div>
                       <div>
-                        <p className="text-slate-600">GSTIN</p>
+                        <p className="text-slate-600">{getTaxIdLabel()}</p>
                         <p className="font-medium text-slate-800">{form.deliverTo.GSTIN || "—"}</p>
                       </div>
                       <div className="col-span-2">
@@ -1684,7 +1846,7 @@ export default function PurchaseOrderPage() {
                             <th className="px-2 py-1.5 text-center font-medium text-slate-600">Qty</th>
                             <th className="px-2 py-1.5 text-center font-medium text-slate-600">Unit</th>
                             <th className="px-2 py-1.5 text-right font-medium text-slate-600">Rate</th>
-                            <th className="px-2 py-1.5 text-right font-medium text-slate-600">GST %</th>
+                            <th className="px-2 py-1.5 text-right font-medium text-slate-600">{getTaxLabel(true)} %</th>
                             <th className="px-2 py-1.5 text-right font-medium text-slate-600">Total</th>
                           </tr>
                         </thead>
@@ -1710,10 +1872,27 @@ export default function PurchaseOrderPage() {
                       <span className="text-slate-600">Taxable Value</span>
                       <span className="font-medium text-slate-800">{formatMoney(form.totalTaxableValue)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-600">{getTaxLabel()}</span>
-                      <span className="font-medium text-slate-800">{formatMoney(form.totalGSTAmount)}</span>
-                    </div>
+                    {determineTaxType() === "GST" ? (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">CGST</span>
+                          <span className="font-medium text-slate-800">{formatMoney(form.totalCGSTAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">SGST</span>
+                          <span className="font-medium text-slate-800">{formatMoney(form.totalSGSTAmount)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-slate-600">IGST</span>
+                          <span className="font-medium text-slate-800">{formatMoney(form.totalIGSTAmount)}</span>
+                        </div>
+                      </>
+                    ) : determineTaxType() !== "NONE" ? (
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">{getTaxLabel()}</span>
+                        <span className="font-medium text-slate-800">{formatMoney(form.totalGSTAmount)}</span>
+                      </div>
+                    ) : null}
                     <div className="flex justify-between border-t border-slate-200 pt-1 mt-1">
                       <span className="font-semibold text-slate-800">Total Amount</span>
                       <span className="font-semibold text-slate-800">{formatMoney(form.totalAmount)}</span>
