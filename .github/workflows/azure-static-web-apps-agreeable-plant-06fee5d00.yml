@@ -46,6 +46,20 @@ jobs:
           echo "VITE_AZURE_REDIRECT_URL=$VITE_AZURE_REDIRECT_URL"
           echo "VITE_AZURE_BACKEND_CLIENT_ID=$VITE_AZURE_BACKEND_CLIENT_ID"
           echo "VITE_API_URL=$VITE_API_URL"
+      - name: Verify Build Environment
+        env:
+          VITE_AZURE_CLIENT_ID: ${{ secrets.VITE_AZURE_CLIENT_ID }}
+          VITE_AZURE_TENANT_ID: ${{ secrets.VITE_AZURE_TENANT_ID }}
+          VITE_AZURE_REDIRECT_URL: ${{ secrets.VITE_AZURE_REDIRECT_URL }}
+          VITE_AZURE_BACKEND_CLIENT_ID: ${{ secrets.VITE_AZURE_BACKEND_CLIENT_ID }}
+          VITE_API_URL: ${{ secrets.VITE_API_URL }}
+        run: |
+          echo "Environment variables are set (masked for security):"
+          [ -n "$VITE_AZURE_CLIENT_ID" ] && echo "✓ VITE_AZURE_CLIENT_ID is set" || echo "✗ VITE_AZURE_CLIENT_ID is NOT set"
+          [ -n "$VITE_AZURE_TENANT_ID" ] && echo "✓ VITE_AZURE_TENANT_ID is set" || echo "✗ VITE_AZURE_TENANT_ID is NOT set"
+          [ -n "$VITE_AZURE_REDIRECT_URL" ] && echo "✓ VITE_AZURE_REDIRECT_URL is set" || echo "✗ VITE_AZURE_REDIRECT_URL is NOT set"
+          [ -n "$VITE_AZURE_BACKEND_CLIENT_ID" ] && echo "✓ VITE_AZURE_BACKEND_CLIENT_ID is set" || echo "✗ VITE_AZURE_BACKEND_CLIENT_ID is NOT set"
+          [ -n "$VITE_API_URL" ] && echo "✓ VITE_API_URL is set" || echo "✗ VITE_API_URL is NOT set"
       - name: Build And Deploy
         id: builddeploy
         uses: Azure/static-web-apps-deploy@v1
