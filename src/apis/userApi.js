@@ -46,11 +46,11 @@ export const updateCompanyApi = async (companyId, payload) => {
 };
 
 export const getAllCompaniesApi = async () => {
-  const { data } = await API.get("/user/getAllCompanies");
+  const { data } = await API.get("/users/companies/all");
   return data;
 };
 
 export const getCompanyByIdApi = async (companyId) => {
-  const { data } = await API.get(`users/companies/${companyId}`);
+  const { data } = await API.get(`/users/companies/${companyId}`);
   return data;
 };
