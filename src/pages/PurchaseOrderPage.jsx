@@ -9,6 +9,7 @@ import {
   updatePurchaseOrderApi,
 } from "../apis/purchaseOrderApi";
 import { getCompanyByIdApi } from "../apis/userApi";
+import { getAllCountryTaxApi } from "../apis/countryTaxApi";
 import {
   X,
   ChevronDown,
@@ -206,6 +207,7 @@ export default function PurchaseOrderPage() {
   const [vendors, setVendors] = useState([]);
   const [hsnList, setHsnList] = useState([]);
   const [companyInfo, setCompanyInfo] = useState(null);
+  const [countryTaxList, setCountryTaxList] = useState([]);
   const [entitySearch, setEntitySearch] = useState("");
   const [entityDropdownOpen, setEntityDropdownOpen] = useState(false);
   const [deliverToSearch, setDeliverToSearch] = useState("");
@@ -261,6 +263,90 @@ export default function PurchaseOrderPage() {
     return (Number(hsn.cgst) || 0) + (Number(hsn.sgst) || 0);
   };
 
+  // ─────────────────────────────────────────────────────────────
+  //  TAX TYPE DECISION LAYER
+  // ─────────────────────────────────────────────────────────────
+  /**
+   * Returns 'IN' for India, or the country code (uppercase) for foreign.
+   */
+  const getCountryFlag = (countryStr = "") => {
+    if (!countryStr) return "IN"; // default India
+    const normalized = countryStr.trim().toLowerCase();
+    if (
+      normalized === "india" ||
+      normalized === "in" ||
+      normalized === "ind"
+    ) return "IN";
+    // Try to extract ISO code from something like 'US', 'USA', 'United States'
+    // We store countryCode on client/vendor — if provided use first word
+    return countryStr.trim().toUpperCase().substring(0, 2);
+  };
+
+  /**
+   * Get the party (client/vendor) country code.
+   */
+  const getPartyCountry = () => {
+    const entity = mode === "client" ? form.client : form.vendor;
+    const raw =
+      entity?.clientCountry ||
+      entity?.country ||
+      entity?.defaultAddress?.country ||
+      "";
+    return getCountryFlag(raw);
+  };
+
+  /**
+   * Get the company's country code.
+   */
+  const getCompanyCountry = () => {
+    const raw =
+      companyInfo?.country ||
+      companyInfo?.address?.country ||
+      companyInfo?.registeredAddress?.country ||
+      "IN";
+    return getCountryFlag(raw);
+  };
+
+  /**
+   * Determine the applicable tax type for the current PO.
+   *
+   * Returns one of: 'GST' | 'SALES_TAX' | 'RCM' | 'NONE'
+   */
+  const determineTaxType = () => {
+    const companyCountry = getCompanyCountry();
+    const partyCountry   = getPartyCountry();
+
+    const isCompanyIndia = companyCountry === "IN";
+    const isPartyIndia   = partyCountry   === "IN" || partyCountry === "";
+
+    // Case 1: India → India → GST
+    if (isCompanyIndia && isPartyIndia) return "GST";
+
+    // Case 2: India → Foreign → SALES_TAX (look up country master)
+    if (isCompanyIndia && !isPartyIndia) return "SALES_TAX";
+
+    // Case 3: Foreign → India → RCM
+    if (!isCompanyIndia && isPartyIndia) return "RCM";
+
+    // Case 4: Foreign → Foreign → NONE
+    return "NONE";
+  };
+
+  /**
+   * Get the foreign country tax rate from countryTaxList.
+   * Returns { taxRate, taxLabel, taxType } or null.
+   */
+  const getForeignCountryTax = (partyCountry) => {
+    if (!partyCountry || partyCountry === "IN") return null;
+    return (
+      countryTaxList.find(
+        (ct) =>
+          ct.countryCode.toUpperCase() === partyCountry.toUpperCase() &&
+          ct.isActive
+      ) || null
+    );
+  };
+
   const normalizeStateCode = (value = "") => {
     const normalized = String(value || "").trim().toUpperCase();
     if (!normalized) return "";
@@ -282,33 +368,44 @@ export default function PurchaseOrderPage() {
 
   const calculateGstTotals = (items = []) => {
     let totalTaxable = 0;
-    let totalGST = 0;
-    let totalAmount = 0;
+    let totalTax     = 0;
+    let totalAmount  = 0;
 
     items.forEach((item) => {
       totalTaxable += Number(item.taxableValue) || 0;
-      totalGST += Number(item.gstAmount) || 0;
-      totalAmount += Number(item.totalAmount) || 0;
+      totalTax     += Number(item.gstAmount)    || 0;
+      totalAmount  += Number(item.totalAmount)  || 0;
     });
 
-    const companyStateCode = getCompanyStateCode();
-    const shipToStateCode = normalizeStateCode(form.deliverTo?.stateCode);
-    const isIntraState =
-      !!companyStateCode &&
-      !!shipToStateCode &&
-      companyStateCode === shipToStateCode;
+    const taxType = determineTaxType();
 
-    const totalCGSTAmount = isIntraState ? Math.round((totalGST / 2) * 100) / 100 : 0;
-    const totalSGSTAmount = isIntraState ? Math.round((totalGST / 2) * 100) / 100 : 0;
-    const totalIGSTAmount = isIntraState ? 0 : Math.round(totalGST * 100) / 100;
+    // Only split CGST/SGST for India→India intra-state GST
+    let totalCGSTAmount = 0;
+    let totalSGSTAmount = 0;
+    let totalIGSTAmount = 0;
+
+    if (taxType === "GST") {
+      const companyStateCode = getCompanyStateCode();
+      const shipToStateCode  = normalizeStateCode(form.deliverTo?.stateCode);
+      const isIntraState =
+        !!companyStateCode &&
+        !!shipToStateCode &&
+        companyStateCode === shipToStateCode;
+
+      totalCGSTAmount = isIntraState ? Math.round((totalTax / 2) * 100) / 100 : 0;
+      totalSGSTAmount = isIntraState ? Math.round((totalTax / 2) * 100) / 100 : 0;
+      totalIGSTAmount = isIntraState ? 0 : Math.round(totalTax * 100) / 100;
+    }
+    // For SALES_TAX / RCM / NONE — no CGST/SGST/IGST split
 
     return {
       totalTaxableValue: Math.round(totalTaxable * 100) / 100,
-      totalGSTAmount: Math.round(totalGST * 100) / 100,
+      totalGSTAmount:    Math.round(totalTax    * 100) / 100,
       totalCGSTAmount,
       totalSGSTAmount,
       totalIGSTAmount,
-      totalAmount: Math.round(totalAmount * 100) / 100,
+      totalAmount:       Math.round(totalAmount * 100) / 100,
+      taxType,
     };
   };
 
@@ -422,6 +519,13 @@ export default function PurchaseOrderPage() {
         else if (Array.isArray(res)) hsnArray = res;
         setHsnList(hsnArray);
       })
+      .catch(console.error);
+  }, []);
+
+  // Fetch country tax master list
+  useEffect(() => {
+    getAllCountryTaxApi()
+      .then((res) => setCountryTaxList(res?.data || []))
       .catch(console.error);
   }, []);
 
@@ -753,11 +857,39 @@ export default function PurchaseOrderPage() {
     setForm(prev => {
       const items = [...prev.items];
       items[idx] = { ...items[idx], [field]: value };
+
       if (field === "quantity" || field === "rate" || field === "gstRate") {
-        items[idx].taxableValue = items[idx].quantity * items[idx].rate;
-        items[idx].gstAmount = (items[idx].taxableValue * items[idx].gstRate) / 100;
-        items[idx].totalAmount = items[idx].taxableValue + items[idx].gstAmount;
+        const taxType = determineTaxType();
+        const taxableValue = items[idx].quantity * items[idx].rate;
+        items[idx].taxableValue = taxableValue;
+
+        if (taxType === "GST") {
+          // ✅ India→India: use HSN GST rate
+          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
+          items[idx].totalAmount = taxableValue + items[idx].gstAmount;
+
+        } else if (taxType === "SALES_TAX") {
+          // ✅ India→Foreign: use country tax rate from master
+          const partyCountry   = getPartyCountry();
+          const countryTax     = getForeignCountryTax(partyCountry);
+          const taxRate        = countryTax ? countryTax.taxRate : 0;
+          items[idx].gstRate   = taxRate;
+          items[idx].gstAmount = (taxableValue * taxRate) / 100;
+          items[idx].totalAmount = taxableValue + items[idx].gstAmount;
+
+        } else if (taxType === "RCM") {
+          // ✅ Foreign→India: RCM — buyer pays tax (record for reference)
+          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
+          items[idx].totalAmount = taxableValue; // RCM: tax not added to invoice amount
+
+        } else {
+          // NONE: Foreign→Foreign
+          items[idx].gstAmount   = 0;
+          items[idx].gstRate     = 0;
+          items[idx].totalAmount = taxableValue;
+        }
       }
+
       const totals = calculateGstTotals(items);
       return {
         ...prev,
