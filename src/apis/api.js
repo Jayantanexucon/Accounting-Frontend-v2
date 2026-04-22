@@ -33,6 +33,16 @@ API.interceptors.request.use(async (config) => {
     }
   }
 
+  // 🔍 DEBUG: Log cookies being sent with each request
+  if (config.url?.includes("fetchMe") || config.url?.includes("auth")) {
+    const acCmpCookie = document.cookie.split('; ').find(row => row.startsWith('AC_CMP='));
+    console.log(`📡 [${config.method?.toUpperCase()}] ${config.url}`, {
+      withCredentials: config.withCredentials,
+      AC_CMP_cookie: acCmpCookie ? `${acCmpCookie.split('=')[0]}=${acCmpCookie.split('=')[1]}` : "NOT FOUND",
+      hasBearerToken: !!config.headers?.Authorization,
+    });
+  }
+
   return config;
 });
 

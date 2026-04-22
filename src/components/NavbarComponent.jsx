@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useState, useEffect, useMemo } from "react";
 import { Settings, ChevronRight, ChevronLeft, LogOut } from "lucide-react";
 import { setCookie } from "../utils/cookieUtil";
+import { debugCookieIssue } from "../utils/debugCookies";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Import all icons
@@ -110,13 +111,20 @@ export default function NavbarComponent() {
           console.log("🍪 All cookies:", document.cookie);
         }, 50);
         
-        // Step 4: Longer delay to ensure cookie is persisted in all scenarios
+        // Step 4: Run debug check
+        console.log("\n🔍 Running cookie debug check...");
+        const debugInfo = debugCookieIssue();
+        if (!debugInfo.hasCookie) {
+          console.error("⚠️  CRITICAL: Cookie was not set! Company change will fail.");
+        }
+        
+        // Step 5: Longer delay to ensure cookie is persisted in all scenarios
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        // Step 5: Update local state before reload
+        // Step 6: Update local state before reload
         setChoose(value);
         
-        // Step 6: Reload to fetch new company data from backend
+        // Step 7: Reload to fetch new company data from backend
         console.log("🔄 Reloading page to apply company change...");
         window.location.reload();
       } catch (error) {
