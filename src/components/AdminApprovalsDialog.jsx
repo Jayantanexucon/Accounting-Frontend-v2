@@ -19,6 +19,7 @@ import {
 import LoadingComponent from "../components/LoadingComponent";
 import axios from "axios";
 import { useNotifications } from "../modules/notification/notification.slice.jsx";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 export default function AdminApprovalsDialog({ open, onClose }) {
   const { user } = useAuth();
@@ -34,6 +35,7 @@ export default function AdminApprovalsDialog({ open, onClose }) {
     user?.role === "superAdmin" ||
     user?.role === "admin" ||
     user?.privilege?.masterUpdate === true;
+  const canReviewJournalApprovals = checkAuthorization(user, "JOURNAL", "EDIT");
 
   // useEffect(() => {
   //   if (open && isAdmin) {
@@ -152,7 +154,7 @@ export default function AdminApprovalsDialog({ open, onClose }) {
     setExpandedRequestId(expandedRequestId === requestId ? null : requestId);
   };
 
-  if (!isAdmin) {
+  if (!isAdmin || !canReviewJournalApprovals) {
     // // console.log("User is not admin, not showing dialog. User:", user);
     return null;
   }

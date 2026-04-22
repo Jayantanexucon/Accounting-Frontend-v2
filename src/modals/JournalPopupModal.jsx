@@ -11,6 +11,7 @@ import {
   User, Tag, Hash, ArrowUpRight, ArrowDownLeft,
   AlertTriangle, BookOpen, Pencil,
 } from "lucide-react";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 /* ─── tiny helpers ────────────────────────────────────── */
 const fmt = (n) =>
@@ -102,9 +103,11 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
     user?.role === "admin" ||
     user?.role === "superAdmin" ||
     user?.privilege?.masterUpdate === true;
+  const canEditJournal = checkAuthorization(user, "JOURNAL", "EDIT");
+  const canDeleteJournal = checkAuthorization(user, "JOURNAL", "DELETE");
 
   const handleEditJournal = useCallback(() => {
-    if (!filteredJournal) return;
+    if (!filteredJournal || !canEditJournal) return;
 
     if (
       filteredJournal.sourceType &&
@@ -114,14 +117,14 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
       return;
     }
 
-    navigate("/accounting/journals", {
+    navigate("/accounting/journals/create", {
       state: {
         editingJournal: filteredJournal,
         isEditing: true,
       },
     });
     onClose();
-  }, [filteredJournal, navigate, onClose]);
+  }, [filteredJournal, navigate, onClose, canEditJournal]);
 
   /* ── totals ────────────────────────────────────────── */
   const totalDebit  = filteredJournal?.lines?.reduce((s, l) => s + (l.debit  || 0), 0) ?? 0;
@@ -269,9 +272,12 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
                     </div>
 
                     {/* Action buttons */}
-                    {(canManage || ["MANUAL", "EXCEL"].includes(filteredJournal.sourceType)) && (
+                    {((canDeleteJournal && canManage) ||
+                      (canEditJournal &&
+                        ["MANUAL", "EXCEL"].includes(filteredJournal.sourceType))) && (
                       <div className="flex items-center gap-2 shrink-0">
-                        {["MANUAL", "EXCEL"].includes(filteredJournal.sourceType) && (
+                        {canEditJournal &&
+                          ["MANUAL", "EXCEL"].includes(filteredJournal.sourceType) && (
                           <button
                             onClick={handleEditJournal}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded-xl hover:bg-blue-100 transition-all"
@@ -279,7 +285,7 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
                             <Pencil size={12} /> Edit
                           </button>
                         )}
-                        {canManage && (
+                        {canDeleteJournal && canManage && (
                           <button
                             onClick={() => setConfirmDelete(filteredJournal)}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-xl hover:bg-red-100 transition-all"

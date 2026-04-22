@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from "react";
 import HSNModal from "../modals/HSNModal";
+import CountryTaxModal from "../modals/CountryTaxModal";
 import {
   Plus, Pencil, Trash2, ChevronRight, History, Hash,
   Tag, ShieldCheck, ShieldOff, Search, X, LayoutGrid,
-  Calendar, SlidersHorizontal,
+  Calendar, SlidersHorizontal, Globe,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { getallhsn, deletehsnbyid } from "../apis/hsnapi";
@@ -33,12 +34,13 @@ export default function HSNList() {
   const { user } = useAuth();
   const companyId = user?.company?._id;
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editId, setEditId]       = useState(null);
-  const [openLogs, setOpenLogs]   = useState(false);
-  const [expanded, setExpanded]   = useState(null);
-  const [search, setSearch]       = useState("");
-  const [page, setPage]           = useState(1);
+  const [modalOpen, setModalOpen]               = useState(false);
+  const [editId, setEditId]                     = useState(null);
+  const [openLogs, setOpenLogs]                 = useState(false);
+  const [expanded, setExpanded]                 = useState(null);
+  const [search, setSearch]                     = useState("");
+  const [page, setPage]                         = useState(1);
+  const [countryTaxModalOpen, setCountryTaxModalOpen] = useState(false);
 
   const PAGE_SIZE = 10;
 
@@ -156,6 +158,18 @@ export default function HSNList() {
                 title="Audit Trail"
                 className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-all">
                 <History size={15} />
+              </button>
+
+              {/* Country Tax Master button */}
+              <button
+                onClick={() => setCountryTaxModalOpen(true)}
+                title="Country Tax Master"
+                className="flex items-center gap-1.5 px-4 py-2.5 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all"
+                style={{
+                  background: "linear-gradient(135deg,#0ea5e9,#06b6d4)",
+                  boxShadow: "0 4px 14px rgba(14,165,233,0.35)",
+                }}>
+                <Globe size={14} /> Country Tax
               </button>
 
               {/* Add HSN — gradient CTA matching HomePage */}
@@ -524,6 +538,11 @@ export default function HSNList() {
           editId={editId}
         />
       )}
+      {/* Country Tax Master Modal */}
+      <CountryTaxModal
+        isOpen={countryTaxModalOpen}
+        onClose={() => setCountryTaxModalOpen(false)}
+      />
     </div>
   );
 }

@@ -23,11 +23,12 @@ const formatLocalDateInput = (date) => {
 export default function TrialBalancePage() {
   // const [accountData, setAccountData] = useState([]);
   // const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const company=localStorage.getItem("selectedCompany") ? JSON.parse(localStorage.getItem("selectedCompany")) : null;
+  const canViewReport = hasPermission("TRIAL BALANCE", "VIEW");
 
   // Helper function to close sidebar
   const handleCloseSidebar = useCallback(() => {
@@ -577,13 +578,19 @@ export default function TrialBalancePage() {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
               {loading && <LoadingComponent message="Loading trial balance..." />}
 
-              {!loading && trialBalance.length === 0 && (
+              {!loading && !canViewReport && (
+                <div className="p-12">
+                  <EmptyComponent title="Permission Required" subtitle="You do not have permission to view this report" />
+                </div>
+              )}
+
+              {!loading && canViewReport && trialBalance.length === 0 && (
                 <div className="p-12">
                   <EmptyComponent title="No trial balance data" subtitle="Add accounts and journals to generate trial balance" />
                 </div>
               )}
 
-              {!loading && trialBalance.length > 0 && (
+              {!loading && canViewReport && trialBalance.length > 0 && (
                 <>
                   {/* Table header bar */}
                   <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100"

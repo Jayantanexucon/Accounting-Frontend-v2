@@ -188,12 +188,19 @@ export default function VendorForm({ companyId, editData = null, onClose, onSucc
   };
 
   const handleCreateCountry = async (payload) => {
+    // Currency is now nested inside country - extract from payload.currency
     const response = await createCountryApi({
-      ...payload,
-      currency: {
-        currencyName: payload.currencyName,
-        currencyCode: payload.currencyCode,
-        currencySymbol: payload.currencySymbol,
+      countryName: payload.countryName,
+      countryCode: payload.countryCode,
+      dialCode: payload.dialCode || "",
+      currency: payload.currency || {
+        currencyName: payload.currencyName || payload.countryName,
+        currencyCode: payload.currencyCode || payload.countryCode,
+        currencySymbol: payload.currencySymbol || "",
+      },
+      taxConfig: payload.taxConfig || {
+        taxSystem: payload.taxConfig?.taxSystem || "OTHER",
+        isGSTApplicable: payload.taxConfig?.taxSystem === "GST",
       },
     });
     const createdCountry = response?.data;
@@ -321,7 +328,21 @@ export default function VendorForm({ companyId, editData = null, onClose, onSucc
             </div>
             <div>
               <Label>Phone Number</Label>
-              <input name="phoneNumber" value={form.phoneNumber} onChange={handleBasicChange} placeholder="9876543210" className={inputCls} />
+              <div className="flex items-center gap-2">
+                {primaryAddress.dialCode && (
+                  <span className="px-3 py-2 text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 rounded-xl">
+                    {primaryAddress.dialCode}
+                  </span>
+                )}
+                <input 
+                  name="phoneNumber" 
+                  value={form.phoneNumber} 
+                  onChange={handleBasicChange} 
+                  placeholder="9876543210" 
+                  className={inputCls}
+                  style={{ flex: 1 }}
+                />
+              </div>
             </div>
             <div>
               <Label>Email Address</Label>
@@ -343,6 +364,9 @@ export default function VendorForm({ companyId, editData = null, onClose, onSucc
                 value: country._id,
                 label: country.countryName,
                 countryName: country.countryName,
+                dialCode: country.dialCode || "",
+                currency: country.currency || null,
+                taxConfig: country.taxConfig || null,
                 taxTypes: country.taxTypes || [],
                 countryType: country.countryType,
               }))}

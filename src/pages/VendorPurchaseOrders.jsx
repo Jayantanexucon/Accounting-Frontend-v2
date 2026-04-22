@@ -31,6 +31,7 @@ import {
     History,
     Loader2,
 } from "lucide-react";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 const StatCard = ({ label, value, icon: Icon, color }) => (
     <div className="bg-white border rounded-md p-2 flex items-center justify-between shadow-sm">
@@ -46,6 +47,9 @@ const StatCard = ({ label, value, icon: Icon, color }) => (
 
 const VendorPurchaseOrders = () => {
     const { user } = useAuth();
+    const canCreatePO = checkAuthorization(user, "PURCHASE ORDER", "CREATE");
+    const canEditPO = checkAuthorization(user, "PURCHASE ORDER", "EDIT");
+    const canDeletePO = checkAuthorization(user, "PURCHASE ORDER", "DELETE");
     const navigate = useNavigate();
     const { vendorId } = useParams();
 
@@ -235,13 +239,15 @@ const VendorPurchaseOrders = () => {
                             </div>
                         </div>
                         <div className="flex gap-2">
-                            <Link
-                                to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
-                                className="inline-flex items-center justify-center px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700 transition"
-                            >
-                                <Plus className="h-4 w-4 mr-2" />
-                                New PO for {vendor?.vendorName || "Vendor"}
-                            </Link>
+                            {canCreatePO && (
+                                <Link
+                                    to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
+                                    className="inline-flex items-center justify-center px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-md hover:bg-amber-700 transition"
+                                >
+                                    <Plus className="h-4 w-4 mr-2" />
+                                    New PO for {vendor?.vendorName || "Vendor"}
+                                </Link>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -271,13 +277,15 @@ const VendorPurchaseOrders = () => {
                         <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
                         <h3 className="font-semibold text-gray-700 mb-1">No purchase orders for this vendor</h3>
                         <p className="text-gray-500 mb-4 text-xs">Create the first purchase order for this vendor.</p>
-                        <Link
-                            to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
-                            className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-md inline-flex items-center text-xs"
-                        >
-                            <Plus className="h-4 w-4 mr-1.5" />
-                            Create New PO
-                        </Link>
+                        {canCreatePO && (
+                            <Link
+                                to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
+                                className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-md inline-flex items-center text-xs"
+                            >
+                                <Plus className="h-4 w-4 mr-1.5" />
+                                Create New PO
+                            </Link>
+                        )}
                     </div>
                 ) : (
                     <div className="space-y-3">
@@ -371,10 +379,14 @@ const VendorPurchaseOrders = () => {
                                                 </div>
                                             </div>
                                             <div className="flex flex-wrap gap-1 mt-4 pt-4 border-t border-gray-200">
-                                                <Link to={`/purchase-order?edit=${po._id}`} className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"><Edit className="h-3 w-3 mr-1.5" />Edit</Link>
+                                                {canEditPO && (
+                                                    <Link to={`/purchase-order?edit=${po._id}`} className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"><Edit className="h-3 w-3 mr-1.5" />Edit</Link>
+                                                )}
                                                 <button onClick={(e) => handleDownloadPdf(po._id, po.poNumber, e)} className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Download className="h-3 w-3 mr-1.5" />PDF</button>
                                                 <button onClick={(e) => handleDownloadWord(po._id, po.poNumber, e)} className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Download className="h-3 w-3 mr-1.5" />Word</button>
-                                                <button onClick={(e) => handleDelete(po._id, e)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"><Trash2 className="h-3 w-3 mr-1.5" />Delete</button>
+                                                {canDeletePO && (
+                                                    <button onClick={(e) => handleDelete(po._id, e)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"><Trash2 className="h-3 w-3 mr-1.5" />Delete</button>
+                                                )}
                                                 <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Mail className="h-3 w-3 mr-1.5" />Email</button>
                                             </div>
                                         </div>

@@ -70,6 +70,18 @@ export const buildCountryOptions = (countries = []) =>
       label: country.countryName,
       countryName: country.countryName,
       countryCode: country.countryCode,
+      // Currency is now embedded in country
+      currency: country.currency || null,
+      currencyName: country.currency?.currencyName || "",
+      currencyCode: country.currency?.currencyCode || "",
+      currencySymbol: country.currency?.currencySymbol || "",
+      // Tax config (new structure)
+      taxConfig: country.taxConfig || null,
+      taxSystem: country.taxConfig?.taxSystem || "NONE",
+      isGSTApplicable: country.taxConfig?.isGSTApplicable || false,
+      isRCMApplicable: country.taxConfig?.isRCMApplicable || false,
+      isExportZeroRated: country.taxConfig?.isExportZeroRated || false,
+      // Legacy fields (for backward compatibility)
       taxTypes: country.taxTypes || [],
       countryType: country.countryType || "OTHER",
       postalCodeLabel: country.postalCodeLabel || "Postal Code",

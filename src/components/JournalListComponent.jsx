@@ -6,6 +6,7 @@ import { useAuth } from "../contexts/AuthContext";
 import LoadingComponent from "./LoadingComponent";
 import axios from "axios";
 import { ApprovalManager } from "../utils/approvalManager";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 export default function JournalList({ open, onClose, id, initialSearch = "", onEditJournal }) {
   const [journals, setJournals] = useState([]);
@@ -20,6 +21,8 @@ const isAdmin =
   user?.role === "superAdmin" ||
   user?.role === "admin" ||
   user?.privilege?.masterUpdate === true;
+  const canEditJournal = checkAuthorization(user, "JOURNAL", "EDIT");
+  const canDeleteJournal = checkAuthorization(user, "JOURNAL", "DELETE");
   const refreshApprovals = async () => {
     if (!user?.company?._id) return;
     await ApprovalManager.syncRequests(user.company._id);
@@ -52,8 +55,9 @@ const isAdmin =
   }, [open, user?.company?._id]);
 
   // Handle delete confirmation
-const handleDeleteClick = async (journal, e) => {
+  const handleDeleteClick = async (journal, e) => {
   e.stopPropagation();
+  if (!canDeleteJournal) return;
   if (isAdmin) {
     setConfirmDelete(journal);
   } else {
@@ -101,6 +105,7 @@ const handleDeleteClick = async (journal, e) => {
 
   // Handle edit click
   const handleEditClick = async (journal) => {
+    if (!canEditJournal) return;
     if (isAdmin) {
       // Admin can edit directly
       onEditJournal(journal);
@@ -126,6 +131,7 @@ const handleDeleteClick = async (journal, e) => {
 
   // Get button status for a journal
   const getEditButtonStatus = (journal) => {
+    if (!canEditJournal) return null;
     if (isAdmin) {
       return {
         text: "Edit",
@@ -181,6 +187,16 @@ const handleDeleteClick = async (journal, e) => {
       setSearch(initialSearch);
     }
   }, [open, initialSearch]);
+
+  const getDeleteButtonStatus = () => {
+    if (!canDeleteJournal) return null;
+    return {
+      text: isAdmin ? "Delete" : "Request Delete",
+      enabled: true,
+      className: "bg-red-100 text-red-700 hover:bg-red-200",
+      tooltip: isAdmin ? "Delete journal" : "Request journal deletion",
+    };
+  };
 
   // Confirmation Modal Component
   const DeleteConfirmationModal = () => {
@@ -250,6 +266,8 @@ const handleDeleteClick = async (journal, e) => {
               {!loading &&
                 filteredJournals.map((journal) => {
                   const editButtonStatus = getEditButtonStatus(journal);
+                  const deleteButtonStatus = getDeleteButtonStatus(journal);
+                  const showActions = Boolean(editButtonStatus || deleteButtonStatus);
 
                   return (
                     <div key={journal._id} className="border border-neutral-200 rounded-lg overflow-hidden bg-white shadow-sm">
@@ -275,25 +293,31 @@ const handleDeleteClick = async (journal, e) => {
 
                           <div className="flex items-center gap-4">
                             <div className="text-sm text-neutral-600 whitespace-nowrap">{new Date(journal.date).toLocaleDateString()}</div>
-                            <div className="flex gap-2">
-                              {/* EDIT BUTTON */}
-                              <button
-                                onClick={() => handleEditClick(journal)}
-                                disabled={!editButtonStatus.enabled}
-                                className={`px-3 py-1 text-xs font-medium rounded ${editButtonStatus.className} ${!editButtonStatus.enabled ? "cursor-not-allowed" : "cursor-pointer"}`}
-                                title={editButtonStatus.tooltip}
-                              >
-                                {editButtonStatus.text}
-                              </button>
+                            {showActions && (
+                              <div className="flex gap-2">
+                                {editButtonStatus && (
+                                  <button
+                                    onClick={() => handleEditClick(journal)}
+                                    disabled={!editButtonStatus.enabled}
+                                    className={`px-3 py-1 text-xs font-medium rounded ${editButtonStatus.className} ${!editButtonStatus.enabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                                    title={editButtonStatus.tooltip}
+                                  >
+                                    {editButtonStatus.text}
+                                  </button>
+                                )}
 
-                              {/* DELETE BUTTON */}
-                              <button 
-                                onClick={() => handleDeleteClick(journal)} 
-                                className="px-3 py-1 text-xs font-medium text-red-700 bg-red-100 rounded hover:bg-red-200 cursor-pointer"
-                              >
-                                {isAdmin ? "Delete" : "Request Delete"}
-                              </button>
-                            </div>
+                                {deleteButtonStatus && (
+                                  <button
+                                    onClick={(e) => handleDeleteClick(journal, e)}
+                                    disabled={!deleteButtonStatus.enabled}
+                                    className={`px-3 py-1 text-xs font-medium rounded ${deleteButtonStatus.className} ${!deleteButtonStatus.enabled ? "cursor-not-allowed" : "cursor-pointer"}`}
+                                    title={deleteButtonStatus.tooltip}
+                                  >
+                                    {deleteButtonStatus.text}
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>

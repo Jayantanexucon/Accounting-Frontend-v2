@@ -17,6 +17,8 @@ import LoadingComponent from "../components/LoadingComponent";
 export default function VendorPage() {
   const { user } = useAuth();
   const companyId = user?.company?._id;
+  const canCreateVendor = checkAuthorization(user, "VENDOR", "CREATE");
+  const canEditVendor = checkAuthorization(user, "VENDOR", "EDIT");
 
   const [openForm, setOpenForm]             = useState(false);
   const [editData, setEditData]             = useState(null);
@@ -151,9 +153,7 @@ export default function VendorPage() {
                 </button>
 
                 {/* Approvals */}
-                {(user?._id === user?.company?.owner ||
-                  user?.role === "superAdmin" ||
-                  user?.role === "admin") && (
+                {canEditVendor && (
                   <button
                     onClick={() => setShowApprovals(true)}
                     className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-all">
@@ -162,7 +162,7 @@ export default function VendorPage() {
                 )}
 
                 {/* New Vendor — same gradient + glow as HomePage CTA */}
-                {checkAuthorization(user, "VENDOR", "CREATE") && (
+                {canCreateVendor && (
                   <button
                     onClick={() => { setEditData(null); setOpenForm(true); }}
                     className="flex items-center gap-1.5 px-4 py-2.5 text-white text-xs font-bold rounded-xl hover:opacity-90 transition-all"
