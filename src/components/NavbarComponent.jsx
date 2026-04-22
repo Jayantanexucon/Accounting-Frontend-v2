@@ -89,27 +89,34 @@ export default function NavbarComponent() {
   const handleChangeCompany = async (value) => {
     const selectedCompany = user?.companies?.find((c) => c._id === value);
     if (selectedCompany) {
-      console.log("🔄 Switching company to:", selectedCompany.name);
+      console.log("🔄 Switching company to:", selectedCompany.name, "ID:", value);
       
       try {
         // Step 1: Update localStorage
         localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
         console.log("✅ localStorage updated:", selectedCompany.name);
         
-        // Step 2: Set cookie with proper options
+        // Step 2: Set cookie with explicit options for production HTTPS
         setCookie("AC_CMP", value, {
-          expires: 30, // 30 days
-          path: "/", // Ensure cookie is available on all paths
+          expires: 30,
+          path: "/",
+          domain: undefined, // Let browser use current domain
         });
-        console.log("✅ Cookie set:", value);
         
-        // Step 3: Small delay to ensure cookie is saved before reload
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Step 3: Verify cookie was set immediately
+        setTimeout(() => {
+          const cookieValue = document.cookie.split('; ').find(row => row.startsWith('AC_CMP='));
+          console.log("✅ Cookie verification:", cookieValue || "Cookie NOT found");
+          console.log("🍪 All cookies:", document.cookie);
+        }, 50);
         
-        // Step 4: Update local state before reload
+        // Step 4: Longer delay to ensure cookie is persisted in all scenarios
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Step 5: Update local state before reload
         setChoose(value);
         
-        // Step 5: Reload to fetch new company data from backend
+        // Step 6: Reload to fetch new company data from backend
         console.log("🔄 Reloading page to apply company change...");
         window.location.reload();
       } catch (error) {
