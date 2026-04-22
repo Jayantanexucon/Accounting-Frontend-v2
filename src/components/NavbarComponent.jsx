@@ -100,7 +100,6 @@ export default function NavbarComponent() {
         setCookie("AC_CMP", value, {
           expires: 30, // 30 days
           path: "/", // Ensure cookie is available on all paths
-          secure: import.meta.env.VITE_COOKIE_SECURE === "true",
         });
         console.log("✅ Cookie set:", value);
         
