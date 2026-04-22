@@ -31,22 +31,30 @@ export const SocketProvider = ({ children }) => {
           return;
         }
 
+        // Debug logging
+        console.log("📊 Socket token response:", { 
+          hasData: !!response?.data, 
+          token: response?.data?.token ? "present" : "null" 
+        });
+
         socketInstance = io(resolveSocketUrl(), {
           transports: ["websocket"],
           autoConnect: true,
           auth: {
-            token: response.data.token,
+            token: response.data?.token,
           },
         });
 
         socketInstance.on("connect", () => {
           if (active) {
+            console.log("✅ Socket connected successfully");
             setIsConnected(true);
           }
         });
 
         socketInstance.on("disconnect", () => {
           if (active) {
+            console.log("❌ Socket disconnected");
             setIsConnected(false);
           }
         });
@@ -54,8 +62,12 @@ export const SocketProvider = ({ children }) => {
         setSocket(socketInstance);
       } catch (error) {
         console.error(
-          "Socket connection failed:",
-          error?.response?.data?.message || error?.message || error,
+          "❌ Socket connection failed:",
+          {
+            message: error?.response?.data?.message || error?.message || error,
+            responseStatus: error?.response?.status,
+            hasData: !!error?.response?.data,
+          }
         );
         setSocket(null);
         setIsConnected(false);

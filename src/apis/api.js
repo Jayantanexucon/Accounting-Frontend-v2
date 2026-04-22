@@ -71,7 +71,13 @@ API.interceptors.response.use(
     }
 
     if (status === 401 || isBlocked) {
+      // Preserve company selection before clearing
+      const selectedCompany = localStorage.getItem("selectedCompany");
       localStorage.clear();
+      if (selectedCompany && !isBlocked) {
+        // Only restore if not blocked
+        localStorage.setItem("selectedCompany", selectedCompany);
+      }
       // Fire a global event — React will catch this and logout properly
       window.dispatchEvent(
         new CustomEvent("force-logout", {

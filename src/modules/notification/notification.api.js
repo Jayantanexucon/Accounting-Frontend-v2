@@ -57,9 +57,9 @@ export const markAllNotificationsReadApi = async (companyId) => {
 
 export const getNotificationSocketTokenApi = async () => {
   if (!ENABLE_NOTIFICATIONS_API) {
-    return { token: null };
+    return { data: { token: null } };
   }
 
   const { data } = await API.get("/notifications/socket-token");
-  return data;
+  return { data };
 };
