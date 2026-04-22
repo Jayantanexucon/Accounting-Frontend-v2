@@ -72,6 +72,8 @@ import { setAuthToken } from "../apis/api";
 import { loginRequest } from "../authConfig";
 import { fetchMe } from "../apis/authApi";
 import { useNavigate } from "react-router-dom";
+import { getEntitiesApi } from "../apis/entityApi";
+import { hasPermission as checkUserPermission } from "../utils/permissionUtils";
 
 const AuthContext = createContext(null);
 
@@ -80,6 +82,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isLoading, setLoading] = useState(true);
   const [company, setCompany] = useState(null);
+  const [entities, setEntities] = useState([]);
 
   const navigator = useNavigate();
   const initAuth = async () => {
@@ -136,6 +139,19 @@ export const AuthProvider = ({ children }) => {
         console.warn("⚠️  No selected company returned from backend");
       }
 
+      let entityCatalog = [];
+      try {
+        const entityResponse = await getEntitiesApi();
+        entityCatalog = entityResponse?.data || [];
+        setEntities(entityCatalog);
+        localStorage.setItem("entityCatalog", JSON.stringify(entityCatalog));
+      } catch (entityError) {
+        console.error("❌ Failed to load entity catalog:", entityError);
+        setEntities([]);
+        localStorage.removeItem("entityCatalog");
+      }
+
+      setCompany(selectedCompany);
       setUser({
         ...data.user,
         company: selectedCompany,
@@ -146,6 +162,8 @@ export const AuthProvider = ({ children }) => {
       console.error("❌ Azure auth init failed:", err);
       navigator("/accessDenied");
       setUser(null);
+      setCompany(null);
+      setEntities([]);
     } finally {
       setLoading(false);
     }
@@ -160,8 +178,21 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     setAuthToken(null);
     setUser(null);
+    setCompany(null);
+    setEntities([]);
+    localStorage.removeItem("entityCatalog");
     await instance.logoutRedirect();
   };
+
+  const hasPermission = (module, action = "VIEW", options = {}) =>
+    checkUserPermission({
+      user,
+      entities,
+      module,
+      action,
+      companyId: options.companyId || company?._id,
+      entityId: options.entityId,
+    });
 
   return (
     <AuthContext.Provider
@@ -173,6 +204,8 @@ export const AuthProvider = ({ children }) => {
         initAuth,
         company,
         setCompany,
+        entities,
+        hasPermission,
       }}
     >
       {children}

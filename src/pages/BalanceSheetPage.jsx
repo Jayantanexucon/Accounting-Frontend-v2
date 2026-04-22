@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { getScheduleIIIBalanceSheetApi } from "../apis/reportApi";
-import { checkAuthorization } from "../utils/checkAuthorization";
 import LoadingComponent from "../components/LoadingComponent";
 import EmptyComponent from "../components/EmptyComponent";
 import LedgerDetailSidebar from "../components/LedgerDetailSidebar";
@@ -36,7 +35,7 @@ const hasMeaningfulBalanceSheetData = (report) =>
   Math.abs(report?.summary?.totalEquityLiabilities || 0) > 0.009;
 
 export default function BalanceSheetPage() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const currentFYEnding = getCurrentFinancialYearEnding();
   const years = getFinancialYearOptions();
 
@@ -65,7 +64,7 @@ export default function BalanceSheetPage() {
     refetchOnWindowFocus: false,
   });
 
-  const canViewReport = checkAuthorization(user, "CHART OF ACCOUNTS", "VIEW");
+  const canViewReport = hasPermission("BALANCE SHEET", "VIEW");
   const sidebarFilters = useMemo(
     () => getLedgerSidebarFilters(selectedYear, periodType, selectedQuarter, selectedMonth),
     [selectedYear, periodType, selectedQuarter, selectedMonth]

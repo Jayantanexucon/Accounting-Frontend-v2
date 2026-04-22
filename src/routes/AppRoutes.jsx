@@ -70,7 +70,11 @@ const InvoiceGeneratorPage = lazy(
 );
 
 export default function AppRoutes() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const withPermission = (module, action, element) =>
+    hasPermission(module, action) ? element : <AccessDenied />;
+  const withAnyPermission = (module, actions, element) =>
+    actions.some((action) => hasPermission(module, action)) ? element : <AccessDenied />;
 
   return (
     <Suspense fallback={<LoadingComponent fullPage />}>
@@ -100,31 +104,67 @@ export default function AppRoutes() {
               <Route path="accounting">
                 <Route path="group" element={<GroupPage />} />
                 <Route path="account" element={<LedgerPage />} />
-                <Route path="journals" element={<JournalPage />} />
-                <Route path="journals/list" element={<JournalListPage />} />
-                <Route path="journals/upload-excel" element={<JournalExcelUploadPage />} />
-                <Route path="trial" element={<TrialBalancePage />} />
-                <Route path="sheet" element={<BalanceSheetPage />} />
-                <Route path="profit-loss" element={<ProfitLossStatement />} />
+                <Route
+                  path="journals"
+                  element={withAnyPermission("JOURNAL", ["CREATE", "EDIT"], <JournalPage />)}
+                />
+                <Route
+                  path="journals/list"
+                  element={withPermission("JOURNAL", "VIEW", <JournalListPage />)}
+                />
+                <Route
+                  path="journals/upload-excel"
+                  element={withPermission("JOURNAL", "CREATE", <JournalExcelUploadPage />)}
+                />
+                <Route
+                  path="trial"
+                  element={withPermission("TRIAL BALANCE", "VIEW", <TrialBalancePage />)}
+                />
+                <Route
+                  path="sheet"
+                  element={withPermission("BALANCE SHEET", "VIEW", <BalanceSheetPage />)}
+                />
+                <Route
+                  path="profit-loss"
+                  element={withPermission("PROFIT AND LOSS", "VIEW", <ProfitLossStatement />)}
+                />
                 <Route path="day-books" element={<DayBooks />} />
               </Route>
 
               <Route path="master-data">
-                <Route path="client-details" element={<ClientPage />} />
-                <Route path="vendor-details" element={<VendorPage />} />
-                <Route path="hsn-codes" element={<HSNPage />} />
-                <Route path="invoice" element={<InvoiceGeneratorPage />} />
-                <Route path="manual-invoice" element={<ManualInvoicePage />} />
+                <Route
+                  path="client-details"
+                  element={withPermission("CLIENTS", "VIEW", <ClientPage />)}
+                />
+                <Route
+                  path="vendor-details"
+                  element={withPermission("VENDOR", "VIEW", <VendorPage />)}
+                />
+                <Route
+                  path="hsn-codes"
+                  element={withPermission("HSN", "VIEW", <HSNPage />)}
+                />
+                <Route
+                  path="invoice"
+                  element={withAnyPermission("INVOICE", ["CREATE", "EDIT"], <InvoiceGeneratorPage />)}
+                />
+                <Route
+                  path="manual-invoice"
+                  element={withAnyPermission("INVOICE", ["CREATE", "EDIT"], <ManualInvoicePage />)}
+                />
               </Route>
 
-              <Route path="invoice-data" element={<InvoiceData />} />
+              <Route
+                path="invoice-data"
+                element={withPermission("INVOICE", "VIEW", <InvoiceData />)}
+              />
               <Route
                 path="invoice-data/viewall-invoices"
-                element={<ViewAllInvoices />}
+                element={withPermission("INVOICE", "VIEW", <ViewAllInvoices />)}
               />
               <Route
                 path="invoice-data/bulk-upload"
-                element={<BulkInvoiceUploadPage />}
+                element={withPermission("INVOICE", "CREATE", <BulkInvoiceUploadPage />)}
               />
               <Route
                 path="accounting/bank-reconciliation"
@@ -132,27 +172,33 @@ export default function AppRoutes() {
               />
               <Route path="accounting/bank-reconciliation/report" element={<MonthlyReconciliationReport />} />
 
-              <Route path="purchase-order" element={<PurchaseOrderPage />} />
+              <Route
+                path="purchase-order"
+                element={withAnyPermission("PURCHASE ORDER", ["CREATE", "EDIT"], <PurchaseOrderPage />)}
+              />
               <Route
                 path="/purchaseorder-data/client/:clientId"
-                element={<ClientPurchaseOrders />}
+                element={withPermission("PURCHASE ORDER", "VIEW", <ClientPurchaseOrders />)}
               />
               <Route
                 path="/purchaseorder-data/vendor/:vendorId"
-                element={<VendorPurchaseOrders />}
+                element={withPermission("PURCHASE ORDER", "VIEW", <VendorPurchaseOrders />)}
               />
               <Route
                 path="purchase-order/bulk-po-upload"
-                element={<BulkPurchaseOrderPage />}
+                element={withPermission("PURCHASE ORDER", "CREATE", <BulkPurchaseOrderPage />)}
               />
 
               <Route
                 path="purchaseorder-data"
-                element={<PurchaseOrderData />}
+                element={withPermission("PURCHASE ORDER", "VIEW", <PurchaseOrderData />)}
               />
 
               <Route path="notifications" element={<NotificationsPage />} />
-              <Route path="reports/tax-flow" element={<TaxFlowReportPage />} />
+              <Route
+                path="reports/tax-flow"
+                element={withPermission("INVOICE", "VIEW", <TaxFlowReportPage />)}
+              />
               <Route path="settings" element={<SettingPage />} />
             </Route>
           </Route>

@@ -61,6 +61,10 @@ export default function ManualJournalPage() {
     user?.role === "admin" ||
     user?.role === "superAdmin" ||
     user?.privilege?.masterUpdate === true;
+  const canViewJournal = checkAuthorization(user, "JOURNAL", "VIEW");
+  const canCreateJournal = checkAuthorization(user, "JOURNAL", "CREATE");
+  const canEditJournal = checkAuthorization(user, "JOURNAL", "EDIT");
+  const canCreateLedger = checkAuthorization(user, "CHART OF ACCOUNTS", "CREATE");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [accounts, setAccounts] = useState([]);
@@ -811,46 +815,52 @@ export default function ManualJournalPage() {
                   <History size={15} />
                 </button>
 
-                 <button
-                onClick={() => navigate("/accounting/journals/upload-excel")}
-                className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center shadow-lg shadow-emerald-600/20 transition-all"
-              >
-                <FiUploadCloud size={18} />
-                Upload via Excel
-              </button>
+                {canCreateJournal && (
+                  <button
+                    onClick={() => navigate("/accounting/journals/upload-excel")}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center shadow-lg shadow-emerald-600/20 transition-all"
+                  >
+                    <FiUploadCloud size={18} />
+                    Upload via Excel
+                  </button>
+                )}
 
                 {/* Add Ledger */}
-                <button
-                  onClick={() => setOpenManageLedger(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 transition-all"
-                >
-                  <Plus size={13} /> Add Ledger
-                </button>
+                {canCreateLedger && (
+                  <button
+                    onClick={() => setOpenManageLedger(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 transition-all"
+                  >
+                    <Plus size={13} /> Add Ledger
+                  </button>
+                )}
 
                 {/* Create Ledger from Invoice */}
-                <button
-                  onClick={() =>
-                    setOpenModal((prev) => ({ ...prev, createLedger: true }))
-                  }
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  <FileText size={13} /> Invoice → Ledger
-                </button>
+                {canCreateLedger && (
+                  <button
+                    onClick={() =>
+                      setOpenModal((prev) => ({ ...prev, createLedger: true }))
+                    }
+                    disabled={saving}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                  >
+                    <FileText size={13} /> Invoice → Ledger
+                  </button>
+                )}
 
                 {/* Journal List */}
-                <button
-                  onClick={() => navigate("/accounting/journals/list")}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
-                >
-                  <FileText size={13} /> Journal List
-                </button>
+                {canViewJournal && (
+                  <button
+                    onClick={() => navigate("/accounting/journals/list")}
+                    disabled={saving}
+                    className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
+                  >
+                    <FileText size={13} /> Journal List
+                  </button>
+                )}
 
                 {/* Approvals */}
-                {(user?.role === "admin" ||
-                  user?.role === "superAdmin" ||
-                  user?.privilege?.masterUpdate === true) && (
+                {isAdmin && canEditJournal && (
                   <button
                     onClick={() => setShowApprovals(true)}
                     className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-all"
@@ -875,8 +885,8 @@ export default function ManualJournalPage() {
                 </button>
 
                 {/* Save / Update — primary CTA */}
-                {(checkAuthorization(user, "JOURNAL", "CREATE") ||
-                  checkAuthorization(user, "JOURNAL", "EDIT")) && (
+                {((!editingJournal && canCreateJournal) ||
+                  (editingJournal && canEditJournal)) && (
                   <button
                     onClick={handleSave}
                     disabled={saving || !isBalanced || !isVoucherSelected}

@@ -36,6 +36,7 @@ import { TbFileInvoice } from "react-icons/tb";
 import { getJournalAuditLogsApi } from "../apis/auditLog.api";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNotifications } from "../modules/notification/notification.slice.jsx";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 const SYSTEM_JOURNAL_MESSAGE =
   "This journal is system-generated. Please edit the source document.";
@@ -76,6 +77,9 @@ const [loadingStats, setLoadingStats] = useState(false);
 
   const { user } = useAuth();
   const isAdmin = user?.role === "admin"  || user?.role === "superAdmin" || user?.privilege?.masterUpdate === true;
+  const canCreateJournal = checkAuthorization(user, "JOURNAL", "CREATE");
+  const canEditJournal = checkAuthorization(user, "JOURNAL", "EDIT");
+  const canDeleteJournal = checkAuthorization(user, "JOURNAL", "DELETE");
   const refreshApprovals = useCallback(async () => {
     if (!user?.company?._id) return;
     const requests = await ApprovalManager.syncRequests(user.company._id);
@@ -300,6 +304,10 @@ const [loadingStats, setLoadingStats] = useState(false);
 
   // Get edit button status
   const getEditButtonStatus = (journal) => {
+    if (!canEditJournal) {
+      return null;
+    }
+
     if (journal.sourceType === "INVOICE") {
       return {
         enabled: true,
@@ -768,6 +776,10 @@ const [loadingStats, setLoadingStats] = useState(false);
   };
 
   const getDeleteButtonStatus = (journal) => {
+    if (!canDeleteJournal) {
+      return null;
+    }
+
     if (isAdmin) {
       return { enabled: true, label: "Delete" };
     }
@@ -828,21 +840,25 @@ const [loadingStats, setLoadingStats] = useState(false);
                 <FiChevronDown size={16} className={`transition-transform duration-300 ${showFilters ? "rotate-180" : ""}`} />
               </button>
 
-              <button
-                onClick={() => navigate("/accounting/journals/upload-excel")}
-                className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
-              >
-                <FiUploadCloud size={18} />
-                Upload via Excel
-              </button>
+              {canCreateJournal && (
+                <button
+                  onClick={() => navigate("/accounting/journals/upload-excel")}
+                  className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 font-bold flex items-center gap-2 shadow-lg shadow-emerald-600/20 transition-all"
+                >
+                  <FiUploadCloud size={18} />
+                  Upload via Excel
+                </button>
+              )}
 
-              <button
-                onClick={() => navigate("/accounting/journals")}
-                className="px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
-              >
-                <FiPlus size={20} />
-                New Journal
-              </button>
+              {canCreateJournal && (
+                <button
+                  onClick={() => navigate("/accounting/journals")}
+                  className="px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
+                >
+                  <FiPlus size={20} />
+                  New Journal
+                </button>
+              )}
             </div>
           </div>
 
@@ -1066,6 +1082,7 @@ const [loadingStats, setLoadingStats] = useState(false);
                   const totals = calculateTotals(journal.lines || []);
                   const editStatus = getEditButtonStatus(journal);
                   const deleteStatus = getDeleteButtonStatus(journal);
+                  const showActionButtons = Boolean(editStatus || deleteStatus);
 
                   return (
                     <div 
@@ -1142,32 +1159,38 @@ const [loadingStats, setLoadingStats] = useState(false);
                             </div>
                           </div>
 
-                          <div className="flex gap-1.5">
-                            <button
-                              onClick={(e) => handleEditClick(journal, e)}
-                              disabled={!editStatus.enabled}
-                              className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all ${
-                                buttonVariants[editStatus.variant]
-                              } ${!editStatus.enabled ? "cursor-not-allowed opacity-60" : "cursor-pointer shadow-sm"}`}
-                              title={editStatus.label}
-                            >
-                              {editStatus.icon && <editStatus.icon className="h-3 w-3" />}
-                              <span className="hidden sm:inline">{editStatus.label}</span>
-                            </button>
+                          {showActionButtons && (
+                            <div className="flex gap-1.5">
+                              {editStatus && (
+                                <button
+                                  onClick={(e) => handleEditClick(journal, e)}
+                                  disabled={!editStatus.enabled}
+                                  className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all ${
+                                    buttonVariants[editStatus.variant]
+                                  } ${!editStatus.enabled ? "cursor-not-allowed opacity-60" : "cursor-pointer shadow-sm"}`}
+                                  title={editStatus.label}
+                                >
+                                  {editStatus.icon && <editStatus.icon className="h-3 w-3" />}
+                                  <span className="hidden sm:inline">{editStatus.label}</span>
+                                </button>
+                              )}
 
-                            <button
-                              onClick={(e) => handleDeleteClick(journal, e)}
-                              disabled={!deleteStatus.enabled}
-                              className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all ${
-                                deleteStatus.enabled
-                                  ? `${buttonVariants.danger} cursor-pointer`
-                                  : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-70"
-                              }`}
-                            >
-                              <FiTrash2 className="h-3 w-3" />
-                              <span className="hidden sm:inline">{deleteStatus.label}</span>
-                            </button>
-                          </div>
+                              {deleteStatus && (
+                                <button
+                                  onClick={(e) => handleDeleteClick(journal, e)}
+                                  disabled={!deleteStatus.enabled}
+                                  className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all ${
+                                    deleteStatus.enabled
+                                      ? `${buttonVariants.danger} cursor-pointer`
+                                      : "bg-gray-300 text-gray-500 cursor-not-allowed opacity-70"
+                                  }`}
+                                >
+                                  <FiTrash2 className="h-3 w-3" />
+                                  <span className="hidden sm:inline">{deleteStatus.label}</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

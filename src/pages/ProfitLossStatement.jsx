@@ -34,7 +34,7 @@ const hasMeaningfulReportData = (report) =>
   Math.abs(report?.summary?.totalExpenses || 0) > 0.009;
 
 export default function ProfitLossStatement() {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
   const currentFYEnding = getCurrentFinancialYearEnding();
   const years = getFinancialYearOptions();
 
@@ -128,6 +128,7 @@ export default function ProfitLossStatement() {
   const periodLabel =
     reportData?.reportPeriodLabel ||
     getPeriodDisplayLabel("profit_and_loss", periodType, selectedYear, selectedQuarter, selectedMonth);
+  const canViewReport = hasPermission("PROFIT AND LOSS", "VIEW");
 
   return (
     <div className="min-h-screen">
@@ -306,7 +307,20 @@ export default function ProfitLossStatement() {
       <div className="px-4 pb-8 sm:px-6">
         {loading && <LoadingComponent message="Generating Schedule III profit and loss..." />}
 
-        {!loading && !hasMeaningfulReportData(reportData) && (
+        {!loading && !canViewReport && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+            <EmptyComponent
+              title="Permission Required"
+              subtitle={
+                <div className="text-sm text-slate-600">
+                  You do not have permission to view this report.
+                </div>
+              }
+            />
+          </div>
+        )}
+
+        {!loading && canViewReport && !hasMeaningfulReportData(reportData) && (
           <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
             <EmptyComponent
               title="No profit and loss data found"
@@ -319,7 +333,7 @@ export default function ProfitLossStatement() {
           </div>
         )}
 
-        {!loading && hasMeaningfulReportData(reportData) && (
+        {!loading && canViewReport && hasMeaningfulReportData(reportData) && (
           <div className="flex gap-6">
             <div className={`${isSidebarOpen ? "w-full lg:w-1/2" : "w-full"} transition-all duration-300`}>
               {(reportData?.issues?.length > 0 || reportData?.warnings?.length > 0) && (

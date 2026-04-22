@@ -5,7 +5,6 @@
 
 import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { checkPermission } from '../utils/permissionUtils';
 
 /**
  * PermissionGuard Component
@@ -25,19 +24,15 @@ import { checkPermission } from '../utils/permissionUtils';
  */
 export function PermissionGuard({ 
   entityId, 
+  module,
   action = "VIEW", 
   children, 
   fallback = null 
 }) {
-  const { user } = useAuth();
-  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+  const { hasPermission } = useAuth();
+  const allowed = hasPermission(module, action, { entityId });
 
-  // Check if user has permission
-  const hasPermission = user && selectedCompany 
-    ? checkPermission(user.permissions, entityId, action, selectedCompany._id)
-    : false;
-
-  if (!hasPermission) {
+  if (!allowed) {
     return fallback;
   }
 
@@ -60,6 +55,7 @@ export function PermissionGuard({
  */
 export function ActionButton({
   entityId,
+  module,
   action = "VIEW",
   onClick,
   children,
@@ -67,19 +63,15 @@ export function ActionButton({
   disabledClassName = "opacity-50 cursor-not-allowed",
   ...props
 }) {
-  const { user } = useAuth();
-  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
-
-  const hasPermission = user && selectedCompany
-    ? checkPermission(user.permissions, entityId, action, selectedCompany._id)
-    : false;
+  const { hasPermission } = useAuth();
+  const allowed = hasPermission(module, action, { entityId });
 
   return (
     <button
       onClick={onClick}
-      disabled={!hasPermission}
-      className={`${className} ${!hasPermission ? disabledClassName : ""}`}
-      title={!hasPermission ? `No permission to ${action.toLowerCase()}` : ""}
+      disabled={!allowed}
+      className={`${className} ${!allowed ? disabledClassName : ""}`}
+      title={!allowed ? `No permission to ${action.toLowerCase()}` : ""}
       {...props}
     >
       {children}
@@ -102,17 +94,14 @@ export function ActionButton({
  */
 export function FeatureGuard({ 
   entityId, 
+  module,
   children, 
   fallback = null 
 }) {
-  const { user } = useAuth();
-  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+  const { hasPermission } = useAuth();
+  const allowed = hasPermission(module, "VIEW", { entityId });
 
-  const hasPermission = user && selectedCompany
-    ? checkPermission(user.permissions, entityId, "VIEW", selectedCompany._id)
-    : false;
-
-  if (!hasPermission) {
+  if (!allowed) {
     return fallback;
   }
 

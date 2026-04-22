@@ -59,7 +59,10 @@ import { getInvoiceUpdatesApi } from "../apis/auditLog.api";
 import InvoiceDetailModal from "../modals/InvoiceDetailsModal";
 
 const InvoiceData = () => {
-  const { user } = useAuth();
+  const { user, hasPermission } = useAuth();
+  const canViewInvoice = hasPermission("INVOICE", "VIEW");
+  const canCreateInvoice = hasPermission("INVOICE", "CREATE");
+  const canEditInvoice = hasPermission("INVOICE", "EDIT");
 
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -790,7 +793,7 @@ const InvoiceData = () => {
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               {/* <div className="flex items-center space-x-2"> */}
-              {user?.role === "user" && (
+              {canViewInvoice && (
                 <button
                   onClick={() => setUserPendingModalOpen(true)}
                   className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
@@ -799,9 +802,7 @@ const InvoiceData = () => {
                   Pending Invoices
                 </button>
               )}
-              {(user?.role === "admin" ||
-                user?.role === "superAdmin" ||
-                user?.privilege?.masterUpdate === true) && (
+              {canEditInvoice && (
                   <button
                     onClick={() => setApprovalModalOpen(true)}
                     className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
@@ -816,7 +817,7 @@ const InvoiceData = () => {
               >
                 <FileText size={13} className="text-blue-500" /> View All
               </button>
-              {checkAuthorization(user, "INVOICE", "CREATE") && (
+              {canCreateInvoice && (
                 <button
                   onClick={handleDownloadTemplate}
                   className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
@@ -824,7 +825,7 @@ const InvoiceData = () => {
                   <Download size={13} className="text-indigo-500" /> Template
                 </button>
               )}
-              {checkAuthorization(user, "INVOICE", "CREATE") && (
+              {canCreateInvoice && (
                 <button
                   onClick={() => navigate("/invoice-data/bulk-upload")}
                   className="flex items-center gap-1.5 px-3 py-2 text-white text-xs font-bold rounded-xl transition-all hover:opacity-90"
@@ -836,7 +837,7 @@ const InvoiceData = () => {
                   <Upload size={13} /> Bulk Upload
                 </button>
               )}
-              {checkAuthorization(user, "INVOICE", "CREATE") && (
+              {canCreateInvoice && (
                 <Link
                   to="/master-data/manual-invoice"
                   className="flex items-center gap-1.5 px-4 py-2 text-white text-xs font-bold rounded-xl transition-all hover:opacity-90"
@@ -1722,7 +1723,7 @@ const InvoiceData = () => {
                               <Download size={12} /> Download Word
                             </button>
 
-                            {!invoice.salesJournalId ? (
+                            {canEditInvoice && !invoice.salesJournalId ? (
                               <button
                                 onClick={(e) =>
                                   handleCreateLedgerClick(invoice, e)
@@ -1737,7 +1738,8 @@ const InvoiceData = () => {
                               </span>
                             )}
 
-                            {invoice.salesJournalId &&
+                            {canEditInvoice &&
+                              invoice.salesJournalId &&
                               paymentInfo.pendingAmount > 0.01 && (
                                 <button
                                   onClick={(e) =>
