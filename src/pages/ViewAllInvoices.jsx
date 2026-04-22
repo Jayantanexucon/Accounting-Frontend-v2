@@ -179,9 +179,7 @@ const InvoiceData = () => {
       setLoading(false);
     }
   };
-  useEffect(() => {
-    fetchInvoices();
-  }, [pagination.page, pagination.limit, advancedFilters]);
+
 
   useEffect(() => {
     const invoiceId = new URLSearchParams(location.search).get("invoiceId");

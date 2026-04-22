@@ -575,21 +575,23 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const paymentDistributions = distributionsWithInvoices.map(dist => {
     const termInvoices = dist.invoices;
     const totalInvoiced = termInvoices.reduce((sum, inv) => sum + Number(inv.invoiceAmount || 0), 0);
-    const totalPaid = termInvoices.reduce((sum, inv) => sum + Number(inv.paidAmount || 0), 0);
-    const totalTds = termInvoices.reduce((sum, inv) => sum + Number(inv.tdsAmount || 0), 0);
+    // Only count payments from approved invoices (TDS is NOT a payment)
+    const approvedInvoices = termInvoices.filter(inv => inv.approvalStatus === "Approved");
+    const totalPaid = approvedInvoices.reduce((sum, inv) => sum + Number(inv.paidAmount || 0), 0);
+    const totalTds = approvedInvoices.reduce((sum, inv) => sum + Number(inv.tdsAmount || 0), 0);
+    const netPayable = Math.max(0, totalInvoiced - totalTds);
     
-    // Status calculation 
+    // Status & progress based on net payable (invoice amount minus TDS)
     let status = "unpaid";
-    const amount = dist.amount || 0;
-    const settled = totalPaid + totalTds;
+    const baseAmount = netPayable > 0 ? netPayable : (dist.amount || 0);
     
     if (termInvoices.length > 0) {
-      if (settled >= (amount - 0.01) && amount > 0) status = "paid";
-      else if (settled > 0) status = "partial";
+      if (totalPaid >= (baseAmount - 0.01) && baseAmount > 0) status = "paid";
+      else if (totalPaid > 0) status = "partial";
       else status = "invoiced";
     }
 
-    const paidPercentage = amount > 0 ? Math.min(100, (settled / amount) * 100) : 0;
+    const paidPercentage = baseAmount > 0 ? Math.min(100, (totalPaid / baseAmount) * 100) : 0;
 
     return {
       ...dist,
@@ -597,6 +599,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
       totalInvoiced,
       totalPaid,
       totalTds,
+      netPayable,
       status,
       paidPercentage
     };
@@ -891,8 +894,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         {hasTaxValues && (
                           <div className="grid grid-cols-3 gap-3">
                             {[
-                              { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 },
-                              { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 },
+                              { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                              { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
                               { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
                             ]
                               .filter((t) => t.show)
@@ -1306,8 +1309,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
                             { l: "Taxable Value", v: fmtC(po.totalTaxableValue, currency), cls: "border-slate-200 bg-slate-50 text-slate-700", show: hasTaxableValue },
-                            { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 },
-                            { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 },
+                            { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                            { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
                             { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
                           ]
                             .filter((t) => t.show)
@@ -1385,7 +1388,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                             {/* Term Progress Bar */}
                             <div className="space-y-1.5 mb-1">
                               <div className="flex justify-between items-end">
-                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Progress</p>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Payment Progress</p>
                                 <p className="text-[9px] font-black text-slate-900 leading-none">{dist.paidPercentage.toFixed(0)}%</p>
                               </div>
                               <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -1399,8 +1402,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                 />
                               </div>
                               <div className="flex justify-between text-[8px] font-bold text-slate-400">
-                                <span>{fmtC(dist.totalPaid + (dist.totalTds || 0), currency)} Settled</span>
-                                <span>{fmtC(Math.max(0, dist.amount - (dist.totalPaid + (dist.totalTds || 0))), currency)} Remaining</span>
+                                <span>{fmtC(dist.totalPaid, currency)} Paid</span>
+                                <span>{fmtC(Math.max(0, (dist.netPayable > 0 ? dist.netPayable : dist.amount) - dist.totalPaid), currency)} Remaining</span>
                               </div>
                             </div>
                           </div>
@@ -1412,19 +1415,34 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                 <div className="relative pl-5 space-y-3 before:content-[''] before:absolute before:left-[9px] before:top-2 before:bottom-2 before:w-px before:bg-slate-200">
                                   {dist.invoices.map((inv) => {
                                     const s = getStatusColor(inv.status);
+                                    const invTds = Number(inv.tdsAmount || 0);
+                                    const invNetPayable = Number(inv.invoiceAmount || 0) - invTds;
                                     return (
                                       <div key={inv._id} className="relative">
                                         <div className={`absolute -left-[20px] top-1 w-2 h-2 rounded-full border-2 border-white ring-1 ring-slate-100 ${s.bg} ${s.text.replace("text-", "bg-")}`} />
-                                        <div className="flex justify-between items-center text-[10px]">
-                                          <div className="flex items-center gap-2">
-                                            <span className="font-black text-slate-700 tracking-tight uppercase">{inv.invoiceNo}</span>
-                                            <span className="text-slate-400 font-bold">{fmt(inv.invoiceDate)}</span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                            <span className="font-black text-slate-900">{fmtC(inv.invoiceAmount, currency)}</span>
+                                        <div className="text-[10px] space-y-0.5">
+                                          <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-black text-slate-700 tracking-tight uppercase">{inv.invoiceNo}</span>
+                                              <span className="text-slate-400 font-bold">{fmt(inv.invoiceDate)}</span>
+                                            </div>
                                             <span className={`text-[7px] font-black uppercase px-1.5 py-0.25 rounded border ${s.bg} ${s.text} ${s.border}`}>
                                               {inv.status?.replace("_", " ")}
                                             </span>
+                                          </div>
+                                          <div className="flex justify-between items-center text-[9px]">
+                                            <span className="text-slate-400">Total Invoice</span>
+                                            <span className="font-black text-slate-700">{fmtC(inv.invoiceAmount, currency)}</span>
+                                          </div>
+                                          {invTds > 0 && (
+                                            <div className="flex justify-between items-center text-[9px]">
+                                              <span className="text-violet-500">TDS</span>
+                                              <span className="font-bold text-violet-600">– {fmtC(invTds, currency)}</span>
+                                            </div>
+                                          )}
+                                          <div className="flex justify-between items-center text-[9px]">
+                                            <span className="text-emerald-600 font-medium">Net Payable</span>
+                                            <span className="font-black text-emerald-700">{fmtC(invNetPayable, currency)}</span>
                                           </div>
                                         </div>
                                       </div>
@@ -1525,6 +1543,27 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
                             const timelineSummary = milestoneSummary || termSummary;
 
+                            // Fallback: use distributionsWithInvoices for monthly/weekly POs
+                            const matchedDist = !timelineSummary
+                              ? distributionsWithInvoices.find(d => d.invoices?.some(inv => inv._id === invoice._id))
+                              : null;
+                            const termAmount = timelineSummary
+                              ? timelineSummary.scheduledTermAmount
+                              : matchedDist
+                                ? roundMoney(matchedDist.amount || 0)
+                                : null;
+                            const termLabel = termSummary
+                              ? `Invoice Term Amount (Term ${termSummary.installmentNo}/${termSummary.totalInstallments})`
+                              : matchedDist
+                                ? `Invoice Term Amount (${matchedDist.title || `Term ${(matchedDist.index ?? 0) + 1}`})`
+                                : timelineSummary
+                                  ? "Invoice Term Amount"
+                                  : null;
+                            const actualInvoiceAmount = invoice.amountDue || invoice.invoiceAmount || breakdown.termInvoiceAmount;
+                            const remainingFromTerm = timelineSummary
+                              ? timelineSummary.remainingFromThisTerm
+                              : (termAmount != null ? roundMoney(Math.max(0, termAmount - actualInvoiceAmount)) : 0);
+
                             return (
                               <div key={invoice._id || index} className="relative flex gap-4">
                                 <div className="absolute -left-8 w-6 h-6 rounded-full bg-amber-500 border-2 border-white shadow-md flex items-center justify-center">
@@ -1539,7 +1578,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                     <div>
                                       <p className="text-xs font-bold text-slate-800">Invoice Generated</p>
                                       <p className="text-[11px] text-slate-500 mt-0.5">
-                                        {invoice.invoiceNo} · {fmtC(breakdown.termInvoiceAmount, currency)}
+                                        {invoice.invoiceNo} · {fmtC(actualInvoiceAmount, currency)}
                                       </p>
                                       <p className="text-[10px] text-slate-400 mt-1.5 flex items-center gap-1">
                                         <Calendar size={10} /> {fmtT(invoice.invoiceDate || invoice.createdAt)}
@@ -1548,28 +1587,33 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                         Status: <span className="font-black text-slate-700">{invoice.status?.replaceAll("_", " ")}</span>
                                       </p>
 
-                                      {timelineSummary && (
-                                        <div className="mt-1.5 space-y-1.5">
-                                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                            <p className="text-[10px] text-slate-500">
-                                              {termSummary
-                                                ? `Scheduled For Term ${termSummary.installmentNo}/${termSummary.totalInstallments}`
-                                                : "Scheduled For Term"}
-                                              :{" "}
-                                              <span className="font-black text-blue-700">{fmtC(timelineSummary.scheduledTermAmount, currency)}</span>
-                                            </p>
-                                            <p className="text-[10px] text-slate-500">
-                                              Raised In This Invoice:{" "}
-                                              <span className="font-black text-slate-700">{fmtC(timelineSummary.actualRaisedAmount, currency)}</span>
-                                            </p>
-                                            <p className="text-[10px] text-slate-500">
-                                              Remaining From This Term:{" "}
-                                              <span className="font-black text-amber-700">{fmtC(timelineSummary.remainingFromThisTerm, currency)}</span>
-                                            </p>
-                                          </div>
-                                        </div>
-                                      )}
+                                      {/* Invoice Term & Amount Breakdown */}
+                                      <div className="mt-2 bg-white/70 border border-amber-200/60 rounded-xl p-2.5 space-y-1.5">
+                                        {termAmount != null && termLabel && (
+                                          <p className="text-[10px] text-slate-500">
+                                            {termLabel}:{" "}
+                                            <span className="font-black text-blue-700">{fmtC(termAmount, currency)}</span>
+                                          </p>
+                                        )}
+                                        <p className="text-[10px] text-slate-500">
+                                          Actual Invoice Amount:{" "}
+                                          <span className="font-black text-slate-800">{fmtC(actualInvoiceAmount, currency)}</span>
+                                        </p>
+                                        {remainingFromTerm > 0 && (
+                                          <p className="text-[10px] text-slate-500">
+                                            Remaining from this term (carries to next):{" "}
+                                            <span className="font-black text-amber-700">{fmtC(remainingFromTerm, currency)}</span>
+                                          </p>
+                                        )}
+                                        {timelineSummary && timelineSummary.carryForwardFromPrevious > 0 && (
+                                          <p className="text-[10px] text-slate-500">
+                                            Carry forward from previous term:{" "}
+                                            <span className="font-black text-violet-700">{fmtC(timelineSummary.carryForwardFromPrevious, currency)}</span>
+                                          </p>
+                                        )}
+                                      </div>
 
+                                      {/* Payment Info */}
                                       <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <p className="text-[10px] text-slate-500">
                                           Paid till date: <span className="font-black text-emerald-700">{fmtC(breakdown.paidAmount, currency)}</span>
