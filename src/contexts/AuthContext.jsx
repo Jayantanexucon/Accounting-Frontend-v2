@@ -130,10 +130,16 @@ export const AuthProvider = ({ children }) => {
 
       if (selectedCompany) {
         localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
-        console.log("✅ Selected company set:", selectedCompany.name);
+        console.log("✅ Selected company set from backend:", {
+          name: selectedCompany.name,
+          id: selectedCompany._id,
+        });
       } else {
         localStorage.removeItem("selectedCompany");
-        console.warn("⚠️  No selected company returned from backend");
+        console.warn("⚠️  No selected company returned from backend", {
+          companiesCount: companies.length,
+          firstCompany: companies[0]?.name,
+        });
       }
 
       setUser({

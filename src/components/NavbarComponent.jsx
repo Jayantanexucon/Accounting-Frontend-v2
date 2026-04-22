@@ -86,15 +86,36 @@ export default function NavbarComponent() {
     setIsCollapsed(!isCollapsed);
   };
 
-  const handleChangeCompany = (value) => {
+  const handleChangeCompany = async (value) => {
     const selectedCompany = user?.companies?.find((c) => c._id === value);
     if (selectedCompany) {
       console.log("🔄 Switching company to:", selectedCompany.name);
-      localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
-      setChoose(value);
-      setCookie("AC_CMP", value);
-      console.log("✅ Company cookie set:", value);
-      window.location.reload();
+      
+      try {
+        // Step 1: Update localStorage
+        localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
+        console.log("✅ localStorage updated:", selectedCompany.name);
+        
+        // Step 2: Set cookie with proper options
+        setCookie("AC_CMP", value, {
+          expires: 30, // 30 days
+          path: "/", // Ensure cookie is available on all paths
+          secure: import.meta.env.VITE_COOKIE_SECURE === "true",
+        });
+        console.log("✅ Cookie set:", value);
+        
+        // Step 3: Small delay to ensure cookie is saved before reload
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Step 4: Update local state before reload
+        setChoose(value);
+        
+        // Step 5: Reload to fetch new company data from backend
+        console.log("🔄 Reloading page to apply company change...");
+        window.location.reload();
+      } catch (error) {
+        console.error("❌ Error switching company:", error);
+      }
     } else {
       console.error("❌ Company not found:", value);
     }
