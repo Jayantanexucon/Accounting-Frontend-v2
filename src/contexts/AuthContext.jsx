@@ -87,6 +87,7 @@ export const AuthProvider = ({ children }) => {
       setLoading(true);
 
       if (!accounts.length) {
+        console.warn("⚠️  No Azure AD accounts found");
         setUser(null);
         return;
       }
@@ -99,6 +100,13 @@ export const AuthProvider = ({ children }) => {
 
       // 📡 Call backend (/me)
       const data = await fetchMe(tokenRes.accessToken);
+      console.log("📡 Backend /me response:", {
+        userId: data?.user?._id,
+        companiesCount: data?.companies?.length,
+        hasSelectedCompany: !!data?.selectedCompany,
+        selectedCompanyId: data?.selectedCompany?._id,
+      });
+
       const appAccessToken = data?.accessToken;
 
       if (appAccessToken) {
@@ -122,8 +130,10 @@ export const AuthProvider = ({ children }) => {
 
       if (selectedCompany) {
         localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
+        console.log("✅ Selected company set:", selectedCompany.name);
       } else {
         localStorage.removeItem("selectedCompany");
+        console.warn("⚠️  No selected company returned from backend");
       }
 
       setUser({
@@ -133,7 +143,7 @@ export const AuthProvider = ({ children }) => {
         privilege,
       });
     } catch (err) {
-      console.error("Azure auth init failed:", err);
+      console.error("❌ Azure auth init failed:", err);
       navigator("/accessDenied");
       setUser(null);
     } finally {

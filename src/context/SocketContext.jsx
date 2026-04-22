@@ -63,7 +63,11 @@ export const SocketProvider = ({ children }) => {
       } catch (error) {
         console.error(
           "❌ Socket connection failed:",
-          error?.response?.data?.message || error?.message || error,
+          {
+            message: error?.response?.data?.message || error?.message || error,
+            responseStatus: error?.response?.status,
+            hasData: !!error?.response?.data,
+          }
         );
         setSocket(null);
         setIsConnected(false);
