@@ -11,7 +11,7 @@ import {
 } from "../apis/invoice.api";
 
 // Lucide Icons
-import { X, Loader2, CheckCircle, AlertCircle, Calendar, CreditCard, Banknote, Calculator, Receipt, FileText, User, Percent, ChevronDown } from "lucide-react";
+import { X, Loader2, CheckCircle, AlertCircle, Calendar, CreditCard, Banknote, Calculator, Receipt, FileText, User, ChevronDown } from "lucide-react";
 
 const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
   const { user } = useAuth();
@@ -148,16 +148,9 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
           0,
         );
         const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
-        const pendingAmount = Math.max(0, totalAmount - totalReceived);
-        const totalTdsUsed = payments.reduce(
-          (sum, payment) => sum + getPaymentTdsAmount(payment),
-          0,
-        );
-        const referenceTds = Math.max(
-          0,
-          Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0) - totalTdsUsed,
-        );
-        const autoTdsAmount = Math.min(pendingAmount, referenceTds);
+        const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
+        const netPayable = totalAmount - invoiceTds;
+        const pendingAmount = Math.max(0, netPayable - totalReceived);
 
         setPaymentSummary({
           totalAmount,
@@ -166,8 +159,8 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         });
         setFormData((prev) => ({
           ...prev,
-          amountPaid: Math.max(0, pendingAmount - autoTdsAmount),
-          tdsAmount: autoTdsAmount,
+          amountPaid: pendingAmount,
+          tdsAmount: 0,
         }));
       }
       const accountRes = await validateInvoiceAccountsApi(user.company._id);
@@ -223,21 +216,20 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     }
 
     // Validation
-    if (formData.amountPaid < 0 || formData.tdsAmount < 0) {
-      toast.error("Payment amounts cannot be negative");
+    if (formData.amountPaid < 0) {
+      toast.error("Payment amount cannot be negative");
       return;
     }
 
     const pendingAmount = paymentSummary.pendingAmount || calculateDefaultAmount();
-    const totalSettlement = formData.amountPaid + formData.tdsAmount;
 
-    if (totalSettlement <= 0) {
-      toast.error("Enter bank amount and/or TDS amount");
+    if (formData.amountPaid <= 0) {
+      toast.error("Enter a payment amount");
       return;
     }
 
-    if (totalSettlement > pendingAmount) {
-      toast.error(`Total settlement exceeds outstanding amount of ₹${pendingAmount.toFixed(2)}`);
+    if (formData.amountPaid > pendingAmount) {
+      toast.error(`Payment exceeds outstanding amount of ₹${pendingAmount.toFixed(2)}`);
       return;
     }
 
@@ -335,21 +327,18 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
   if (!open) return null;
 
   const totals = calculateTotals();
-  const totalReferenceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
-  const usedReferenceTds = paymentHistory.reduce((sum, payment) => sum + getPaymentTdsAmount(payment), 0);
-  const remainingReferenceTds = Math.max(0, totalReferenceTds - usedReferenceTds);
-  const hasTdsReference = totalReferenceTds > 0;
-  const canUseTds = hasTdsReference && remainingReferenceTds > 0 && totals.pendingAmount > 0;
-  const totalSettlement = Number(formData.amountPaid || 0) + Number(formData.tdsAmount || 0);
-  const remainingAfterPayment = Math.max(0, totals.pendingAmount - totalSettlement);
-  const settlementExceedsOutstanding = totalSettlement > totals.pendingAmount;
-  const hasNegativeValues = formData.amountPaid < 0 || formData.tdsAmount < 0;
+  const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
+  const netPayable = totals.totalAmount - invoiceTds;
+  const paymentAmount = Number(formData.amountPaid || 0);
+  const remainingAfterPayment = Math.max(0, totals.pendingAmount - paymentAmount);
+  const paymentExceedsOutstanding = paymentAmount > totals.pendingAmount;
+  const hasNegativeValues = formData.amountPaid < 0;
   const submitDisabled =
     loading ||
     totals.pendingAmount <= 0 ||
     hasNegativeValues ||
-    totalSettlement <= 0 ||
-    settlementExceedsOutstanding;
+    paymentAmount <= 0 ||
+    paymentExceedsOutstanding;
 
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
@@ -429,46 +418,26 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                 </div>
               </div> */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-  <div className={`grid gap-2 ${hasTdsReference ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5" : "grid-cols-1 sm:grid-cols-3"}`}>
-    {/* Invoice Total */}
+  <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
+    {/* Total Invoice Amount */}
     <div className="rounded-md border border-blue-200 bg-white/80 p-2 text-center">
       <div className="text-sm font-bold text-blue-700">₹{totals.totalAmount.toFixed(2)}</div>
-      <div className="text-[11px] text-blue-600">Invoice Total</div>
+      <div className="text-[11px] text-blue-600">Total Invoice Amount</div>
     </div>
 
-    {/* Settled */}
+    {/* Net Payable Amount */}
     <div className="rounded-md border border-green-200 bg-white/80 p-2 text-center">
-      <div className="text-sm font-bold text-green-600">₹{totals.totalReceived.toFixed(2)}</div>
-      <div className="text-[11px] text-green-600">Settled</div>
+      <div className="text-sm font-bold text-green-600">₹{netPayable.toFixed(2)}</div>
+      <div className="text-[11px] text-green-600">Net Payable Amount</div>
     </div>
 
-    {/* Outstanding */}
+    {/* Pending Amount */}
     <div className="rounded-md border border-slate-200 bg-white/80 p-2 text-center">
       <div className={`text-sm font-bold ${totals.pendingAmount > 0 ? "text-red-600" : "text-green-600"}`}>
         ₹{totals.pendingAmount.toFixed(2)}
       </div>
-      <div className="text-[11px] text-gray-600">Outstanding</div>
+      <div className="text-[11px] text-gray-600">Pending Amount</div>
     </div>
-
-    {/* TDS Section (conditional) */}
-    {hasTdsReference && (
-      <>
-        <div className="rounded-md border border-violet-200 bg-white/80 p-2 text-center">
-          <div className="text-sm font-bold text-violet-700">₹{totalReferenceTds.toFixed(2)}</div>
-          <div className="text-[11px] text-violet-600">Total TDS</div>
-        </div>
-        <div className="rounded-md border border-violet-200 bg-white/80 p-2 text-center">
-          <div className="text-sm font-bold text-violet-500">₹{usedReferenceTds.toFixed(2)}</div>
-          <div className="text-[11px] text-violet-500">Used TDS</div>
-        </div>
-        <div className="rounded-md border border-violet-200 bg-white/80 p-2 text-center">
-          <div className={`text-sm font-bold ${remainingReferenceTds > 0 ? "text-violet-700" : "text-slate-500"}`}>
-            ₹{remainingReferenceTds.toFixed(2)}
-          </div>
-          <div className="text-[11px] text-gray-600">TDS Left</div>
-        </div>
-      </>
-    )}
   </div>
 
   {/* Client Info - Compact */}
@@ -501,50 +470,26 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                     />
                   </div>
 
-                  {/* Bank Amount */}
+                  {/* Payment Amount */}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Banknote className="h-4 w-4 inline mr-1" />
-                      Bank Amount Received
+                      Payment Amount
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2.5 text-gray-500">₹</span>
                       <input
                         type="number"
                         value={formData.amountPaid}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, amountPaid: parseFloat(e.target.value) || 0 }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, amountPaid: Math.min(parseFloat(e.target.value) || 0, totals.pendingAmount) }))}
                         min="0"
+                        max={totals.pendingAmount}
                         step="0.01"
                         className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                       />
-                      <div className="text-xs text-gray-500 mt-1">Enter actual bank receipt amount</div>
+                      <div className="text-xs text-gray-500 mt-1">Max: ₹{totals.pendingAmount.toFixed(2)}</div>
                     </div>
                   </div>
-
-                  {/* TDS Amount */}
-                  {canUseTds && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      <Percent className="h-4 w-4 inline mr-1" />
-                      TDS Amount
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-2.5 text-gray-500">₹</span>
-                      <input
-                        type="number"
-                        value={formData.tdsAmount}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, tdsAmount: Math.min(parseFloat(e.target.value) || 0, remainingReferenceTds, totals.pendingAmount) }))}
-                        min="0"
-                        max={Math.min(remainingReferenceTds, totals.pendingAmount)}
-                        step="0.01"
-                        className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
-                      />
-                      <div className="text-xs text-gray-500 mt-1">
-                        Total TDS: ₹{totalReferenceTds.toFixed(2)} | Left TDS: ₹{remainingReferenceTds.toFixed(2)}
-                      </div>
-                    </div>
-                  </div>
-                  )}
 
                   {/* Payment Mode */}
                   {Number(formData.amountPaid || 0) > 0 && (
@@ -639,30 +584,16 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
 
                       <div className="rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-sm">
                         <div className="flex items-center justify-between">
-                          <span className="text-gray-600">Outstanding</span>
+                          <span className="text-gray-600">Pending Amount</span>
                           <span className="font-semibold text-slate-900">₹{totals.pendingAmount.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-gray-600">Entered Bank</span>
-                          <span className="font-semibold text-slate-900">₹{Number(formData.amountPaid || 0).toFixed(2)}</span>
+                          <span className="text-gray-600">Payment Amount</span>
+                          <span className="font-semibold text-slate-900">₹{paymentAmount.toFixed(2)}</span>
                         </div>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-gray-600">Entered TDS</span>
-                          <span className="font-semibold text-slate-900">₹{Number(formData.tdsAmount || 0).toFixed(2)}</span>
-                        </div>
-                        {hasTdsReference && (
-                          <div className="flex items-center justify-between mt-2">
-                            <span className="text-gray-600">TDS Left After This</span>
-                            <span className="font-semibold text-slate-900">₹{Math.max(0, remainingReferenceTds - Number(formData.tdsAmount || 0)).toFixed(2)}</span>
-                          </div>
-                        )}
                         <div className="flex items-center justify-between mt-2 border-t border-emerald-200 pt-2">
-                          <span className="font-medium text-gray-700">Total Settlement</span>
-                          <span className="font-bold text-emerald-700">₹{totalSettlement.toFixed(2)}</span>
-                        </div>
-                        <div className="flex items-center justify-between mt-2">
                           <span className="font-medium text-gray-700">Remaining After Payment</span>
-                          <span className={`font-bold ${settlementExceedsOutstanding ? "text-red-600" : "text-slate-900"}`}>
+                          <span className={`font-bold ${paymentExceedsOutstanding ? "text-red-600" : "text-slate-900"}`}>
                             ₹{remainingAfterPayment.toFixed(2)}
                           </span>
                         </div>
@@ -671,11 +602,11 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                   )}
                 </div>
 
-                {(settlementExceedsOutstanding || hasNegativeValues) && (
+                {(paymentExceedsOutstanding || hasNegativeValues) && (
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     {hasNegativeValues
                       ? "Negative payment values are not allowed."
-                      : "Total settlement cannot exceed the outstanding amount."}
+                      : "Payment cannot exceed the pending amount."}
                   </div>
                 )}
 
@@ -746,7 +677,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                     Processing...
                   </>
                 ) : (
-                  `Record Settlement (₹${totalSettlement.toFixed(2)})`
+                  `Record Settlement (₹${paymentAmount.toFixed(2)})`
                 )}
               </button>
             </div>

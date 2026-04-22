@@ -93,7 +93,7 @@ export default function InvoiceApproval({
             return {
               id: invoice._id,
               versionNo: invoice.versionNo,
-              actionType: "update",
+              actionType: invoice.actionType || (invoice.versionNo === 1 ? "create" : "update"),
               snapshot: invoice,
               invoiceData: invoice,
               pendingCreatedAt: invoice.updatedAt,

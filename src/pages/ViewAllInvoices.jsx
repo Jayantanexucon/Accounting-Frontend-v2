@@ -295,10 +295,13 @@ const InvoiceData = () => {
   const getItemSummary = (items) => !items?.length ? "No items" : `${items.length} item${items.length > 1 ? "s" : ""}`;
   const calculateTotalTax = (invoice) => ((invoice.totalCGSTAmount || 0) + (invoice.totalSGSTAmount || 0) + (invoice.totalIGSTAmount || 0)).toFixed(2);
   const calculatePaymentInfo = (invoice) => {
-    const invoiceAmount = invoice.netPayable || invoice.amountDue || 0;
+    const totalInvoiceAmount = invoice.amountDue || 0;
+    const tdsAmount = Number(invoice.tdsAmount || 0);
+    const netPayable = totalInvoiceAmount - tdsAmount;
+    const invoiceAmount = netPayable;
     const payments = invoice.payments || [];
     const paymentsTotal = payments.reduce(
-      (sum, payment) => sum + getPaymentSettledAmount(payment),
+      (sum, payment) => sum + (Number(payment.receivedAmount ?? payment.amountReceived ?? payment.amountPaid ?? 0)),
       0,
     );
     const totalTDSAdjusted = payments.reduce((s, p) => s + getPaymentTdsAmount(p), 0);
@@ -322,7 +325,7 @@ const InvoiceData = () => {
       else if (totalReceived > 0) paymentStatus = "partially_paid";
       else paymentStatus = "unpaid";
     }
-    return { invoiceAmount, totalReceived, pendingAmount, totalTDSAdjusted, completionPercentage, paymentStatus, paymentCount: payments.length, lastPaymentDate: payments.length > 0 ? payments[payments.length - 1].paymentDate : null };
+    return { invoiceAmount, totalInvoiceAmount, tdsAmount, netPayable, totalReceived, pendingAmount, totalTDSAdjusted, completionPercentage, paymentStatus, paymentCount: payments.length, lastPaymentDate: payments.length > 0 ? payments[payments.length - 1].paymentDate : null };
   };
   const getPaymentStatusBadge = (paymentStatus, pendingAmount) => {
     switch (paymentStatus) {
@@ -721,29 +724,32 @@ const InvoiceData = () => {
                                   </div>
                                   <div className="p-4 space-y-2 text-xs">
                                     {[
-                                      { label: "Subtotal (Taxable)", value: invoice.totalTaxableValue || invoice.amountDue || 0, color: "text-slate-700" },
-                                      invoice.totalCGSTAmount > 0 && { label: "CGST", value: invoice.totalCGSTAmount, color: "text-slate-600" },
-                                      invoice.totalSGSTAmount > 0 && { label: "SGST", value: invoice.totalSGSTAmount, color: "text-slate-600" },
+                                      { label: "Taxable Value", value: invoice.totalTaxableValue || invoice.amountDue || 0, color: "text-slate-700" },
                                       invoice.totalIGSTAmount > 0 && { label: "IGST", value: invoice.totalIGSTAmount, color: "text-slate-600" },
-                                      invoice.tdsAmount > 0 && { label: "TDS Deduction", value: `-${formatAmount(invoice.tdsAmount)}`, color: "text-violet-600", raw: true },
+                                      invoice.totalSGSTAmount > 0 && { label: "SGST", value: invoice.totalSGSTAmount, color: "text-slate-600" },
+                                      invoice.totalCGSTAmount > 0 && { label: "CGST", value: invoice.totalCGSTAmount, color: "text-slate-600" },
                                     ].filter(Boolean).map((row, idx) => (
                                       <div key={idx} className="flex items-center justify-between">
                                         <span className="text-slate-500 font-medium">{row.label}</span>
                                         <span className={`font-black tabular-nums ${row.color}`}>
-                                          {row.raw ? row.value : formatAmount(row.value)}
+                                          {formatAmount(row.value)}
                                         </span>
                                       </div>
                                     ))}
                                     <div className="flex items-center justify-between border-t border-slate-200 pt-2 mt-1">
-                                      <span className="font-extrabold text-slate-800">Total Amount Due</span>
+                                      <span className="font-extrabold text-slate-800">Total Invoice Amount</span>
                                       <span className="font-black text-slate-900 tabular-nums">{formatAmount(invoice.amountDue || 0)}</span>
                                     </div>
-                                    {invoice.netPayable && invoice.netPayable !== invoice.amountDue && (
+                                    {Number(invoice.tdsAmount || 0) > 0 && (
                                       <div className="flex items-center justify-between">
-                                        <span className="text-slate-500 font-medium">Net Payable (After TDS)</span>
-                                        <span className="font-black text-emerald-600 tabular-nums">{formatAmount(invoice.netPayable)}</span>
+                                        <span className="text-violet-600 font-medium">TDS Amount</span>
+                                        <span className="font-black text-violet-600 tabular-nums">– {formatAmount(invoice.tdsAmount)}</span>
                                       </div>
                                     )}
+                                    <div className="flex items-center justify-between border-t border-emerald-200 pt-2 mt-1">
+                                      <span className="font-extrabold text-emerald-800">Net Payable Amount</span>
+                                      <span className="font-black text-emerald-700 tabular-nums">{formatAmount((invoice.amountDue || 0) - Number(invoice.tdsAmount || 0))}</span>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -782,11 +788,11 @@ const InvoiceData = () => {
                                   </div>
                                   <div className="p-4 space-y-2 text-xs">
                                     {[
-                                      { label: "Total Invoice", value: paymentInfo.invoiceAmount, color: "text-emerald-700" },
+                                      { label: "Net Payable Amount", value: paymentInfo.netPayable, color: "text-emerald-700" },
+                                      paymentInfo.tdsAmount > 0 && { label: "TDS Amount", value: paymentInfo.tdsAmount, color: "text-violet-700" },
                                       { label: "Total Received", value: paymentInfo.totalReceived, color: "text-blue-700" },
                                       { label: "Pending Amount", value: paymentInfo.pendingAmount, color: "text-amber-700" },
-                                      { label: "TDS Adjusted", value: paymentInfo.totalTDSAdjusted, color: "text-violet-700" },
-                                    ].map((row, idx) => (
+                                    ].filter(Boolean).map((row, idx) => (
                                       <div key={idx} className="flex items-center justify-between">
                                         <span className="text-slate-500 font-medium">{row.label}</span>
                                         <span className={`font-black tabular-nums ${row.color}`}>{formatAmount(row.value)}</span>
@@ -795,9 +801,9 @@ const InvoiceData = () => {
                                     <div className="flex items-center justify-between border-t border-slate-200 pt-2 mt-1">
                                       <span className="text-slate-500 font-medium">Completion</span>
                                       <div className="flex items-center gap-2">
-                                        <span className="font-black text-slate-700 tabular-nums">{paymentInfo.completionPercentage.toFixed(1)}%</span>
+                                        <span className="font-black text-slate-700 tabular-nums">{Math.min(paymentInfo.completionPercentage, 100).toFixed(1)}%</span>
                                         <div className="h-2 w-20 bg-slate-200 rounded-full overflow-hidden">
-                                          <div className={`h-full rounded-full ${paymentInfo.completionPercentage === 100 ? "bg-emerald-500" : "bg-blue-500"}`}
+                                          <div className={`h-full rounded-full ${paymentInfo.completionPercentage >= 100 ? "bg-emerald-500" : "bg-blue-500"}`}
                                             style={{ width: `${Math.min(paymentInfo.completionPercentage, 100)}%` }} />
                                         </div>
                                       </div>
