@@ -58,7 +58,7 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
 
   const getStatusText = (status) => {
     const statusMap = {
-      DRAFT: "Draft",
+      PENDING_APPROVAL: "Pending Approval",
       POSTED: "Posted",
       PARTIALLY_PAID: "Partially Paid",
       PAID: "Paid",
@@ -136,7 +136,7 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                       <span className={`px-2 py-1 text-xs font-medium rounded ${
                         displayInvoice.status === 'active' ? 'bg-green-100 text-green-800' :
                         displayInvoice.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        displayInvoice.status === 'draft' ? 'bg-gray-100 text-gray-800' :
+                        displayInvoice.status === 'PENDING_APPROVAL' ? 'bg-gray-100 text-gray-800' :
                         displayInvoice.status === 'inprogress' ? 'bg-blue-100 text-blue-800' :
                         displayInvoice.status === 'completed' ? 'bg-purple-100 text-purple-800' :
                         displayInvoice.status === 'cancelled' ? 'bg-red-100 text-red-800' :

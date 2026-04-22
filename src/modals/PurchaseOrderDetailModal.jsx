@@ -66,6 +66,69 @@ const getInvoiceTimelineBreakdown = (invoice = {}) => {
   };
 };
 
+const calculatePaymentDistributions = (po) => {
+  if (!po) return [];
+  const start = dayjs(po.referenceDate || po.poDate);
+  const end = dayjs(po.deliveryDate);
+  const totalAmount = Number(po.totalAmount || 0);
+
+  if (po.paymentTerms === "milestone") {
+    return (po.milestones || []).map((m, idx) => ({
+      _id: m._id,
+      title: m.title || `Milestone ${idx + 1}`,
+      amount: Number(m.amount || 0),
+      percentage: Number(m.percentage || 0),
+      dueDate: m.dueDate,
+      type: "milestone",
+    }));
+  }
+
+  const result = [];
+  if (!start.isValid() || !end.isValid() || end.isBefore(start) || totalAmount <= 0) return [];
+
+  if (po.paymentTerms === "monthly") {
+    const totalDays = end.diff(start, "day") + 1;
+    let numMonths = Math.ceil(totalDays / 30);
+    if (numMonths < 1) numMonths = 1;
+    const amountPerMonth = totalAmount / numMonths;
+    let current = start.clone();
+    for (let i = 0; i < numMonths; i++) {
+      let monthEnd = current.add(1, "month").subtract(1, "day");
+      if (monthEnd.isAfter(end)) monthEnd = end;
+      result.push({
+        title: `${current.format("MMM YYYY")}`,
+        amount: amountPerMonth,
+        startDate: current.format("YYYY-MM-DD"),
+        endDate: monthEnd.format("YYYY-MM-DD"),
+        type: "monthly",
+        index: i,
+      });
+      current = current.add(1, "month");
+    }
+  } else if (po.paymentTerms === "weekly") {
+    const totalDays = end.diff(start, "day") + 1;
+    let numWeeks = Math.ceil(totalDays / 7);
+    if (numWeeks < 1) numWeeks = 1;
+    const amountPerWeek = totalAmount / numWeeks;
+    let current = start.clone();
+    for (let i = 0; i < numWeeks; i++) {
+      let weekEnd = current.add(6, "day");
+      if (weekEnd.isAfter(end)) weekEnd = end;
+      result.push({
+        title: `Week ${i + 1}`,
+        amount: amountPerWeek,
+        startDate: current.format("YYYY-MM-DD"),
+        endDate: weekEnd.format("YYYY-MM-DD"),
+        type: "weekly",
+        index: i,
+      });
+      current = weekEnd.add(1, "day");
+    }
+  }
+
+  return result;
+};
+
 const getTermTimelineSummary = ({ po, invoice, invoiceIndex, orderedInvoices }) => {
   const termDays = PAYMENT_TERM_DAYS[po?.paymentTerms] || 0;
   const scheduleStart = po?.referenceDate || po?.poDate;
@@ -313,6 +376,11 @@ const getAvailableTabs = (po) => {
   // Timeline always makes sense
   tabs.push("timeline");
 
+  // Payment Terms
+  if (po.totalAmount > 0 || hasMilestones) {
+    tabs.push("paymentTerms");
+  }
+
   // Documents always makes sense
   tabs.push("documents");
 
@@ -323,6 +391,7 @@ const TAB_LABELS = {
   overview: "Overview",
   details: "Details",
   timeline: "Timeline",
+  paymentTerms: "Payment Terms",
   documents: "Documents",
 };
 
@@ -445,6 +514,93 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const hasTaxableValue = po ? (po.totalTaxableValue || 0) > 0 : false;
 
   const availableTabs = getAvailableTabs(po);
+  
+  // ── Smart Invoice Matching for Payment Terms ──────────────────
+  const baseDistributions = po ? calculatePaymentDistributions(po) : [];
+  const matchedInvoiceIds = new Set();
+  
+  // Create mapping array
+  const distributionsWithInvoices = baseDistributions.map(dist => ({
+    ...dist,
+    invoices: [],
+  }));
+
+  // Phase 1: Explicit Matching (Labels, IDs)
+  if (po) {
+    orderedInvoices.forEach(inv => {
+      let matchedIdx = -1;
+      
+      if (po.paymentTerms === "milestone") {
+        matchedIdx = distributionsWithInvoices.findIndex(dist => 
+          dist._id === inv.milestoneId ||
+          (inv.items || []).some(item => item.itemId === dist._id || item.poItemId === dist._id) ||
+          inv.description?.trim() === dist.title?.trim() ||
+          (inv.milestones || []).some(m => m.milestoneId === dist._id)
+        );
+      } else {
+        matchedIdx = distributionsWithInvoices.findIndex(dist => 
+          inv.periodLabel === dist.title || 
+          inv.monthlyBillingInfo?.periodLabel === dist.title ||
+          (inv.items || []).some(item => item.periodLabel === dist.title)
+        );
+      }
+
+      if (matchedIdx !== -1) {
+        distributionsWithInvoices[matchedIdx].invoices.push(inv);
+        matchedInvoiceIds.add(inv._id);
+      }
+    });
+
+    // Phase 2: Fallback Matching (By Order for periodic terms)
+    if (po.paymentTerms !== "milestone") {
+      let distIdx = 0;
+      orderedInvoices.forEach(inv => {
+        if (matchedInvoiceIds.has(inv._id)) return;
+
+        // Find the next distribution that doesn't have an explicitly matched invoice
+        while (distIdx < distributionsWithInvoices.length && distributionsWithInvoices[distIdx].invoices.length > 0) {
+          distIdx++;
+        }
+
+        if (distIdx < distributionsWithInvoices.length) {
+          distributionsWithInvoices[distIdx].invoices.push(inv);
+          matchedInvoiceIds.add(inv._id);
+          distIdx++;
+        }
+      });
+    }
+  }
+
+  // Final data calculation
+  const paymentDistributions = distributionsWithInvoices.map(dist => {
+    const termInvoices = dist.invoices;
+    const totalInvoiced = termInvoices.reduce((sum, inv) => sum + Number(inv.invoiceAmount || 0), 0);
+    const totalPaid = termInvoices.reduce((sum, inv) => sum + Number(inv.paidAmount || 0), 0);
+    const totalTds = termInvoices.reduce((sum, inv) => sum + Number(inv.tdsAmount || 0), 0);
+    
+    // Status calculation 
+    let status = "unpaid";
+    const amount = dist.amount || 0;
+    const settled = totalPaid + totalTds;
+    
+    if (termInvoices.length > 0) {
+      if (settled >= (amount - 0.01) && amount > 0) status = "paid";
+      else if (settled > 0) status = "partial";
+      else status = "invoiced";
+    }
+
+    const paidPercentage = amount > 0 ? Math.min(100, (settled / amount) * 100) : 0;
+
+    return {
+      ...dist,
+      invoices: termInvoices,
+      totalInvoiced,
+      totalPaid,
+      totalTds,
+      status,
+      paidPercentage
+    };
+  });
 
   // Badge helpers used in details tab
   const catBadge = {
@@ -466,6 +622,14 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
     completed: "bg-emerald-100 text-emerald-700 border-emerald-200",
     partially_invoiced: "bg-amber-100 text-amber-700 border-amber-200",
     invoiced: "bg-violet-100 text-violet-700 border-violet-200",
+  };
+
+  const getStatusColor = (status = "") => {
+    const s = String(status || "").toLowerCase();
+    if (s.includes("paid") || s === "completed") return { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200" };
+    if (s.includes("partial") || s === "partially_invoiced") return { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200" };
+    if (s === "invoiced" || s === "approved" || s === "sent") return { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200" };
+    return { bg: "bg-slate-50", text: "text-slate-600", border: "border-slate-200" };
   };
 
 
@@ -1168,6 +1332,115 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                 </div>
               )}
 
+              {tab === "paymentTerms" && (
+                <div className="space-y-6">
+                  <div className="flex flex-col gap-6">
+                    {paymentDistributions.length === 0 ? (
+                      <div className="bg-slate-50 rounded-2xl border border-dashed border-slate-200 p-12 text-center">
+                        <CreditCard className="mx-auto text-slate-300 mb-4" size={40} />
+                        <p className="text-base font-bold text-slate-500">No payment terms defined</p>
+                        <p className="text-xs text-slate-400 mt-1">This PO doesn't have any specific milestones or periodic distribution scheduled.</p>
+                      </div>
+                    ) : (
+                      paymentDistributions.map((dist, idx) => (
+                        <div 
+                          key={idx} 
+                          onClick={() => dist.invoices.length > 0 && setSelectedInvoiceId(dist.invoices[0]._id)}
+                          className={`bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden group transition-all ${
+                            dist.invoices.length > 0 ? "cursor-pointer hover:border-blue-400 hover:shadow-md" : ""
+                          }`}
+                        >
+                          {/* Term Header */}
+                          <div className="p-4 pb-3">
+                            <div className="flex justify-between items-start mb-3">
+                              <div className="space-y-1">
+                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-md ${
+                                  dist.type === "milestone" ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                                }`}>
+                                  {dist.type}
+                                </span>
+                                <h4 className="text-sm font-black text-slate-900 tracking-tight">{dist.title}</h4>
+                                <div className="flex items-center gap-1.5 text-slate-400">
+                                  <Clock size={10} />
+                                  <p className="text-[9px] font-bold uppercase tracking-wider">
+                                    {dist.dueDate ? `Due: ${fmt(dist.dueDate)}` : `${fmt(dist.startDate)} — ${fmt(dist.endDate)}`}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-base font-black text-slate-900 leading-none">{fmtC(dist.amount, currency)}</p>
+                                <div className="flex items-center gap-1 justify-end mt-1.5">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    dist.status === "paid" ? "bg-emerald-500" : dist.status === "partial" ? "bg-amber-500" : dist.status === "invoiced" ? "bg-blue-500" : "bg-slate-300"
+                                  }`} />
+                                  <span className={`text-[9px] font-black uppercase tracking-tighter ${
+                                    dist.status === "paid" ? "text-emerald-600" : dist.status === "partial" ? "text-amber-600" : dist.status === "invoiced" ? "text-blue-600" : "text-slate-400"
+                                  }`}>
+                                    {dist.status}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Term Progress Bar */}
+                            <div className="space-y-1.5 mb-1">
+                              <div className="flex justify-between items-end">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest leading-none">Progress</p>
+                                <p className="text-[9px] font-black text-slate-900 leading-none">{dist.paidPercentage.toFixed(0)}%</p>
+                              </div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <motion.div 
+                                  initial={{ width: 0 }}
+                                  animate={{ width: `${dist.paidPercentage}%` }}
+                                  transition={{ duration: 1, ease: "easeOut" }}
+                                  className={`h-full rounded-full ${
+                                    dist.status === "paid" ? "bg-emerald-500" : dist.status === "partial" ? "bg-amber-500" : "bg-blue-500"
+                                  }`}
+                                />
+                              </div>
+                              <div className="flex justify-between text-[8px] font-bold text-slate-400">
+                                <span>{fmtC(dist.totalPaid + (dist.totalTds || 0), currency)} Settled</span>
+                                <span>{fmtC(Math.max(0, dist.amount - (dist.totalPaid + (dist.totalTds || 0))), currency)} Remaining</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Payment History timeline */}
+                          {dist.invoices.length > 0 && (
+                            <div className="bg-slate-50/30 p-4 pt-3 border-t border-slate-50">
+                              <div className="space-y-3">
+                                <div className="relative pl-5 space-y-3 before:content-[''] before:absolute before:left-[9px] before:top-2 before:bottom-2 before:w-px before:bg-slate-200">
+                                  {dist.invoices.map((inv) => {
+                                    const s = getStatusColor(inv.status);
+                                    return (
+                                      <div key={inv._id} className="relative">
+                                        <div className={`absolute -left-[20px] top-1 w-2 h-2 rounded-full border-2 border-white ring-1 ring-slate-100 ${s.bg} ${s.text.replace("text-", "bg-")}`} />
+                                        <div className="flex justify-between items-center text-[10px]">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-black text-slate-700 tracking-tight uppercase">{inv.invoiceNo}</span>
+                                            <span className="text-slate-400 font-bold">{fmt(inv.invoiceDate)}</span>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-black text-slate-900">{fmtC(inv.invoiceAmount, currency)}</span>
+                                            <span className={`text-[7px] font-black uppercase px-1.5 py-0.25 rounded border ${s.bg} ${s.text} ${s.border}`}>
+                                              {inv.status?.replace("_", " ")}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* ══ TIMELINE ══════════════════════════════════════════ */}
               {tab === "timeline" && (
                 <div className="space-y-4">
@@ -1450,7 +1723,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
       <InvoiceDetailsModal
         isOpen={Boolean(selectedInvoiceId)}
-        onClose={() => setSelectedInvoiceId(null)}
+        onClose={() => {
+          setSelectedInvoiceId(null);
+          fetchPO();
+        }}
         invoiceId={selectedInvoiceId}
       />
     </div>
