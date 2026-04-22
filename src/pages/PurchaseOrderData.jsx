@@ -13,6 +13,7 @@ import PurchaseOrderAdvancedSearch from "../components/PurchaseOrderAdvancedSear
 import AuditLogSidebar from "../components/AuditLogSidebar";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { motion, AnimatePresence } from "framer-motion";
+import { checkAuthorization } from "../utils/checkAuthorization";
 
 import {
   Search,
@@ -336,6 +337,7 @@ const TH = ({ label, sortKey, currentSort, onSort, icon: Icon }) => {
 
 const PurchaseOrderData = () => {
   const { user } = useAuth();
+  const canCreatePO = checkAuthorization(user, "PURCHASE ORDER", "CREATE");
   const navigate = useNavigate();
   const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany") || "{}");
   const companyId =
@@ -648,17 +650,21 @@ const PurchaseOrderData = () => {
               <button onClick={fetchAllData} className="p-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all" title="Refresh">
                 <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
               </button>
-              <Link to="/purchase-order/bulk-po-upload" className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-xs font-bold">
-                <Upload size={13} className="text-emerald-500" />
-                Bulk
-              </Link>
-              <Link
-                to={viewMode === "receivable" ? "/purchase-order" : "/purchase-order?direction=payable"}
-                className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 transition-all"
-              >
-                <Plus size={14} />
-                New PO
-              </Link>
+              {canCreatePO && (
+                <Link to="/purchase-order/bulk-po-upload" className="hidden sm:flex items-center gap-1.5 px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all text-xs font-bold">
+                  <Upload size={13} className="text-emerald-500" />
+                  Bulk
+                </Link>
+              )}
+              {canCreatePO && (
+                <Link
+                  to={viewMode === "receivable" ? "/purchase-order" : "/purchase-order?direction=payable"}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-xs font-bold shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 transition-all"
+                >
+                  <Plus size={14} />
+                  New PO
+                </Link>
+              )}
             </div>
           </div>
 
@@ -924,13 +930,15 @@ const PurchaseOrderData = () => {
                               <button onClick={() => navigate(viewMode === "receivable" ? `/purchaseorder-data/client/${row._id}` : `/purchaseorder-data/vendor/${row._id}`)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all" title="View POs">
                                 <FileText size={14} />
                               </button>
-                              <Link
-                                to={viewMode === "receivable" ? `/purchase-order?clientId=${row._id}` : `/purchase-order?vendorId=${row._id}&direction=payable`}
-                                className={`p-1.5 rounded-lg ${actionBg} text-white transition-all shadow-sm`}
-                                title="New PO"
-                              >
-                                <Plus size={14} />
-                              </Link>
+                              {canCreatePO && (
+                                <Link
+                                  to={viewMode === "receivable" ? `/purchase-order?clientId=${row._id}` : `/purchase-order?vendorId=${row._id}&direction=payable`}
+                                  className={`p-1.5 rounded-lg ${actionBg} text-white transition-all shadow-sm`}
+                                  title="New PO"
+                                >
+                                  <Plus size={14} />
+                                </Link>
+                              )}
                             </div>
                           </td>
                         </motion.tr>

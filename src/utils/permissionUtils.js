@@ -1,121 +1,222 @@
-/**
- * Permission Checking Utilities
- * Use these functions throughout the frontend for consistent permission validation
- */
+const normalizeToken = (value = "") =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
 
-/**
- * Check if user has a specific permission for an entity
- * @param {Array} userPermissions - User's permissions array from backend
- * @param {String|Object} entityId - Entity ID (string or object with _id)
- * @param {String} action - Permission action (VIEW, CREATE, EDIT, DELETE)
- * @param {String|Object} companyId - Company ID (string or object with _id)
- * @returns {Boolean} Whether user has the permission
- */
-export const checkPermission = (userPermissions, entityId, action, companyId) => {
-  if (!userPermissions || !Array.isArray(userPermissions)) return false;
+const normalizeAction = (value = "") => normalizeToken(value);
 
-  return userPermissions.some((permission) => {
-    // Handle both string and object formats for entity
-    const permissionEntityId = typeof permission.entity === "object" 
-      ? permission.entity._id 
-      : permission.entity;
+const safeJsonParse = (value, fallback = null) => {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+};
 
-    // Handle both string and object formats for company
-    const permissionCompanyId = typeof permission.company === "object" 
-      ? permission.company._id 
-      : permission.company;
+export const getStoredSelectedCompany = () =>
+  safeJsonParse(localStorage.getItem("selectedCompany"));
 
-    // Extract company ID if it's an object
-    const targetCompanyId = typeof companyId === "object" 
-      ? companyId._id 
-      : companyId;
+export const getStoredEntities = () =>
+  safeJsonParse(localStorage.getItem("entityCatalog"), []);
 
-    return (
-      permissionEntityId?.toString() === entityId?.toString() &&
-      permissionCompanyId?.toString() === targetCompanyId?.toString() &&
-      permission.actions.includes(action)
+const getCompanyId = (company) =>
+  company?._id || company?.id || company?.companyId || company;
+
+const getEntityId = (entity) =>
+  entity?._id || entity?.id || entity?.entityId || entity;
+
+const buildEntityMaps = (entities = []) => {
+  const byId = new Map();
+  const byKey = new Map();
+
+  entities.forEach((entity) => {
+    const entityId = getEntityId(entity)?.toString();
+    if (entityId) {
+      byId.set(entityId, entity);
+    }
+
+    const normalizedKey = normalizeToken(entity?.key || entity?.name);
+    if (normalizedKey) {
+      byKey.set(normalizedKey, entity);
+    }
+  });
+
+  return { byId, byKey };
+};
+
+const permissionHasAction = (permission, action) => {
+  const normalizedAction = normalizeAction(action);
+
+  if (Array.isArray(permission?.actions)) {
+    return permission.actions.some(
+      (item) => normalizeAction(item) === normalizedAction
     );
+  }
+
+  if (permission?.actions && typeof permission.actions === "object") {
+    const matchedKey = Object.keys(permission.actions).find(
+      (key) => normalizeAction(key) === normalizedAction
+    );
+    return Boolean(matchedKey && permission.actions[matchedKey]);
+  }
+
+  return false;
+};
+
+export const resolvePermissionModule = (permission, entities = []) => {
+  const directModule =
+    permission?.module ||
+    permission?.entityKey ||
+    permission?.entity?.key ||
+    permission?.entity?.name;
+
+  if (directModule) {
+    return normalizeToken(directModule);
+  }
+
+  const entityId = getEntityId(permission?.entity)?.toString();
+  if (!entityId) return "";
+
+  const { byId } = buildEntityMaps(entities);
+  const matchedEntity = byId.get(entityId);
+  return normalizeToken(matchedEntity?.key || matchedEntity?.name);
+};
+
+export const normalizePermissions = (permissions = [], entities = []) =>
+  Array.isArray(permissions)
+    ? permissions.map((permission) => ({
+        entityId: getEntityId(permission?.entity)?.toString() || "",
+        module: resolvePermissionModule(permission, entities),
+        companyId: getCompanyId(permission?.company)?.toString() || "",
+        actions: permission?.actions || {},
+        raw: permission,
+      }))
+    : [];
+
+export const hasPermission = ({
+  user,
+  permissions,
+  entities,
+  module,
+  entityId,
+  action = "VIEW",
+  companyId,
+} = {}) => {
+  if (!user && !permissions) return false;
+  if ((user?.role || "").toLowerCase() === "superadmin") return true;
+
+  const effectivePermissions = permissions || user?.permissions || [];
+  if (!Array.isArray(effectivePermissions) || effectivePermissions.length === 0) {
+    return false;
+  }
+
+  const effectiveEntities =
+    entities?.length > 0 ? entities : getStoredEntities();
+  const effectiveCompanyId =
+    getCompanyId(companyId || user?.company || getStoredSelectedCompany())?.toString();
+  const normalizedModule = normalizeToken(module);
+  const normalizedEntityId = getEntityId(entityId)?.toString();
+
+  return effectivePermissions.some((permission) => {
+    const permissionCompanyId = getCompanyId(
+      permission?.company || permission?.companyId
+    )?.toString();
+    const permissionEntityId = getEntityId(permission?.entity)?.toString();
+    const permissionModule = resolvePermissionModule(permission, effectiveEntities);
+
+    const matchesModule =
+      normalizedModule && permissionModule === normalizedModule;
+    const matchesEntityId =
+      normalizedEntityId && permissionEntityId === normalizedEntityId;
+
+    if (!matchesModule && !matchesEntityId) {
+      return false;
+    }
+
+    if (effectiveCompanyId && permissionCompanyId !== effectiveCompanyId) {
+      return false;
+    }
+
+    return permissionHasAction(permission, action);
   });
 };
 
-/**
- * Check if user has VIEW permission for an entity
- */
-export const canView = (userPermissions, entityId, companyId) => {
-  return checkPermission(userPermissions, entityId, "VIEW", companyId);
-};
+export const checkPermission = (
+  userPermissions,
+  entityId,
+  action,
+  companyId,
+  entities = []
+) =>
+  hasPermission({
+    permissions: userPermissions,
+    entityId,
+    action,
+    companyId,
+    entities,
+  });
 
-/**
- * Check if user has CREATE permission for an entity
- */
-export const canCreate = (userPermissions, entityId, companyId) => {
-  return checkPermission(userPermissions, entityId, "CREATE", companyId);
-};
+export const canView = (userPermissions, entityId, companyId, entities = []) =>
+  checkPermission(userPermissions, entityId, "VIEW", companyId, entities);
 
-/**
- * Check if user has EDIT permission for an entity
- */
-export const canEdit = (userPermissions, entityId, companyId) => {
-  return checkPermission(userPermissions, entityId, "EDIT", companyId);
-};
+export const canCreate = (userPermissions, entityId, companyId, entities = []) =>
+  checkPermission(userPermissions, entityId, "CREATE", companyId, entities);
 
-/**
- * Check if user has DELETE permission for an entity
- */
-export const canDelete = (userPermissions, entityId, companyId) => {
-  return checkPermission(userPermissions, entityId, "DELETE", companyId);
-};
+export const canEdit = (userPermissions, entityId, companyId, entities = []) =>
+  checkPermission(userPermissions, entityId, "EDIT", companyId, entities);
 
-/**
- * React Hook: usePermission
- * Use this hook in components for easy permission checking
- * @param {Object} user - User object from AuthContext
- * @returns {Object} Permission checking functions
- */
-export const usePermission = (user) => {
-  const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
+export const canDelete = (userPermissions, entityId, companyId, entities = []) =>
+  checkPermission(userPermissions, entityId, "DELETE", companyId, entities);
 
-  if (!user || !selectedCompany) {
-    return {
-      can: () => false,
-      canView: () => false,
-      canCreate: () => false,
-      canEdit: () => false,
-      canDelete: () => false,
-    };
-  }
+export const usePermission = (user, entities = []) => {
+  const selectedCompany = getStoredSelectedCompany();
 
   return {
-    can: (entityId, action) => 
-      checkPermission(user.permissions, entityId, action, selectedCompany._id),
-    canView: (entityId) => 
-      canView(user.permissions, entityId, selectedCompany._id),
-    canCreate: (entityId) => 
-      canCreate(user.permissions, entityId, selectedCompany._id),
-    canEdit: (entityId) => 
-      canEdit(user.permissions, entityId, selectedCompany._id),
-    canDelete: (entityId) => 
-      canDelete(user.permissions, entityId, selectedCompany._id),
+    can: (moduleOrEntityId, action = "VIEW", options = {}) =>
+      hasPermission({
+        user,
+        entities,
+        companyId: options.companyId || selectedCompany?._id,
+        module: options.module ? moduleOrEntityId : undefined,
+        entityId: options.module ? options.entityId : moduleOrEntityId,
+        action,
+      }),
+    canView: (module, options = {}) =>
+      hasPermission({
+        user,
+        entities,
+        companyId: options.companyId || selectedCompany?._id,
+        module,
+        entityId: options.entityId,
+        action: "VIEW",
+      }),
+    canCreate: (module, options = {}) =>
+      hasPermission({
+        user,
+        entities,
+        companyId: options.companyId || selectedCompany?._id,
+        module,
+        entityId: options.entityId,
+        action: "CREATE",
+      }),
+    canEdit: (module, options = {}) =>
+      hasPermission({
+        user,
+        entities,
+        companyId: options.companyId || selectedCompany?._id,
+        module,
+        entityId: options.entityId,
+        action: "EDIT",
+      }),
+    canDelete: (module, options = {}) =>
+      hasPermission({
+        user,
+        entities,
+        companyId: options.companyId || selectedCompany?._id,
+        module,
+        entityId: options.entityId,
+        action: "DELETE",
+      }),
   };
 };
-
-/**
- * Example Usage in Components:
- * 
- * import { usePermission } from "../utils/permissionUtils.js";
- * import { useAuth } from "../contexts/AuthContext.jsx";
- * 
- * export function JournalsPage() {
- *   const { user } = useAuth();
- *   const { canCreate, canEdit, canDelete } = usePermission(user);
- *   const journalEntity = entities.find(e => e.key === "JOURNAL");
- * 
- *   return (
- *     <div>
- *       {canCreate(journalEntity._id) && (
- *         <button onClick={handleCreate}>+ Create Journal</button>
- *       )}
- *     </div>
- *   );
- * }
- */

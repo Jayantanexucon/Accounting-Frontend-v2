@@ -43,10 +43,12 @@ function CompanySelectionPage() {
   };
 
   const handleSelect = (company) => {
+    console.log("🔄 Selecting company:", company.name);
     setCookie("AC_CMP", company._id);
     setUser((prev) => ({ ...prev, company }));
     setCompany(company);
     localStorage.setItem("selectedCompany", JSON.stringify(company));
+    console.log("✅ Company selected and stored:", company.name);
     navigate("/", { replace: true });
   };
 

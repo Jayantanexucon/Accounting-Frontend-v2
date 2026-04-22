@@ -866,7 +866,7 @@ const InvoiceData = () => {
                                 )}
                                 <ActionBtn onClick={(e) => handleDownloadPdf(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download PDF" color="slate" />
                                 <ActionBtn onClick={(e) => handleDownloadWord(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download Word" color="slate" />
-                                {!invoice.salesJournalId && (
+                                {checkAuthorization(user, "INVOICE", "EDIT") && !invoice.salesJournalId && (
                                   <ActionBtn onClick={(e) => handleCreateLedgerClick(invoice, e)} icon={BookOpen} label="Post Sales Journal" color="purple" />
                                 )}
                                 {invoice.salesJournalId && (
@@ -874,7 +874,7 @@ const InvoiceData = () => {
                                     <CheckCircle size={11} /> Sales Journal Posted
                                   </span>
                                 )}
-                                {invoice.salesJournalId && paymentInfo.pendingAmount > 0 && (
+                                {checkAuthorization(user, "INVOICE", "EDIT") && invoice.salesJournalId && paymentInfo.pendingAmount > 0 && (
                                   <ActionBtn onClick={(e) => handleRecordPayment(invoice, e)} icon={Banknote} label="Receive Payment" color="green" />
                                 )}
                                 {paymentInfo.pendingAmount <= 0 && paymentInfo.totalReceived > 0 && (

@@ -4,6 +4,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useState, useEffect, useMemo } from "react";
 import { Settings, ChevronRight, ChevronLeft, LogOut } from "lucide-react";
 import { setCookie } from "../utils/cookieUtil";
+import { debugCookieIssue } from "../utils/debugCookies";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Import all icons
@@ -39,8 +40,6 @@ import {
   Bell,
 } from "lucide-react";
 import { Inventory, Dashboard, AccountBalance } from "@mui/icons-material";
-import { getEntitiesApi } from "../apis/entityApi";
-import { fetchMe } from "../apis/authApi";
 import NotificationBell from "../modules/notification/NotificationBell";
 
 // Comprehensive icon mapping
@@ -70,11 +69,9 @@ const ICON_MAP = {
 };
 
 export default function NavbarComponent() {
-  const { user, initAuth, logout } = useAuth();
+  const { user, logout, entities, hasPermission } = useAuth();
   const [choose, setChoose] = useState(user?.company?._id);
   const [openMenu, setOpenMenu] = useState("");
-  const [entities, setEntities] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const navigator = useNavigate();
 
@@ -86,29 +83,57 @@ export default function NavbarComponent() {
     setIsCollapsed(!isCollapsed);
   };
 
-  const handleChangeCompany = (value) => {
+  const handleChangeCompany = async (value) => {
     const selectedCompany = user?.companies?.find((c) => c._id === value);
     if (selectedCompany) {
-      localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
-      setChoose(value);
-      setCookie("AC_CMP", value);
-      window.location.reload();
+      console.log("🔄 Switching company to:", selectedCompany.name, "ID:", value);
+      
+      try {
+        // Step 1: Update localStorage
+        localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
+        console.log("✅ localStorage updated:", selectedCompany.name);
+        
+        // Step 2: Set cookie with explicit options for production HTTPS
+        setCookie("AC_CMP", value, {
+          expires: 30,
+          path: "/",
+          domain: undefined, // Let browser use current domain
+        });
+        
+        // Step 3: Verify cookie was set immediately
+        setTimeout(() => {
+          const cookieValue = document.cookie.split('; ').find(row => row.startsWith('AC_CMP='));
+          console.log("✅ Cookie verification:", cookieValue || "Cookie NOT found");
+          console.log("🍪 All cookies:", document.cookie);
+        }, 50);
+        
+        // Step 4: Run debug check
+        console.log("\n🔍 Running cookie debug check...");
+        const debugInfo = debugCookieIssue();
+        if (!debugInfo.hasCookie) {
+          console.error("⚠️  CRITICAL: Cookie was not set! Company change will fail.");
+        }
+        
+        // Step 5: Longer delay to ensure cookie is persisted in all scenarios
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // Step 6: Update local state before reload
+        setChoose(value);
+        
+        // Step 7: Reload to fetch new company data from backend
+        console.log("🔄 Reloading page to apply company change...");
+        window.location.reload();
+      } catch (error) {
+        console.error("❌ Error switching company:", error);
+      }
+    } else {
+      console.error("❌ Company not found:", value);
     }
   };
 
   useEffect(() => {
-    const fetchEntities = async () => {
-      try {
-        const response = await getEntitiesApi();
-        setEntities(response.data);
-      } catch (error) {
-        console.error("Error fetching entities:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchEntities();
-  }, []);
+    setChoose(user?.company?._id);
+  }, [user?.company?._id]);
 
   useEffect(() => {
     const mainContent = document.getElementById("main-content");
@@ -118,29 +143,7 @@ export default function NavbarComponent() {
   }, [isCollapsed]);
 
   const hasViewPermission = (entityId) => {
-    if (!user) return false;
-    if (user.role === "superAdmin") return true;
-    if (user.role === "admin" || user?._id === user?.company?.owner) return true;
-    if (!user.permissions || !Array.isArray(user.permissions)) return false;
-
-    const selectedCompany = JSON.parse(localStorage.getItem("selectedCompany"));
-    if (!selectedCompany) return false;
-
-    return user.permissions.some((permission) => {
-      // Handle both string and object formats for entity
-      const permissionEntityId = typeof permission.entity === "object" ? permission.entity._id : permission.entity;
-      
-      // Handle both string and object formats for company
-      const permissionCompanyId = typeof permission.company === "object" 
-        ? permission.company._id 
-        : permission.company;
-      
-      return (
-        permissionEntityId?.toString() === entityId?.toString() &&
-        permissionCompanyId?.toString() === selectedCompany._id?.toString() &&
-        permission.actions.includes("VIEW")
-      );
-    });
+    return hasPermission(undefined, "VIEW", { entityId });
   };
 
   const getIconComponent = (entity) => {
@@ -183,7 +186,7 @@ export default function NavbarComponent() {
 
   const links = useMemo(() => buildNavigation(), [entities, user?.permissions, user?.role, user?.company?.owner]);
 
-  if (loading) {
+  if (!user || !Array.isArray(entities)) {
     return (
       <div className={`fixed top-0 left-0 bottom-0 ${isCollapsed ? "w-20" : "w-64"} glass-dark z-50 flex items-center justify-center transition-all duration-500`}>
         <div className="w-8 h-8 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
@@ -341,7 +344,7 @@ export default function NavbarComponent() {
         })}
 
 
-        {(user?.role === "superAdmin" || user?.role === "admin") && (
+        {user?.role === "superAdmin" && (
           <div className="mb-1">
              <NavLink
           to="/reports/tax-flow"
