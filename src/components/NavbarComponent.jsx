@@ -89,10 +89,14 @@ export default function NavbarComponent() {
   const handleChangeCompany = (value) => {
     const selectedCompany = user?.companies?.find((c) => c._id === value);
     if (selectedCompany) {
+      console.log("🔄 Switching company to:", selectedCompany.name);
       localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
       setChoose(value);
       setCookie("AC_CMP", value);
+      console.log("✅ Company cookie set:", value);
       window.location.reload();
+    } else {
+      console.error("❌ Company not found:", value);
     }
   };
 
