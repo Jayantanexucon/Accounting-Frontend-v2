@@ -1234,6 +1234,15 @@ const ManualInvoicePage = () => {
     }
   }, [shipToSearch, clients]);
 
+  const normalizeStateCode = (value = "") => {
+    const normalized = String(value || "").trim().toUpperCase();
+    if (!normalized) return "";
+    const digitMatch = normalized.match(/^(\d{2})/);
+    if (digitMatch) return digitMatch[1];
+    const alphaMatch = normalized.match(/^([A-Z]{2})/);
+    return alphaMatch ? alphaMatch[1] : normalized;
+  };
+
   const convertToWords = (num) => {
     if (num === 0) return "Zero Only";
 
@@ -1298,12 +1307,15 @@ const ManualInvoicePage = () => {
       let sgst = 0;
       let igst = 0;
 
+      const companyStateCode = normalizeStateCode(companyDetails.gstNumber);
+      const shipToStateCode = normalizeStateCode(invoice.shipTo.stateCode);
+      const isIntraState = !!companyStateCode && !!shipToStateCode && companyStateCode === shipToStateCode;
+
       invoice.items.forEach((item) => {
         taxableValue += item.taxableValue || 0;
         const gstAmount = item.gstAmount || 0;
 
-        // Only apply CGST/SGST if both billTo and shipTo state codes are present and equal
-        if (invoice.billTo.stateCode && invoice.shipTo.stateCode && invoice.billTo.stateCode === invoice.shipTo.stateCode) {
+        if (isIntraState) {
           cgst += Math.round(gstAmount / 2);
           sgst += Math.round(gstAmount / 2);
         } else {
@@ -1343,7 +1355,7 @@ const ManualInvoicePage = () => {
 
       setValueInWords(convertToWords(netPayable));
     }
-  }, [invoice.items, invoice.billTo.stateCode, invoice.shipTo.stateCode, manualAmountEdit, manualTdsEdit, hsnList]);
+  }, [invoice.items, invoice.billTo.stateCode, invoice.shipTo.stateCode, manualAmountEdit, manualTdsEdit, hsnList, companyDetails.gstNumber]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -2594,17 +2606,43 @@ const ManualInvoicePage = () => {
         // // console.log("Create API Response:", response.data);
 
         const generatedInvoiceNo = response?.data?.invoiceNo;
-        setCreatedInvoiceId(response?.data?._id);
+        const generatedId = response?.data?._id;
+        
+        setCreatedInvoiceId(generatedId);
 
-        // Update invoice number in state
+        // ✅ Construct full display object for success modal
+        const invoiceToDisplay = {
+          ...invoice,
+          _id: generatedId,
+          invoiceNo: generatedInvoiceNo || invoice.invoiceNo,
+          companyId: user?.company?._id,
+          status: status,
+          approvalStatus: "Pending",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          currency: invoice.currency || "INR",
+          totalTaxableValue: invoice.totalTaxableValue,
+          totalCGSTAmount: invoice.totalCGSTAmount,
+          totalSGSTAmount: invoice.totalSGSTAmount,
+          totalIGSTAmount: invoice.totalIGSTAmount,
+          totalGSTAmount: (invoice.totalCGSTAmount || 0) + (invoice.totalSGSTAmount || 0) + (invoice.totalIGSTAmount || 0),
+          amountDue: invoice.amountDue,
+          netPayable: invoice.netPayable,
+          tdsAmount: invoice.tdsAmount || 0,
+          valueInWords: valueInWords,
+          billTo: invoice.billTo,
+          shipTo: invoice.shipTo,
+          items: invoice.items,
+        };
+
+        setCreatedInvoice(invoiceToDisplay);
+        setShowSuccessModal(true);
+
+        // Update invoice number in state for current UI
         setInvoice((prev) => ({
           ...prev,
           invoiceNo: generatedInvoiceNo,
         }));
-
-        // For create, use the API response directly
-        setCreatedInvoice(response?.data);
-        setShowSuccessModal(true);
 
         toast.success("Invoice created and submitted for approval.");
       }
