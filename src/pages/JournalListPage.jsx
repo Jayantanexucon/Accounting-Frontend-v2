@@ -748,7 +748,7 @@ const [loadingStats, setLoadingStats] = useState(false);
     }
 
     if (isAdmin) {
-      navigate("/accounting/journals", {
+      navigate("/accounting/journals/create", {
         state: {
           editingJournal: journal,
           isEditing: true,
@@ -765,7 +765,7 @@ const [loadingStats, setLoadingStats] = useState(false);
         const otherUser = pendingRequests[0]?.requestedBy?.name || "another user";
         toast.warning(`This journal has a pending edit request from ${otherUser}. Please wait.`);
       } else {
-        navigate("/accounting/journals", {
+        navigate("/accounting/journals/create", {
           state: {
             editingJournal: journal,
             isEditing: true,
@@ -812,12 +812,7 @@ const [loadingStats, setLoadingStats] = useState(false);
         <div className="px-6 py-8">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
             <div className="flex items-center gap-4">
-              <button 
-                onClick={() => navigate("/accounting/journals")} 
-                className="p-3 bg-white/50 hover:bg-white rounded-2xl transition-all shadow-sm group"
-              >
-                <FiArrowLeft size={20} className="text-slate-600 group-hover:text-blue-600" />
-              </button>
+          
               <div>
                 <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">Journal Vouchers</h1>
                 <p className="text-sm font-medium text-slate-500 mt-1">
@@ -852,7 +847,7 @@ const [loadingStats, setLoadingStats] = useState(false);
 
               {canCreateJournal && (
                 <button
-                  onClick={() => navigate("/accounting/journals")}
+                  onClick={() => navigate("/accounting/journals/create")}
                   className="px-6 py-2.5 bg-blue-600 text-white rounded-xl hover:bg-blue-700 font-bold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
                 >
                   <FiPlus size={20} />

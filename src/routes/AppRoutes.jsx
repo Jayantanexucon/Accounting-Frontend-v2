@@ -106,11 +106,15 @@ export default function AppRoutes() {
                 <Route path="account" element={<LedgerPage />} />
                 <Route
                   path="journals"
-                  element={withAnyPermission("JOURNAL", ["CREATE", "EDIT"], <JournalPage />)}
+                  element={withPermission("JOURNAL", "VIEW", <JournalListPage />)}
                 />
                 <Route
                   path="journals/list"
                   element={withPermission("JOURNAL", "VIEW", <JournalListPage />)}
+                />
+                <Route
+                  path="journals/create"
+                  element={withAnyPermission("JOURNAL", ["CREATE", "EDIT"], <JournalPage />)}
                 />
                 <Route
                   path="journals/upload-excel"

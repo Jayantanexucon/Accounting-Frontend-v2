@@ -117,7 +117,7 @@ export default function JournalPopupModal({ open, onClose, initialSearch = "" })
       return;
     }
 
-    navigate("/accounting/journals", {
+    navigate("/accounting/journals/create", {
       state: {
         editingJournal: filteredJournal,
         isEditing: true,

@@ -851,7 +851,7 @@ export default function ManualJournalPage() {
                 {/* Journal List */}
                 {canViewJournal && (
                   <button
-                    onClick={() => navigate("/accounting/journals/list")}
+                    onClick={() => navigate("/accounting/journals")}
                     disabled={saving}
                     className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all disabled:opacity-50"
                   >
