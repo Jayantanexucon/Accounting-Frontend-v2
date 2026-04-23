@@ -105,6 +105,15 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     }).format(amount || 0);
   };
 
+  const getItemTaxLabel = (item = {}) =>
+    item?.taxLabel || item?.taxType || invoice?.taxLabel || invoice?.taxType || "Tax";
+
+  const getItemTaxRate = (item = {}) =>
+    Number(item?.taxRate ?? item?.combinedTaxRate ?? item?.gstRate ?? 0);
+
+  const getItemTaxAmount = (item = {}) =>
+    Number(item?.taxAmount ?? item?.gstAmount ?? 0);
+
   const handleOpenJournal = async (journalId) => {
     if (!journalId || !user?.company?._id) return;
     try {
@@ -244,6 +253,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   };
 
   const calculateTotalTax = (invoice) => {
+    if (invoice?.totalTaxAmount != null) {
+      return Number(invoice.totalTaxAmount || 0);
+    }
     const cgst = invoice.totalCGSTAmount || 0;
     const sgst = invoice.totalSGSTAmount || 0;
     const igst = invoice.totalIGSTAmount || 0;
@@ -391,7 +403,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   const handlePOClick = () => {
     const poId = getPOId();
     if (poId) {
-      setSelectedPOId(poId);
+      setShowPOModal(true);
     } else {
       toast.info("PO details not available");
     }
@@ -401,6 +413,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 
   const paymentInfo = invoice ? calculatePaymentInfo(invoice) : {};
   const currency    = invoice?.currency || "INR";
+  const taxLabel = invoice?.taxLabel || invoice?.taxType || "Tax";
+  const taxSummary = Array.isArray(invoice?.taxSummary) ? invoice.taxSummary : [];
   const isApprovedInvoice = invoice?.approvalStatus === "Approved";
   const TABS = ["overview","items","payments","accounting","documents"];
 
@@ -443,7 +457,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-sm font-extrabold text-white tracking-tight">
-                      {invoice?.invoiceNo ? `Invoice #${invoice.invoiceNo}` : "Invoice Details"}
+                      {invoice?.invoiceNo ? `Invoice  ${invoice.invoiceNo}` : "Invoice Details"}
                     </h2>
                     {invoice && getInvoiceStatusBadge(invoice.status)}
                     {invoice && (
@@ -551,7 +565,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           <F label="Client Name" value={invoice.billTo?.name} />
                           <F label="Address"     value={invoice.billTo?.address} />
                           <div className="grid grid-cols-2 gap-3">
-                            <F label="GSTIN"      value={invoice.billTo?.GSTIN} mono />
+                            <F label={invoice.billTo?.taxIdentifierType || "Tax ID"} value={invoice.billTo?.taxIdentifierNumber || invoice.billTo?.GSTIN} mono />
                             <F label="State Code" value={invoice.billTo?.stateCode} mono />
                           </div>
                         </div>
@@ -580,16 +594,6 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 	                        </div>
 	                        <F label="Payment Terms" value={getPaymentTermsText(invoice.paymentTerms)} />
 	                        <F label="Shipping To"   value={invoice.shipTo?.name || "Same as billing"} />
-                          {hasInvoiceTds && (
-                            <button
-                              type="button"
-                              onClick={() => setShowTdsDetails(true)}
-                              className="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700"
-                            >
-                              <Percent size={13} />
-                              View TDS Details
-                            </button>
-                          )}
 	                      </div>
 	                    </SectionCard>
                   </div>
@@ -600,7 +604,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {[
                           { l:"Taxable Value", v: formatCurrency(invoice.totalTaxableValue||0,currency), cls:"bg-slate-50 border-slate-100" },
-                          { l:"Total Tax",     v: formatCurrency(calculateTotalTax(invoice),currency),   cls:"bg-slate-50 border-slate-100" },
+                          { l:`Total ${taxLabel}`,     v: formatCurrency(calculateTotalTax(invoice),currency),   cls:"bg-slate-50 border-slate-100" },
                           { l:"TDS (Reference Only)", v: formatCurrency(getInvoiceTdsAmount(invoice),currency), cls:"bg-violet-50 border-violet-100" },
                           { l:"Invoice Total", v: formatCurrency(invoice.amountDue || invoice.netPayable || 0,currency), cls:"bg-blue-50 border-blue-100" },
                         ].map(s => (
@@ -611,18 +615,21 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                         ))}
                       </div>
 
-                        {/* GST breakdown */}
-                        <div className="grid grid-cols-3 gap-3 pt-3 border-t border-slate-100">
-                          {[
-                            { l:"CGST", v: formatCurrency(invoice.totalCGSTAmount||0,currency), cls:"bg-blue-50 border-blue-100 text-blue-700" },
-                            { l:"SGST", v: formatCurrency(invoice.totalSGSTAmount||0,currency), cls:"bg-emerald-50 border-emerald-100 text-emerald-700" },
-                            { l:"IGST", v: formatCurrency(invoice.totalIGSTAmount||0,currency), cls:"bg-violet-50 border-violet-100 text-violet-700" },
-                          ].map(s => (
-                            <div key={s.l} className={`flex items-center justify-between px-3 py-2 rounded-xl border ${s.cls}`}>
-                              <span className="text-[10px] font-black uppercase tracking-wider">{s.l}</span>
-                              <span className="text-xs font-black tabular-nums">{s.v}</span>
-                            </div>
-                          ))}
+                        <div className={`grid gap-3 pt-3 border-t border-slate-100 ${taxSummary.length > 1 ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1"}`}>
+                          {(taxSummary.length > 0 ? taxSummary : [
+                            { l:"CGST", amount: invoice.totalCGSTAmount||0 },
+                            { l:"SGST", amount: invoice.totalSGSTAmount||0 },
+                            { l:"IGST", amount: invoice.totalIGSTAmount||0 },
+                          ]).map((entry) => {
+                            const label = entry.l || entry.label || entry.taxType || taxLabel;
+                            const value = entry.amount ?? 0;
+                            return (
+                              <div key={label} className="flex items-center justify-between px-3 py-2 rounded-xl border bg-slate-50 border-slate-100 text-slate-700">
+                                <span className="text-[10px] font-black uppercase tracking-wider">{label}</span>
+                                <span className="text-xs font-black tabular-nums">{formatCurrency(value,currency)}</span>
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Progress bar */}
@@ -666,7 +673,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                       <table className="w-full text-xs">
                         <thead>
                           <tr style={{ background: "linear-gradient(90deg,#f1f5f9,#dbeafe)" }}>
-                            {["Description","HSN/SAC","Qty","Rate","Taxable Value","GST %","GST Amt","Total"].map(h => (
+                            {["Description","HSN/SAC","Qty","Rate","Taxable Value",`${taxLabel} %`,`${taxLabel} Amt`,"Total"].map(h => (
                               <th key={h} className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{h}</th>
                             ))}
                            </tr>
@@ -682,9 +689,18 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               <td className="px-4 py-3 font-bold text-slate-700 tabular-nums">{item.quantity}</td>
                               <td className="px-4 py-3 tabular-nums text-slate-700">{formatCurrency(item.rate,currency)}</td>
                               <td className="px-4 py-3 tabular-nums text-slate-700">{formatCurrency(item.taxableValue,currency)}</td>
-                              <td className="px-4 py-3"><span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full text-[10px] font-black">{item.gstRate}%</span></td>
-                              <td className="px-4 py-3 tabular-nums text-amber-700 font-semibold">{formatCurrency(item.gstAmount,currency)}</td>
-                              <td className="px-4 py-3 font-black text-slate-900 tabular-nums">{formatCurrency(item.total,currency)}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex flex-col gap-1">
+                                  <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full text-[10px] font-black w-fit">
+                                    {getItemTaxRate(item)}%
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 uppercase tracking-wide">
+                                    {getItemTaxLabel(item)}
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 tabular-nums text-amber-700 font-semibold">{formatCurrency(getItemTaxAmount(item),currency)}</td>
+                              <td className="px-4 py-3 font-black text-slate-900 tabular-nums">{formatCurrency(item.total ?? item.totalAmount,currency)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1064,7 +1080,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
       <PurchaseOrderDetailModal
         isOpen={showPOModal}
         onClose={() => setShowPOModal(false)}
-        purchaseOrderId={invoice?.linkedPO?._id}
+        purchaseOrderId={getPOId()}
       />
       <JournalDetailsModal
         open={showJournalModal}

@@ -40,6 +40,15 @@ const fmtC = (amt, currency = "INR") =>
     maximumFractionDigits: 2,
   }).format(amt || 0);
 
+const getPrimaryTaxLabel = (po = {}) =>
+  po?.taxLabel || po?.taxType || po?.taxSummary?.[0]?.label || po?.taxSummary?.[0]?.taxType || "Tax";
+
+const getItemTaxRate = (item = {}) =>
+  Number(item?.taxRate ?? item?.combinedTaxRate ?? item?.gstRate ?? 0);
+
+const getItemTaxAmount = (item = {}) =>
+  Number(item?.taxAmount ?? item?.gstAmount ?? 0);
+
 const PAYMENT_TERM_DAYS = {
   "net-15": 15,
   "net-30": 30,
@@ -1009,7 +1018,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         <table className="w-full text-xs">
                           <thead>
                             <tr style={{ background: "linear-gradient(90deg,#f1f5f9 0%,#dbeafe 100%)" }}>
-                              {["#", "Description", "HSN/SAC", "Qty", "Rate", "Taxable Value", "GST %", "GST Amt", "Total"].map((h) => (
+                              {["#", "Description", "HSN/SAC", "Qty", "Rate", "Taxable Value", `${getPrimaryTaxLabel(po)} %`, `${getPrimaryTaxLabel(po)} Amt`, "Total"].map((h) => (
                                 <th key={h} className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{h}</th>
                               ))}
                             </tr>
@@ -1028,11 +1037,18 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                 <td className="px-4 py-3 tabular-nums text-slate-700">{item.rate != null ? fmtC(item.rate, currency) : "—"}</td>
                                 <td className="px-4 py-3 tabular-nums text-slate-700">{item.taxableValue != null ? fmtC(item.taxableValue, currency) : "—"}</td>
                                 <td className="px-4 py-3">
-                                  {item.gstRate != null
-                                    ? <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full text-[10px] font-black">{item.gstRate}%</span>
+                                  {getItemTaxRate(item) > 0 || getItemTaxAmount(item) > 0
+                                    ? <div className="flex flex-col gap-1">
+                                        <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full text-[10px] font-black w-fit">
+                                          {getItemTaxRate(item)}%
+                                        </span>
+                                        <span className="text-[10px] text-slate-400 uppercase tracking-wide">
+                                          {item.taxLabel || item.taxType || getPrimaryTaxLabel(po)}
+                                        </span>
+                                      </div>
                                     : <span className="text-slate-400">—</span>}
                                 </td>
-                                <td className="px-4 py-3 tabular-nums text-amber-700 font-semibold">{item.gstAmount != null ? fmtC(item.gstAmount, currency) : "—"}</td>
+                                <td className="px-4 py-3 tabular-nums text-amber-700 font-semibold">{getItemTaxAmount(item) > 0 ? fmtC(getItemTaxAmount(item), currency) : "—"}</td>
                                 <td className="px-4 py-3 font-black text-slate-900 tabular-nums">
                                   {fmtC(item.total ?? item.totalAmount ?? 0, currency)}
                                 </td>
@@ -1045,13 +1061,29 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                               <td className="px-4 py-3 font-black text-slate-700 tabular-nums">{fmtC(po.totalTaxableValue, currency)}</td>
                               <td className="px-4 py-3" />
                               <td className="px-4 py-3 font-black text-amber-700 tabular-nums">
-                                {fmtC((po.totalCGSTAmount || 0) + (po.totalSGSTAmount || 0) + (po.totalIGSTAmount || 0), currency)}
+                                {fmtC(po.totalTaxAmount ?? (po.totalCGSTAmount || 0) + (po.totalSGSTAmount || 0) + (po.totalIGSTAmount || 0), currency)}
                               </td>
                               <td className="px-4 py-3 font-black text-blue-700 tabular-nums text-sm">{fmtC(po.totalAmount, currency)}</td>
                             </tr>
                           </tfoot>
                         </table>
                       </div>
+                      {Array.isArray(po.taxSummary) && po.taxSummary.length > 0 && (
+                        <div className="px-5 py-4 border-t border-slate-100 bg-slate-50/60">
+                          <div className={`grid gap-3 ${po.taxSummary.length > 1 ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1"}`}>
+                            {po.taxSummary.map((entry, idx) => (
+                              <div key={`${entry.taxType || entry.label || idx}`} className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                  {entry.label || entry.taxType || getPrimaryTaxLabel(po)}
+                                </span>
+                                <span className="text-xs font-black tabular-nums text-slate-800">
+                                  {fmtC(entry.amount || 0, currency)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
 

@@ -10,7 +10,7 @@ const normalizeInvoicePayload = (payload = {}) => {
     totalAmount:
       item.totalAmount ??
       item.total ??
-      Number(item.taxableValue || 0) + Number(item.gstAmount || 0),
+      Number(item.taxableValue || 0) + Number((item.taxAmount ?? item.gstAmount) || 0),
   }));
 
   return {
