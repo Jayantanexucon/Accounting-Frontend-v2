@@ -10,9 +10,9 @@ import {
 import { motion } from "framer-motion";
 import DashboardCharts from "../components/DashboardCharts";
 import { getMonthlyFinancialSummaryFYApi } from "../apis/accountApi";
-import HomeInvoiceDetails from "../modals/HomeInvoiceDetails";
+import InvoiceDetailsModal from "../modals/InvoiceDetailsModal";
 import JournalDetailsModal from "../modals/JournalDetailsModal";
-import PurchaseOrderDetailsModal from "../modals/PurchaseOrderDetailsModal";
+import PurchaseOrderDetailModal from "../modals/PurchaseOrderDetailModal";
 import AuditLogSidebar from "../components/AuditLogSidebar";
 import { getPurchaseOrdersApi } from "../apis/purchaseOrderApi";
 import { getInvoicesApi } from "../apis/invoice.api";
@@ -23,26 +23,33 @@ import { useFinancialYear } from "../contexts/FinancialYearContext";
 
 /* ─── data fetchers ───────────────────────────────────── */
 const fetchRecentInvoices = async (companyId) => {
-  const res = await getInvoicesApi(companyId, { page: 1, limit: 1000 });
+  const res = await getInvoicesApi(companyId, {
+    page: 1,
+    limit: 10,
+    approvalStatus: "Approved",
+    sort: "-createdAt",
+  });
   const data =
     res.data ||
     res.invoices ||
     res.result ||
     (Array.isArray(res) ? res : []);
   return data
-    .sort((a, b) => new Date(b.invoiceDate || b.createdAt) - new Date(a.invoiceDate || a.createdAt))
+    .filter((inv) => inv.approvalStatus === "Approved")
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 5);
 };
 
 const fetchRecentPOs = async (companyId) => {
-  const res = await getPurchaseOrdersApi(companyId, { limit: 100 });
+  const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
   const data =
     res.data?.data ||
     res.data?.purchaseOrders ||
     res.data?.result ||
-    (Array.isArray(res.data) ? res.data : []);
+    (Array.isArray(res.data) ? res.data : []) ||
+    (Array.isArray(res) ? res : []);
   return data
-    .sort((a, b) => new Date(b.poDate || b.createdAt) - new Date(a.poDate || a.createdAt))
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 5);
 };
 
@@ -56,16 +63,20 @@ const getStatusInfo = (status, pendingAmount) => {
   switch (status?.toLowerCase()) {
     case "fully_paid":
     case "paid":
+    case "reconciled":
       return { icon: <CheckCircle size={11} />, color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", label: "Paid" };
     case "partially_paid":
       return { icon: <Clock size={11} />, color: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200", dot: "bg-amber-400", label: "Partial" };
     case "unpaid":
+    case "posted":
       return { icon: <AlertCircle size={11} />, color: "text-red-700", bg: "bg-red-50", border: "border-red-200", dot: "bg-red-500", label: "Unpaid" };
     case "inprogress":
     case "pending":
+    case "pending_approval":
       return { icon: <Clock size={11} />, color: "text-amber-700", bg: "bg-amber-50", border: "border-amber-200", dot: "bg-amber-400", label: "Pending" };
     case "inactive":
     case "cancelled":
+    case "rejected":
       return { icon: <XCircle size={11} />, color: "text-red-700", bg: "bg-red-50", border: "border-red-200", dot: "bg-red-500", label: "Cancelled" };
     default:
       return { icon: <AlertCircle size={11} />, color: "text-slate-600", bg: "bg-slate-100", border: "border-slate-200", dot: "bg-slate-400", label: "Draft" };
@@ -110,14 +121,14 @@ export default function HomePage() {
     queryKey: ["recentInvoices", companyId],
     queryFn: () => fetchRecentInvoices(companyId),
     enabled: !!companyId,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 0, // Always fresh when visiting Home
   });
 
   const { data: recentPOs = [], isLoading: loadingPOs } = useQuery({
     queryKey: ["recentPOs", companyId],
     queryFn: () => fetchRecentPOs(companyId),
     enabled: !!companyId,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 0, // Always fresh
   });
 
   const { data: monthlyFinance = [], isLoading: loadingFinance } = useQuery({
@@ -351,11 +362,15 @@ export default function HomePage() {
                   </div>
                 ) : recentInvoices.map((inv, i) => {
                   const invoiceAmount = inv.netPayable || inv.amountDue || inv.totalTaxableValue || 0;
-                  const totalReceived = (inv.payments || []).reduce((s, p) => s + (p.receivedAmount || 0), 0);
+                  const totalReceived = (inv.payments && inv.payments.length > 0)
+                    ? inv.payments.reduce((s, p) => s + (p.receivedAmount || p.amountPaid || p.grossAmount || 0), 0)
+                    : (inv.paidAmount || 0);
                   const pendingAmount = Math.max(0, invoiceAmount - totalReceived);
                   
                   let paymentStatus = inv.status;
-                  if (inv.status?.toLowerCase() === "active" || inv.status?.toLowerCase() === "paid") {
+                  const invoiceApproved = inv.approvalStatus === "Approved";
+                  
+                  if (invoiceApproved || inv.status?.toLowerCase() === "active" || inv.status?.toLowerCase() === "paid" || inv.status?.toLowerCase() === "posted") {
                     if (pendingAmount <= 0) paymentStatus = "fully_paid";
                     else if (totalReceived > 0) paymentStatus = "partially_paid";
                     else paymentStatus = "unpaid";
@@ -501,11 +516,10 @@ export default function HomePage() {
 
       {/* ── MODALS ──────────────────────────────────────── */}
       {showInvoiceModal && (
-        <HomeInvoiceDetails
-          open={showInvoiceModal}
+        <InvoiceDetailsModal
+          isOpen={showInvoiceModal}
           onClose={() => setShowInvoiceModal(false)}
           invoiceId={selectedInvoiceId}
-          refreshInvoices={() => {}}
         />
       )}
       {showJournalModal && (
@@ -516,10 +530,10 @@ export default function HomePage() {
         />
       )}
       {showPOModal && (
-        <PurchaseOrderDetailsModal
-          open={showPOModal}
+        <PurchaseOrderDetailModal
+          isOpen={showPOModal}
           onClose={() => setShowPOModal(false)}
-          purchaseOrder={selectedPO}
+          purchaseOrderId={selectedPO?._id}
         />
       )}
       <AuditLogSidebar
