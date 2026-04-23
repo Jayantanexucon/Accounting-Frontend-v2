@@ -73,14 +73,12 @@ export const deleteInvoiceApi = async (id) => {
 
 // DOWNLOAD
 export const downloadInvoicePdfApi = (id) =>
-  API.get(`${INVOICE_BASE}/${id}/export`, {
-    params: { format: "pdf" },
+  API.get(`${INVOICE_BASE}/${id}/download/pdf`, {
     responseType: "blob",
   });
 
 export const downloadInvoiceWordApi = (id) =>
-  API.get(`${INVOICE_BASE}/${id}/export`, {
-    params: { format: "word" },
+  API.get(`${INVOICE_BASE}/${id}/download/word`, {
     responseType: "blob",
   });
 
