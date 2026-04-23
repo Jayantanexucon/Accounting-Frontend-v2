@@ -121,25 +121,55 @@ export const AuthProvider = ({ children }) => {
       }
 
       const companies = data.companies || [];
-      const selectedCompany = data.selectedCompany || null;
+
+      // 🔑 KEY FIX: Respect the user's explicit company selection stored in localStorage.
+      // The backend may return a different "default" company if the cookie isn't matching
+      // its permission set. We validate the localStorage value against the actual companies
+      // list returned by the backend to prevent an invalid selection.
+      let resolvedCompany = data.selectedCompany || null;
+      try {
+        const storedCompanyRaw = localStorage.getItem("selectedCompany");
+        if (storedCompanyRaw) {
+          const storedCompany = JSON.parse(storedCompanyRaw);
+          // Check if the stored company is actually in the user's companies list
+          const isValid = companies.some((c) => c._id?.toString() === storedCompany._id?.toString());
+          if (isValid) {
+            // Use the full company object from backend (has latest data)
+            resolvedCompany = companies.find((c) => c._id?.toString() === storedCompany._id?.toString()) || storedCompany;
+            console.log("✅ [AuthContext] Honoring localStorage company selection:", {
+              name: resolvedCompany.name,
+              id: resolvedCompany._id,
+            });
+          } else {
+            console.warn("⚠️  [AuthContext] Stored company not in user's list, using backend default:", {
+              stored: storedCompany._id,
+              backendDefault: data.selectedCompany?._id,
+            });
+          }
+        }
+      } catch (parseErr) {
+        console.warn("⚠️  [AuthContext] Failed to parse localStorage company, using backend default:", parseErr);
+      }
+
+      const selectedCompany = resolvedCompany;
 
       let privilege = {};
       if (selectedCompany) {
         if (selectedCompany.owner !== data.user._id) {
-          const emp = selectedCompany.employees.find((e) => e.user === data.user._id);
+          const emp = selectedCompany.employees?.find((e) => e.user === data.user._id);
           privilege = emp?.privilege || {};
         }
       }
 
       if (selectedCompany) {
         localStorage.setItem("selectedCompany", JSON.stringify(selectedCompany));
-        console.log("✅ Selected company set from backend:", {
+        console.log("✅ Selected company persisted to localStorage:", {
           name: selectedCompany.name,
           id: selectedCompany._id,
         });
       } else {
         localStorage.removeItem("selectedCompany");
-        console.warn("⚠️  No selected company returned from backend", {
+        console.warn("⚠️  No selected company resolved", {
           companiesCount: companies.length,
           firstCompany: companies[0]?.name,
         });
