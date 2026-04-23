@@ -19,10 +19,16 @@ export default function LatestJournals({ onViewAll, onJournalClick }) {
     async function getLatestJournals() {
       try {
         setLoading(true);
-        // // console.log("Journal",company?._id);
-        const res = await allJournalApi(company?._id, {}, controller.signal);
-        // Sort by date (newest first) and take first 5
-        const sortedJournals = res.data.sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 3);
+        // Pass a limit to the API if supported, or fetch and sort
+        const res = await allJournalApi(company?._id, { limit: 100 }, controller.signal);
+        
+        // Sort strictly by createdAt (newest first) to show actually latest activity
+        // Automated journals from invoices might have an older 'date' (invoice date)
+        // but they are 'posted' now, so createdAt is what the user expects for "Recent"
+        const sortedJournals = (res.data || [])
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, 5);
+          
         setJournals(sortedJournals);
       } catch (err) {
         if (!axios.isCancel(err)) {
@@ -33,7 +39,9 @@ export default function LatestJournals({ onViewAll, onJournalClick }) {
         if (!controller?.signal?.aborted) setLoading(false);
       }
     }
-    getLatestJournals();
+    if (company?._id && !isLoading) {
+      getLatestJournals();
+    }
     return () => controller.abort();
   }, [company?._id, isLoading]);
 

@@ -289,14 +289,16 @@ const InvoiceData = () => {
 
   // Calculate payment information
   const calculatePaymentInfo = (invoice) => {
-    const invoiceAmount = invoice.netPayable || invoice.amountDue || 0;
+    const totalInvoiceAmount = invoice.amountDue || 0;
+    const tdsAmount = Number(invoice.tdsAmount || 0);
+    const netPayable = totalInvoiceAmount - tdsAmount;
+    const invoiceAmount = netPayable;
     const payments = invoice.payments || [];
 
     const paymentsTotal = payments.reduce(
       (sum, payment) =>
         sum +
         Number(
-          payment.grossAmount ??
           payment.receivedAmount ??
           payment.amountReceived ??
           payment.amountPaid ??
@@ -343,6 +345,9 @@ const InvoiceData = () => {
 
     return {
       invoiceAmount,
+      totalInvoiceAmount,
+      tdsAmount,
+      netPayable,
       totalReceived,
       pendingAmount,
       totalTDSAdjusted,
@@ -1361,9 +1366,9 @@ const InvoiceData = () => {
                                     ),
                                     cls: "text-slate-700",
                                   },
-                                  invoice.totalCGSTAmount > 0 && {
-                                    l: "CGST",
-                                    v: formatAmount(invoice.totalCGSTAmount),
+                                  invoice.totalIGSTAmount > 0 && {
+                                    l: "IGST",
+                                    v: formatAmount(invoice.totalIGSTAmount),
                                     cls: "text-slate-600",
                                   },
                                   invoice.totalSGSTAmount > 0 && {
@@ -1371,15 +1376,10 @@ const InvoiceData = () => {
                                     v: formatAmount(invoice.totalSGSTAmount),
                                     cls: "text-slate-600",
                                   },
-                                  invoice.totalIGSTAmount > 0 && {
-                                    l: "IGST",
-                                    v: formatAmount(invoice.totalIGSTAmount),
+                                  invoice.totalCGSTAmount > 0 && {
+                                    l: "CGST",
+                                    v: formatAmount(invoice.totalCGSTAmount),
                                     cls: "text-slate-600",
-                                  },
-                                  invoice.tdsAmount > 0 && {
-                                    l: "TDS Deduction",
-                                    v: `– ${formatAmount(invoice.tdsAmount)}`,
-                                    cls: "text-violet-600",
                                   },
                                 ]
                                   .filter(Boolean)
@@ -1400,23 +1400,30 @@ const InvoiceData = () => {
                                   ))}
                                 <div className="flex justify-between items-center pt-1 border-t border-slate-200">
                                   <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
-                                    Total Due
+                                    Total Invoice Amount
                                   </span>
                                   <span className="text-sm font-black text-blue-700 tabular-nums">
                                     {formatAmount(invoice.amountDue || 0)}
                                   </span>
                                 </div>
-                                {invoice.netPayable &&
-                                  invoice.netPayable !== invoice.amountDue && (
-                                    <div className="flex justify-between items-center">
-                                      <span className="text-[10px] text-slate-500">
-                                        Net Payable
-                                      </span>
-                                      <span className="text-xs font-bold text-emerald-600 tabular-nums">
-                                        {formatAmount(invoice.netPayable)}
-                                      </span>
-                                    </div>
-                                  )}
+                                {Number(invoice.tdsAmount || 0) > 0 && (
+                                  <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
+                                    <span className="text-[10px] text-violet-600 font-medium">
+                                      TDS Amount
+                                    </span>
+                                    <span className="text-xs font-semibold text-violet-600 tabular-nums">
+                                      – {formatAmount(invoice.tdsAmount)}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex justify-between items-center pt-1 border-t border-emerald-200">
+                                  <span className="text-xs font-black text-emerald-800 uppercase tracking-wider">
+                                    Net Payable Amount
+                                  </span>
+                                  <span className="text-sm font-black text-emerald-700 tabular-nums">
+                                    {formatAmount((invoice.amountDue || 0) - Number(invoice.tdsAmount || 0))}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1496,9 +1503,14 @@ const InvoiceData = () => {
                               <div className="p-4 space-y-2.5">
                                 {[
                                   {
-                                    l: "Total Invoice",
-                                    v: formatAmount(paymentInfo.invoiceAmount),
+                                    l: "Net Payable Amount",
+                                    v: formatAmount(paymentInfo.netPayable),
                                     cls: "text-emerald-700",
+                                  },
+                                  paymentInfo.tdsAmount > 0 && {
+                                    l: "TDS Amount",
+                                    v: formatAmount(paymentInfo.tdsAmount),
+                                    cls: "text-violet-700",
                                   },
                                   {
                                     l: "Total Received",
@@ -1510,14 +1522,7 @@ const InvoiceData = () => {
                                     v: formatAmount(paymentInfo.pendingAmount),
                                     cls: "text-amber-700",
                                   },
-                                  {
-                                    l: "TDS Adjusted",
-                                    v: formatAmount(
-                                      paymentInfo.totalTDSAdjusted,
-                                    ),
-                                    cls: "text-violet-700",
-                                  },
-                                ].map((f) => (
+                                ].filter(Boolean).map((f) => (
                                   <div
                                     key={f.l}
                                     className="flex justify-between items-center border-b border-slate-100 pb-2 last:border-0"
@@ -1538,14 +1543,14 @@ const InvoiceData = () => {
                                   </span>
                                   <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                     <div
-                                      className={`h-full rounded-full ${paymentInfo.completionPercentage === 100 ? "bg-emerald-500" : "bg-blue-500"}`}
+                                      className={`h-full rounded-full ${paymentInfo.completionPercentage >= 100 ? "bg-emerald-500" : "bg-blue-500"}`}
                                       style={{
                                         width: `${Math.min(paymentInfo.completionPercentage, 100)}%`,
                                       }}
                                     />
                                   </div>
                                   <span className="text-[10px] font-black text-slate-700 shrink-0 tabular-nums">
-                                    {paymentInfo.completionPercentage.toFixed(
+                                    {Math.min(paymentInfo.completionPercentage, 100).toFixed(
                                       1,
                                     )}
                                     %
