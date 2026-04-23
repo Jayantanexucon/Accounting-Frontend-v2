@@ -744,6 +744,24 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           </div>
                         ))}
                       </div>
+                      {invoice.salesJournalId && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-violet-50 rounded-lg border border-violet-100">
+                              <BookOpen size={12} className="text-violet-600" />
+                            </div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sales Journal Reference</span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenJournal(invoice.salesJournalId)}
+                            className="text-xs font-bold text-violet-600 hover:text-violet-800 hover:underline flex items-center gap-1 transition-all"
+                          >
+                            {invoice.salesJournal?.number || invoice.salesJournalId?.number || "View Journal"}
+                            <span className="text-slate-400 font-normal">→</span>
+                          </button>
+                        </div>
+                      )}
                     </SectionCard>
 
                   {(invoice.payments || invoice.paymentIds) && (invoice.payments || invoice.paymentIds).length > 0 ? (
@@ -784,13 +802,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               </p>
                               <div className="flex items-center justify-end gap-2 mt-0.5">
                                 {p.tdsAdjusted>0 && <span className="text-[9px] text-violet-600 font-bold">TDS: {formatCurrency(p.tdsAdjusted,currency)}</span>}
-                                {p.paymentJournal?.number && (
+                                {(p.paymentJournal || p.journalId) && (
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenJournal(p.paymentJournal?._id || p.journalId)}
-                                    className="text-[9px] text-blue-600 font-bold hover:text-blue-800"
+                                    onClick={() => handleOpenJournal(p.paymentJournal?._id || p.journalId?._id || p.journalId)}
+                                    className="text-[9px] text-blue-600 font-bold hover:text-blue-800 flex items-center gap-1"
                                   >
-                                    Journal: {p.paymentJournal.number}
+                                    <BookOpen size={10} />
+                                    Journal: {p.paymentJournal?.number || p.journalId?.number || "View"}
                                   </button>
                                 )}
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${p.status==="posted" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200"}`}>
@@ -922,13 +941,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               </div>
                               <div className="mt-1 text-[10px] text-slate-500 flex flex-wrap gap-2">
                                 <span>{formatDate(payment.paymentDate)}</span>
-                                {payment.paymentJournal?.number && (
+                                {(payment.paymentJournal || payment.journalId) && (
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenJournal(payment.paymentJournal?._id || payment.journalId)}
-                                    className="text-blue-600 hover:text-blue-800"
+                                    onClick={() => handleOpenJournal(payment.paymentJournal?._id || payment.journalId?._id || payment.journalId)}
+                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                   >
-                                    Journal: {payment.paymentJournal.number}
+                                    <BookOpen size={10} />
+                                    Journal: {payment.paymentJournal?.number || payment.journalId?.number || "View"}
                                   </button>
                                 )}
                                 {payment.referenceNumber && <span>Ref: {payment.referenceNumber}</span>}

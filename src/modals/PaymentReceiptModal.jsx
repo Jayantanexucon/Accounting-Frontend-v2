@@ -144,18 +144,20 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         setPaymentHistory(Array.isArray(payments) ? payments : []);
 
         const totalReceived = payments.reduce(
-          (sum, payment) => sum + getPaymentSettledAmount(payment),
+          (sum, payment) => sum + getPaymentReceivedAmount(payment),
           0,
         );
-        const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
+        const totalAmount = Number(invoiceData.amountDue || invoiceData.invoiceAmount || 0);
         const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
-        const netPayable = totalAmount - invoiceTds;
+        const netPayable = Number(invoiceData?.netPayable || totalAmount - invoiceTds);
         const pendingAmount = Math.max(0, netPayable - totalReceived);
 
         setPaymentSummary({
           totalAmount,
           totalReceived,
           pendingAmount,
+          netPayable,
+          invoiceTds,
         });
         setFormData((prev) => ({
           ...prev,
@@ -286,15 +288,18 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     }
 
     // Fallback calculation
-    if (!invoiceData) return { totalAmount: 0, totalReceived: 0, pendingAmount: 0 };
+    if (!invoiceData) return { totalAmount: 0, totalReceived: 0, pendingAmount: 0, netPayable: 0, invoiceTds: 0 };
 
-    const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
+    const totalAmount = Number(invoiceData.amountDue || invoiceData.invoiceAmount || 0);
+    const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
+    const netPayable = Number(invoiceData?.netPayable || totalAmount - invoiceTds);
+    
     const totalReceived = Array.isArray(paymentHistory)
-      ? paymentHistory.reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0)
+      ? paymentHistory.reduce((sum, payment) => sum + getPaymentReceivedAmount(payment), 0)
       : 0;
-    const pendingAmount = Math.max(0, totalAmount - totalReceived);
+    const pendingAmount = Math.max(0, netPayable - totalReceived);
 
-    return { totalAmount, totalReceived, pendingAmount };
+    return { totalAmount, totalReceived, pendingAmount, netPayable, invoiceTds };
   };
 
   const handleClose = () => {
