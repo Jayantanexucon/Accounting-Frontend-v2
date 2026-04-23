@@ -39,7 +39,7 @@ export const debugCookieIssue = () => {
     // These are indicators - actual attributes set by js-cookie
     const httpOnly = "✓ (set by js-cookie)";
     const secure = window.location.protocol === 'https:' ? "✓ (HTTPS enabled)" : "✗ (HTTP - may work)";
-    const sameSite = "Lax ✓";
+    const sameSite = window.location.protocol === 'https:' ? "None ✓" : "Lax ✓";
     console.log({ sameSite, secure, httpOnly });
   }
   

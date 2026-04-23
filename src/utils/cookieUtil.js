@@ -11,9 +11,9 @@ export const setCookie = (key, value, options = {}) => {
   const defaultOptions = {
     expires: 30, // 30 days
     secure: isSecure,
-    // sameSite: Lax allows cookies in cross-site requests (needed for reload to work)
-    // Strict requires same-site only (very restrictive)
-    sameSite: "Lax",
+    // sameSite: "None" required for cross-origin requests when using HTTPS
+    // "Lax" for local dev without HTTPS
+    sameSite: isSecure ? "None" : "Lax",
     path: "/", // Ensure cookie is available on all paths
   };
   
