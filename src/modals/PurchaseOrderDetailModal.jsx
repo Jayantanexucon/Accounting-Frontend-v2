@@ -66,12 +66,16 @@ const getInvoiceTimelineBreakdown = (invoice = {}) => {
     ? lineItems.reduce((sum, item) => sum + Number(item.total || item.totalAmount || 0), 0)
     : Number(invoice.invoiceAmount || 0);
   const paidAmount = Number(invoice.paidAmount || 0);
-  const remainingAmount = Math.max(0, termInvoiceAmount - paidAmount);
+  const tdsAmount = Number(invoice.tdsAmount || 0);
+  const netPayable = Math.max(0, termInvoiceAmount - tdsAmount);
+  const remainingAmount = Math.max(0, netPayable - paidAmount);
 
   return {
     termInvoiceAmount,
     paidAmount,
     remainingAmount,
+    tdsAmount,
+    netPayable,
   };
 };
 
@@ -900,20 +904,34 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       <div className="space-y-3">
 
                         {/* Tax row — only when any tax value is non-zero */}
-                        {hasTaxValues && (
+                        {(hasTaxValues || (Array.isArray(po.taxSummary) && po.taxSummary.length > 0)) && (
                           <div className="grid grid-cols-3 gap-3">
-                            {[
-                              { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
-                              { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
-                              { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
-                            ]
-                              .filter((t) => t.show)
-                              .map((t) => (
-                                <div key={t.l} className={`flex flex-col items-center px-3 py-2.5 rounded-xl border ${t.cls}`}>
-                                  <span className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5">{t.l}</span>
-                                  <span className="text-sm font-black">{t.v}</span>
-                                </div>
-                              ))}
+                            {Array.isArray(po.taxSummary) && po.taxSummary.length > 0
+                              ? po.taxSummary.map((tax, idx) => ({
+                                  l: tax.label || tax.taxType || `Tax ${idx + 1}`,
+                                  v: fmtC(tax.amount || 0, currency),
+                                  cls: idx % 3 === 0 ? "border-blue-100 bg-blue-50/80 text-blue-700" :
+                                       idx % 3 === 1 ? "border-violet-100 bg-violet-50/80 text-violet-700" :
+                                       "border-emerald-100 bg-emerald-50/80 text-emerald-700"
+                                })).map((t) => (
+                                  <div key={t.l} className={`flex flex-col items-center px-3 py-2.5 rounded-xl border ${t.cls}`}>
+                                    <span className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5">{t.l}</span>
+                                    <span className="text-sm font-black">{t.v}</span>
+                                  </div>
+                                ))
+                              : [
+                                  { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                                  { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                                  { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
+                                ]
+                                .filter((t) => t.show)
+                                .map((t) => (
+                                  <div key={t.l} className={`flex flex-col items-center px-3 py-2.5 rounded-xl border ${t.cls}`}>
+                                    <span className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5">{t.l}</span>
+                                    <span className="text-sm font-black">{t.v}</span>
+                                  </div>
+                                ))
+                            }
                           </div>
                         )}
 
@@ -1340,12 +1358,23 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       <div className="p-4 space-y-3">
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                           {[
-                            { l: "Taxable Value", v: fmtC(po.totalTaxableValue, currency), cls: "border-slate-200 bg-slate-50 text-slate-700", show: hasTaxableValue },
-                            { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
-                            { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
-                            { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
+                            ...(hasTaxableValue ? [{ l: "Taxable Value", v: fmtC(po.totalTaxableValue, currency), cls: "border-slate-200 bg-slate-50 text-slate-700" }] : []),
+                            ...(Array.isArray(po.taxSummary) && po.taxSummary.length > 0
+                              ? po.taxSummary.map((tax, idx) => ({
+                                  l: tax.label || tax.taxType || `Tax ${idx + 1}`,
+                                  v: fmtC(tax.amount || 0, currency),
+                                  cls: idx % 4 === 0 ? "border-blue-100 bg-blue-50/80 text-blue-700" :
+                                       idx % 4 === 1 ? "border-violet-100 bg-violet-50/80 text-violet-700" :
+                                       idx % 4 === 2 ? "border-emerald-100 bg-emerald-50/80 text-emerald-700" :
+                                       "border-amber-100 bg-amber-50/80 text-amber-700"
+                                }))
+                              : [
+                                  { l: "CGST", v: fmtC(po.totalCGSTAmount, currency), cls: "border-blue-100 bg-blue-50/80 text-blue-700", show: (po.totalCGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                                  { l: "SGST", v: fmtC(po.totalSGSTAmount, currency), cls: "border-violet-100 bg-violet-50/80 text-violet-700", show: (po.totalSGSTAmount || 0) > 0 && !(po.totalIGSTAmount > 0) },
+                                  { l: "IGST", v: fmtC(po.totalIGSTAmount, currency), cls: "border-emerald-100 bg-emerald-50/80 text-emerald-700", show: (po.totalIGSTAmount || 0) > 0 },
+                                ].filter((t) => t.show !== false)
+                            )
                           ]
-                            .filter((t) => t.show)
                             .map((t) => (
                               <div key={t.l} className={`flex flex-col items-center px-3 py-2.5 rounded-xl border ${t.cls}`}>
                                 <span className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5">{t.l}</span>
@@ -1647,6 +1676,16 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
                                       {/* Payment Info */}
                                       <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {breakdown.tdsAmount > 0 && (
+                                          <p className="text-[10px] text-slate-500">
+                                            TDS Deducted: <span className="font-black text-violet-700">{fmtC(breakdown.tdsAmount, currency)}</span>
+                                          </p>
+                                        )}
+                                        {breakdown.tdsAmount > 0 && (
+                                          <p className="text-[10px] text-slate-500">
+                                            Net Payable: <span className="font-black text-emerald-700">{fmtC(breakdown.netPayable, currency)}</span>
+                                          </p>
+                                        )}
                                         <p className="text-[10px] text-slate-500">
                                           Paid till date: <span className="font-black text-emerald-700">{fmtC(breakdown.paidAmount, currency)}</span>
                                         </p>

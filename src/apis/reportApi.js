@@ -83,6 +83,7 @@ const toBalanceSheetRowsAndNotes = (report = {}) => {
   const rows = [];
   const notes = [];
 
+  // Assets Section
   rows.push({
     code: "assets",
     label: "Assets",
@@ -94,29 +95,41 @@ const toBalanceSheetRowsAndNotes = (report = {}) => {
   [
     ["non-current-assets", "Non-Current Assets", report.assets?.nonCurrent],
     ["current-assets", "Current Assets", report.assets?.current],
-  ].forEach(([code, label, section]) => {
-    const items = section?.items || [];
-    const note = buildNote(label, "", items);
-    if (items.length) notes.push(note);
+  ].forEach(([groupCode, groupLabel, section]) => {
     rows.push({
-      code,
-      label,
-      nodeType: "line_item",
+      code: groupCode,
+      label: groupLabel,
+      nodeType: "subsection",
       level: 1,
-      noteCode: items.length ? note.noteCode : null,
-      noteNo: items.length ? note.noteNo : "",
       amount: Number(section?.total || 0),
+    });
+
+    Object.entries(section?.lineItems || {}).forEach(([lineLabel, lineData]) => {
+      const items = lineData?.items || [];
+      const note = buildNote(lineLabel, "", items);
+      if (items.length) notes.push(note);
+      
+      rows.push({
+        code: `${groupCode}-${slugify(lineLabel)}`,
+        label: lineLabel,
+        nodeType: "line_item",
+        level: 2,
+        noteCode: items.length ? note.noteCode : null,
+        noteNo: "",
+        amount: Number(lineData?.total || 0),
+      });
     });
   });
 
   rows.push({
     code: "assets-total",
     label: "Total Assets",
-    nodeType: "subsection",
-    level: 1,
+    nodeType: "section",
+    level: 0,
     amount: Number(report.assets?.total || 0),
   });
 
+  // Equity and Liabilities Section
   rows.push({
     code: "equity-liabilities",
     label: "Equity and Liabilities",
@@ -126,30 +139,41 @@ const toBalanceSheetRowsAndNotes = (report = {}) => {
   });
 
   [
-    ["equity-shareholders", "Shareholders' Funds", report.liabilitiesAndEquity?.equity?.shareholders],
-    ["equity-other", "Other Equity", report.liabilitiesAndEquity?.equity?.other],
-    ["liabilities-non-current", "Non-Current Liabilities", report.liabilitiesAndEquity?.liabilities?.nonCurrent],
-    ["liabilities-current", "Current Liabilities", report.liabilitiesAndEquity?.liabilities?.current],
-  ].forEach(([code, label, section]) => {
-    const items = section?.items || [];
-    const note = buildNote(label, "", items);
-    if (items.length) notes.push(note);
+    ["shareholders-funds", "Shareholders' Funds", report.liabilitiesAndEquity?.equity?.shareholders],
+    ["other-equity", "Other Equity", report.liabilitiesAndEquity?.equity?.other],
+    ["non-current-liabilities", "Non-Current Liabilities", report.liabilitiesAndEquity?.liabilities?.nonCurrent],
+    ["current-liabilities", "Current Liabilities", report.liabilitiesAndEquity?.liabilities?.current],
+  ].forEach(([groupCode, groupLabel, section]) => {
     rows.push({
-      code,
-      label,
-      nodeType: "line_item",
+      code: groupCode,
+      label: groupLabel,
+      nodeType: "subsection",
       level: 1,
-      noteCode: items.length ? note.noteCode : null,
-      noteNo: items.length ? note.noteNo : "",
       amount: Number(section?.total || 0),
+    });
+
+    Object.entries(section?.lineItems || {}).forEach(([lineLabel, lineData]) => {
+      const items = lineData?.items || [];
+      const note = buildNote(lineLabel, "", items);
+      if (items.length) notes.push(note);
+      
+      rows.push({
+        code: `${groupCode}-${slugify(lineLabel)}`,
+        label: lineLabel,
+        nodeType: "line_item",
+        level: 2,
+        noteCode: items.length ? note.noteCode : null,
+        noteNo: "",
+        amount: Number(lineData?.total || 0),
+      });
     });
   });
 
   rows.push({
     code: "equity-liabilities-total",
     label: "Total Equity and Liabilities",
-    nodeType: "subsection",
-    level: 1,
+    nodeType: "section",
+    level: 0,
     amount: Number(report.liabilitiesAndEquity?.total || 0),
   });
 

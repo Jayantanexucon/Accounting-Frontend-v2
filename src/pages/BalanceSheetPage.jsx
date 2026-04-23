@@ -30,9 +30,7 @@ import {
   getReportPeriodParams,
 } from "../utils/scheduleReportUtil";
 
-const hasMeaningfulBalanceSheetData = (report) =>
-  Math.abs(report?.summary?.totalAssets || 0) > 0.009 ||
-  Math.abs(report?.summary?.totalEquityLiabilities || 0) > 0.009;
+const hasMeaningfulBalanceSheetData = (report) => true; // Always show full format as per requirement
 
 export default function BalanceSheetPage() {
   const { user, hasPermission } = useAuth();

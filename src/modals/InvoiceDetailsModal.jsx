@@ -143,7 +143,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   // Calculate payment information
   const calculatePaymentInfo = (invoice) => {
     const invoiceAmount = invoice.amountDue || invoice.netPayable || 0;
-    const payments = invoice.payments || [];
+    const payments = invoice.payments || invoice.paymentIds || [];
 
     const paymentsTotal = payments.reduce(
       (sum, payment) =>
@@ -731,9 +731,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           </button>
                         ) : null
                       }>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-4 gap-3">
                         {[
                           { l:"Invoice Amount", v: formatCurrency(invoice.amountDue||0,currency), cls:"text-slate-800" },
+                          { l:"TDS Deduction",  v: formatCurrency(getInvoiceTdsAmount(invoice),currency), cls:"text-violet-700" },
                           { l:"Total Received", v: formatCurrency(paymentInfo.totalReceived||0,currency), cls:"text-emerald-700" },
                           { l:"Pending",        v: formatCurrency(paymentInfo.pendingAmount||0,currency), cls:"text-amber-700" },
                         ].map(s => (
@@ -743,9 +744,27 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           </div>
                         ))}
                       </div>
+                      {invoice.salesJournalId && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <div className="p-1.5 bg-violet-50 rounded-lg border border-violet-100">
+                              <BookOpen size={12} className="text-violet-600" />
+                            </div>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sales Journal Reference</span>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={() => handleOpenJournal(invoice.salesJournalId)}
+                            className="text-xs font-bold text-violet-600 hover:text-violet-800 hover:underline flex items-center gap-1 transition-all"
+                          >
+                            {invoice.salesJournal?.number || invoice.salesJournalId?.number || "View Journal"}
+                            <span className="text-slate-400 font-normal">→</span>
+                          </button>
+                        </div>
+                      )}
                     </SectionCard>
 
-                  {invoice.payments && invoice.payments.length > 0 ? (
+                  {(invoice.payments || invoice.paymentIds) && (invoice.payments || invoice.paymentIds).length > 0 ? (
                     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                       <div className="flex items-center gap-3 px-5 py-3.5 border-b border-slate-100"
                         style={{ background: "linear-gradient(90deg,#f8fafc,#f0fdf4)" }}>
@@ -753,10 +772,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                         <History size={13} className="text-slate-500" />
                         <p className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Payment History</p>
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-black text-white"
-                          style={{ background: "linear-gradient(135deg,#059669,#34d399)" }}>{invoice.payments.length}</span>
+                          style={{ background: "linear-gradient(135deg,#059669,#34d399)" }}>{(invoice.payments || invoice.paymentIds).length}</span>
                       </div>
                       <div className="divide-y divide-slate-100">
-                        {[...invoice.payments].sort((a,b) => new Date(b.paymentDate)-new Date(a.paymentDate)).map((p,i) => (
+                        {[...(invoice.payments || invoice.paymentIds)].sort((a,b) => new Date(b.paymentDate)-new Date(a.paymentDate)).map((p,i) => (
                           <div key={p._id||i} className="flex items-center justify-between px-5 py-3.5 hover:bg-emerald-50/30 transition-colors group">
                             <div className="flex items-center gap-3">
                               <div className="w-8 h-8 rounded-xl flex items-center justify-center border border-emerald-100 shrink-0"
@@ -783,13 +802,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               </p>
                               <div className="flex items-center justify-end gap-2 mt-0.5">
                                 {p.tdsAdjusted>0 && <span className="text-[9px] text-violet-600 font-bold">TDS: {formatCurrency(p.tdsAdjusted,currency)}</span>}
-                                {p.paymentJournal?.number && (
+                                {(p.paymentJournal || p.journalId) && (
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenJournal(p.paymentJournal?._id || p.journalId)}
-                                    className="text-[9px] text-blue-600 font-bold hover:text-blue-800"
+                                    onClick={() => handleOpenJournal(p.paymentJournal?._id || p.journalId?._id || p.journalId)}
+                                    className="text-[9px] text-blue-600 font-bold hover:text-blue-800 flex items-center gap-1"
                                   >
-                                    Journal: {p.paymentJournal.number}
+                                    <BookOpen size={10} />
+                                    Journal: {p.paymentJournal?.number || p.journalId?.number || "View"}
                                   </button>
                                 )}
                                 <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${p.status==="posted" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200"}`}>
@@ -829,9 +849,13 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           <CheckCircle size={16} className="text-emerald-600 shrink-0" />
                           <div>
                             <p className="text-xs font-bold text-emerald-800">Sales Journal Posted</p>
-                            <p className="text-[10px] font-mono text-emerald-600 mt-0.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenJournal(invoice.salesJournalId)}
+                              className="text-[10px] font-mono text-emerald-600 mt-0.5 hover:text-emerald-800 hover:underline text-left block"
+                            >
                               {invoice.salesJournal?.number || invoice.salesJournalId?.number || invoice.salesJournalId?._id || invoice.salesJournalId}
-                            </p>
+                            </button>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -903,9 +927,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           </button>
                         )}
                       </div>
-                      {invoice.payments?.length > 0 && (
+                      {(invoice.payments || invoice.paymentIds)?.length > 0 && (
                         <div className="pt-2 border-t border-slate-100 space-y-2">
-                          {invoice.payments.map((payment, index) => (
+                          {(invoice.payments || invoice.paymentIds).map((payment, index) => (
                             <div key={payment._id || index} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
                               <div className="flex items-center justify-between gap-3">
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
@@ -917,13 +941,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               </div>
                               <div className="mt-1 text-[10px] text-slate-500 flex flex-wrap gap-2">
                                 <span>{formatDate(payment.paymentDate)}</span>
-                                {payment.paymentJournal?.number && (
+                                {(payment.paymentJournal || payment.journalId) && (
                                   <button
                                     type="button"
-                                    onClick={() => handleOpenJournal(payment.paymentJournal?._id || payment.journalId)}
-                                    className="text-blue-600 hover:text-blue-800"
+                                    onClick={() => handleOpenJournal(payment.paymentJournal?._id || payment.journalId?._id || payment.journalId)}
+                                    className="text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                   >
-                                    Journal: {payment.paymentJournal.number}
+                                    <BookOpen size={10} />
+                                    Journal: {payment.paymentJournal?.number || payment.journalId?.number || "View"}
                                   </button>
                                 )}
                                 {payment.referenceNumber && <span>Ref: {payment.referenceNumber}</span>}

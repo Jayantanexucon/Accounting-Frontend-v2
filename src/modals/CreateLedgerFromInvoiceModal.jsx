@@ -206,13 +206,14 @@ const CreateLedgerFromInvoiceModal = ({
     }
   };
 
-  const taxableValue =
-  invoiceData?.totalTaxableValue ||
-  invoiceData?.amountDue -
-  (invoiceData?.totalTDSAmount || 0) -
-  (invoiceData?.totalCGSTAmount || 0) -
-  (invoiceData?.totalSGSTAmount || 0) -
-  (invoiceData?.totalIGSTAmount || 0);
+  const taxableValue = invoiceData?.totalTaxableValue || 0;
+  const tdsAmount = Number(invoiceData?.totalTDSAmount || invoiceData?.tdsAmount || 0);
+  const netPayable = Number(invoiceData?.netPayable || (invoiceData?.amountDue || 0) - tdsAmount);
+  const totalTaxAmount = Number(invoiceData?.totalTaxAmount || 
+    (invoiceData?.totalCGSTAmount || 0) + 
+    (invoiceData?.totalSGSTAmount || 0) + 
+    (invoiceData?.totalIGSTAmount || 0));
+  const taxSummary = Array.isArray(invoiceData?.taxSummary) ? invoiceData.taxSummary : [];
 
 
   if (!open) return null;
@@ -605,21 +606,41 @@ const CreateLedgerFromInvoiceModal = ({
                     Journal Entries Preview:
                   </h4>
                   <div className="space-y-3">
-                    {/* Debit Entry */}
-                    <div className="bg-white border border-gray-200 rounded p-3">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="font-medium">
-                            Debit: Sundry Debtors
+                    {/* Debit Entries */}
+                    <div className="space-y-2">
+                      <div className="bg-white border border-gray-200 rounded p-3">
+                        <div className="flex justify-between items-center">
+                          <div>
+                            <div className="font-medium text-blue-700">
+                              Debit: Sundry Debtors
+                            </div>
+                            <div className="text-sm text-gray-600">
+                              Client: {invoiceData?.billTo?.name} (Net Payable)
+                            </div>
                           </div>
-                          <div className="text-sm text-gray-600">
-                            Client: {invoiceData?.billTo?.name}
+                          <div className="text-red-600 font-bold">
+                            ₹{netPayable?.toFixed(2)}
                           </div>
                         </div>
-                        <div className="text-red-600 font-bold">
- ₹{invoiceData?.amountDue?.toFixed(2)}
-</div>
                       </div>
+
+                      {tdsAmount > 0 && (
+                        <div className="bg-white border border-gray-200 rounded p-3">
+                          <div className="flex justify-between items-center">
+                            <div>
+                              <div className="font-medium text-blue-700">
+                                Debit: TDS Receivable
+                              </div>
+                              <div className="text-sm text-gray-600">
+                                Tax Deducted at Source
+                              </div>
+                            </div>
+                            <div className="text-red-600 font-bold">
+                              ₹{tdsAmount?.toFixed(2)}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Credit Entries */}
@@ -627,7 +648,7 @@ const CreateLedgerFromInvoiceModal = ({
                       <div className="space-y-2">
                         <div className="flex justify-between items-center">
                           <div>
-                            <div className="font-medium">
+                            <div className="font-medium text-green-700">
                               Credit: Sales Account
                             </div>
                             <div className="text-sm text-gray-600">
@@ -639,70 +660,73 @@ const CreateLedgerFromInvoiceModal = ({
                           </div>
                         </div>
 
-                        {/* TDS Entry */}
-                        {invoiceData?.totalTDSAmount > 0 && (
-                          <div className="flex justify-between items-center border-t pt-2">
-                            <div>
-                              <div className="font-medium">
-                                Credit: TDS Payable
+                        {/* Dynamic Tax Entries */}
+                        {taxSummary.length > 0 ? (
+                          taxSummary.map((tax, idx) => (
+                            <div key={idx} className="flex justify-between items-center border-t pt-2">
+                              <div>
+                                <div className="font-medium text-green-700">
+                                  Credit: {tax.label || tax.taxType} Payable
+                                </div>
+                                <div className="text-sm text-gray-600">
+                                  {tax.label || tax.taxType}
+                                </div>
                               </div>
-                              <div className="text-sm text-gray-600">
-                                Tax deducted at source
+                              <div className="text-green-600 font-bold">
+                                ₹{Number(tax.amount || 0).toFixed(2)}
                               </div>
                             </div>
-                            <div className="text-green-600 font-bold">
-                              ₹{invoiceData?.totalTDSAmount?.toFixed(2)}
-                            </div>
-                          </div>
-                        )}
+                          ))
+                        ) : (
+                          <>
+                            {invoiceData?.totalCGSTAmount > 0 && (
+                              <div className="flex justify-between items-center border-t pt-2">
+                                <div>
+                                  <div className="font-medium text-green-700">
+                                    Credit: CGST Payable
+                                  </div>
+                                  <div className="text-sm text-gray-600">
+                                    Central GST
+                                  </div>
+                                </div>
+                                <div className="text-green-600 font-bold">
+                                  ₹{invoiceData?.totalCGSTAmount?.toFixed(2)}
+                                </div>
+                              </div>
+                            )}
 
-                        {/* GST Entries */}
-                        {invoiceData?.totalCGSTAmount > 0 && (
-                          <div className="flex justify-between items-center border-t pt-2">
-                            <div>
-                              <div className="font-medium">
-                                Credit: CGST Payable
+                            {invoiceData?.totalSGSTAmount > 0 && (
+                              <div className="flex justify-between items-center border-t pt-2">
+                                <div>
+                                  <div className="font-medium text-green-700">
+                                    Credit: SGST Payable
+                                  </div>
+                                  <div className="text-sm text-gray-600">
+                                    State GST
+                                  </div>
+                                </div>
+                                <div className="text-green-600 font-bold">
+                                  ₹{invoiceData?.totalSGSTAmount?.toFixed(2)}
+                                </div>
                               </div>
-                              <div className="text-sm text-gray-600">
-                                Central GST
-                              </div>
-                            </div>
-                            <div className="text-green-600 font-bold">
-                              ₹{invoiceData?.totalCGSTAmount?.toFixed(2)}
-                            </div>
-                          </div>
-                        )}
+                            )}
 
-                        {invoiceData?.totalSGSTAmount > 0 && (
-                          <div className="flex justify-between items-center border-t pt-2">
-                            <div>
-                              <div className="font-medium">
-                                Credit: SGST Payable
+                            {invoiceData?.totalIGSTAmount > 0 && (
+                              <div className="flex justify-between items-center border-t pt-2">
+                                <div>
+                                  <div className="font-medium text-green-700">
+                                    Credit: IGST Payable
+                                  </div>
+                                  <div className="text-sm text-gray-600">
+                                    Integrated GST
+                                  </div>
+                                </div>
+                                <div className="text-green-600 font-bold">
+                                  ₹{invoiceData?.totalIGSTAmount?.toFixed(2)}
+                                </div>
                               </div>
-                              <div className="text-sm text-gray-600">
-                                State GST
-                              </div>
-                            </div>
-                            <div className="text-green-600 font-bold">
-                              ₹{invoiceData?.totalSGSTAmount?.toFixed(2)}
-                            </div>
-                          </div>
-                        )}
-
-                        {invoiceData?.totalIGSTAmount > 0 && (
-                          <div className="flex justify-between items-center border-t pt-2">
-                            <div>
-                              <div className="font-medium">
-                                Credit: IGST Payable
-                              </div>
-                              <div className="text-sm text-gray-600">
-                                Integrated GST
-                              </div>
-                            </div>
-                            <div className="text-green-600 font-bold">
-                              ₹{invoiceData?.totalIGSTAmount?.toFixed(2)}
-                            </div>
-                          </div>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
