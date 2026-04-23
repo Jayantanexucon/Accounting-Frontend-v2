@@ -29,9 +29,7 @@ import {
   getReportPeriodParams,
 } from "../utils/scheduleReportUtil";
 
-const hasMeaningfulReportData = (report) =>
-  Math.abs(report?.summary?.totalRevenue || 0) > 0.009 ||
-  Math.abs(report?.summary?.totalExpenses || 0) > 0.009;
+const hasMeaningfulReportData = (report) => true; // Always show full format as per requirement
 
 export default function ProfitLossStatement() {
   const { user, hasPermission } = useAuth();
