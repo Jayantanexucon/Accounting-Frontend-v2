@@ -21,7 +21,7 @@ export default function App() {
         draggable
         pauseOnHover
         transition={Slide}
-        toastClassName={() => "bg-white dark:bg-neutral-900 shadow-lg rounded-xl p-4 flex items-center gap-3 border border-gray-200 dark:border-neutral-700"}
+        toastClassName={() => "bg-gray-900 dark:bg-neutral-900 shadow-lg rounded-xl p-4 flex items-center gap-3 border border-gray-200 dark:border-neutral-700 z-[9999]"}
         bodyClassName={() => "text-gray-800 dark:text-gray-200 font-medium text-sm"}
         progressClassName="bg-blue-500"
       />

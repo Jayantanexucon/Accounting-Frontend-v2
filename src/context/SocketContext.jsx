@@ -17,6 +17,10 @@ export const SocketProvider = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
+    if (import.meta.env.VITE_ENABLE_SOCKET !== "true") {
+    console.log("⚠️ Socket disabled via ENV");
+    return;
+  }
     if (!user?._id) {
       return undefined;
     }

@@ -50,11 +50,15 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
 
   const calculateTotalTax = (inv) => {
     if (!inv) return "0.00";
+    if (inv.totalTaxAmount != null) return Number(inv.totalTaxAmount || 0).toFixed(2);
     const cgst = inv.totalCGSTAmount || 0;
     const sgst = inv.totalSGSTAmount || 0;
     const igst = inv.totalIGSTAmount || 0;
     return (cgst + sgst + igst).toFixed(2);
   };
+
+  const taxLabel = displayInvoice?.taxLabel || displayInvoice?.taxType || "Tax";
+  const partyTaxLabel = (party = {}) => party?.taxIdentifierType || (party?.GSTIN || party?.gstin ? "GSTIN" : "Tax ID");
 
   const getStatusText = (status) => {
     const statusMap = {
@@ -198,9 +202,9 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
               <div className="bg-white border border-gray-200 rounded-lg p-4 hover:border-green-200 transition-colors">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs text-gray-500 mb-1">Total Tax</p>
+                    <p className="text-xs text-gray-500 mb-1">Total {taxLabel}</p>
                     <p className="text-lg font-semibold text-gray-900">
-                      {displayInvoice.currency || "₹"} {calculateTotalTax(displayInvoice)}
+                      {displayInvoice.currency}{calculateTotalTax(displayInvoice)}
                     </p>
                   </div>
                   <div className="bg-green-50 p-2 rounded">
@@ -264,9 +268,9 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                      (typeof displayInvoice.billTo === 'object' && displayInvoice.billTo.address) || 
                      "-"}
                   </p>
-                  {(displayInvoice.billTo?.GSTIN || displayInvoice.billTo?.gstin) && (
+                  {(displayInvoice.billTo?.taxIdentifierNumber || displayInvoice.billTo?.GSTIN || displayInvoice.billTo?.gstin) && (
                     <p className="text-xs text-gray-500 mt-2">
-                      GSTIN: {displayInvoice.billTo.GSTIN || displayInvoice.billTo.gstin}
+                      {partyTaxLabel(displayInvoice.billTo)}: {displayInvoice.billTo.taxIdentifierNumber || displayInvoice.billTo.GSTIN || displayInvoice.billTo.gstin}
                     </p>
                   )}
                 </div>
@@ -286,9 +290,9 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                        (typeof displayInvoice.shipTo === 'object' && displayInvoice.shipTo.address) || 
                        "-"}
                     </p>
-                    {(displayInvoice.shipTo?.GSTIN || displayInvoice.shipTo?.gstin) && (
+                    {(displayInvoice.shipTo?.taxIdentifierNumber || displayInvoice.shipTo?.GSTIN || displayInvoice.shipTo?.gstin) && (
                       <p className="text-xs text-gray-500 mt-2">
-                        GSTIN: {displayInvoice.shipTo.GSTIN || displayInvoice.shipTo.gstin}
+                        {partyTaxLabel(displayInvoice.shipTo)}: {displayInvoice.shipTo.taxIdentifierNumber || displayInvoice.shipTo.GSTIN || displayInvoice.shipTo.gstin}
                       </p>
                     )}
                   </div>
@@ -308,16 +312,6 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                   <div>
                     <p className="text-xs text-gray-500 mb-1">Payment Mode</p>
                     <p className="font-medium text-gray-900">{displayInvoice.paymentMode}</p>
-                  </div>
-                )}
-                {((displayInvoice.tdsAmount || displayInvoice.totalTDSAmount) > 0) && (
-                  <div className="md:col-span-2">
-                    <div className="flex items-center justify-between pt-3 border-t border-blue-200">
-                      <p className="text-sm font-medium text-gray-700">TDS (reference only, actual at payment)</p>
-                      <p className="text-lg font-bold text-violet-600">
-                        {displayInvoice.currency || "₹"} {((displayInvoice.tdsAmount || displayInvoice.totalTDSAmount || 0)).toFixed(2)}
-                      </p>
-                    </div>
                   </div>
                 )}
               </div>

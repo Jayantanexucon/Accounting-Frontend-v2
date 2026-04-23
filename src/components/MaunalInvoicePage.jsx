@@ -41,11 +41,97 @@ const hasInvoiceablePOItems = (po = {}) =>
 const roundMoney = (value = 0) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const normalizeTaxBreakdown = (item = {}, fallback = {}) => {
+  const list = Array.isArray(item?.taxBreakdown) ? item.taxBreakdown : [];
+  if (list.length > 0) {
+    return list.map((entry) => ({
+      taxType: entry?.taxType || entry?.label || fallback.taxType || "GST",
+      label: entry?.label || entry?.taxType || fallback.label || fallback.taxType || "GST",
+      rate: Number(entry?.rate || 0),
+      amount: roundMoney(entry?.amount || 0),
+    }));
+  }
+
+  const taxType = item?.taxType || item?.taxLabel || fallback.taxType || "GST";
+  const label = item?.taxLabel || item?.taxType || fallback.label || taxType;
+  const rate = Number(item?.taxRate ?? item?.gstRate ?? fallback.rate ?? 0);
+  const amount = roundMoney(item?.taxAmount ?? item?.gstAmount ?? fallback.amount ?? 0);
+
+  if (!rate && !amount && !taxType) return [];
+
+  return [{ taxType, label, rate, amount }];
+};
+
+const buildTaxSummaryFromItems = (items = [], fallback = {}) => {
+  const summaryMap = new Map();
+
+  items.forEach((item) => {
+    const breakdown = normalizeTaxBreakdown(item, fallback);
+    breakdown.forEach((entry) => {
+      const key = `${entry.taxType}::${entry.label}`;
+      const current = summaryMap.get(key) || {
+        taxType: entry.taxType,
+        label: entry.label,
+        rate: 0,
+        amount: 0,
+      };
+      current.rate = Math.max(current.rate, Number(entry.rate || 0));
+      current.amount = roundMoney(current.amount + Number(entry.amount || 0));
+      summaryMap.set(key, current);
+    });
+  });
+
+  return [...summaryMap.values()];
+};
+
+const getLegacyGstTotalsFromSummary = (taxSummary = []) =>
+  taxSummary.reduce(
+    (acc, entry) => {
+      const type = String(entry?.taxType || entry?.label || "").toUpperCase();
+      const amount = roundMoney(entry?.amount || 0);
+      if (type === "CGST") acc.totalCGSTAmount = roundMoney(acc.totalCGSTAmount + amount);
+      if (type === "SGST") acc.totalSGSTAmount = roundMoney(acc.totalSGSTAmount + amount);
+      if (type === "IGST") acc.totalIGSTAmount = roundMoney(acc.totalIGSTAmount + amount);
+      if (["GST", "CGST", "SGST", "IGST"].includes(type)) {
+        acc.totalGSTAmount = roundMoney(acc.totalGSTAmount + amount);
+      }
+      return acc;
+    },
+    { totalCGSTAmount: 0, totalSGSTAmount: 0, totalIGSTAmount: 0, totalGSTAmount: 0 },
+  );
+
+const getPrimaryTaxLabel = (source = {}) =>
+  source?.taxLabel ||
+  source?.taxType ||
+  source?.taxSummary?.[0]?.label ||
+  source?.taxSummary?.[0]?.taxType ||
+  "Tax";
+
+const getItemTaxLabel = (item = {}, fallback = "Tax") =>
+  item?.taxLabel || item?.taxType || fallback;
+
+const getItemTaxRate = (item = {}) =>
+  Number(item?.taxRate ?? item?.combinedTaxRate ?? item?.gstRate ?? 0);
+
+const getItemTaxAmount = (item = {}) =>
+  roundMoney(item?.taxAmount ?? item?.gstAmount ?? 0);
+
+const scaleTaxBreakdown = (taxBreakdown = [], ratio = 1, fallback = {}) => {
+  const normalizedRatio = Number.isFinite(Number(ratio)) ? Number(ratio) : 1;
+  const normalized = normalizeTaxBreakdown({ taxBreakdown }, fallback);
+  return normalized.map((entry) => ({
+    ...entry,
+    amount: roundMoney(Number(entry.amount || 0) * normalizedRatio),
+  }));
+};
+
 const poHasTaxData = (po) =>
   ((po && po.items) || []).some(
     (item) =>
       item?.hsnSac ||
       item?.hsnCode ||
+      Number(item?.taxRate || 0) > 0 ||
+      Number(item?.taxAmount || 0) > 0 ||
       Number(item?.gstRate || 0) > 0 ||
       Number(item?.gstAmount || 0) > 0,
   );
@@ -458,7 +544,7 @@ const normalizeInvoiceItemForPayload = (item = {}) => {
     totalAmount:
       rest.totalAmount ??
       rest.total ??
-      Number(rest.taxableValue || 0) + Number(rest.gstAmount || 0),
+      Number(rest.taxableValue || 0) + Number((rest.taxAmount ?? rest.gstAmount) || 0),
   };
 };
 
@@ -826,6 +912,11 @@ const ManualInvoicePage = () => {
         quantity: 1,
         rate: 0,
         taxableValue: 0,
+        taxType: "GST",
+        taxLabel: "GST",
+        taxRate: 0,
+        taxAmount: 0,
+        taxBreakdown: [],
         gstRate: 0,
         gstAmount: 0,
         total: 0,
@@ -833,6 +924,10 @@ const ManualInvoicePage = () => {
         totalManuallyEdited: false,
       },
     ],
+    taxType: "GST",
+    taxLabel: "GST",
+    taxSummary: [],
+    totalTaxAmount: 0,
     totalTaxableValue: 0,
     totalCGSTAmount: 0,
     totalSGSTAmount: 0,
@@ -984,11 +1079,35 @@ const ManualInvoicePage = () => {
         items: dataToLoad.items.map((item) => ({
           ...item,
           hsnSac: item.hsnSac || item.hsnCode || "",
+          taxType: item.taxType || dataToLoad.taxType || "GST",
+          taxLabel: item.taxLabel || dataToLoad.taxLabel || item.taxType || "GST",
+          taxRate: Number(item.taxRate ?? item.gstRate ?? 0),
+          taxAmount: Number(item.taxAmount ?? item.gstAmount ?? 0),
+          taxBreakdown: normalizeTaxBreakdown(item, {
+            taxType: item.taxType || dataToLoad.taxType || "GST",
+            label: item.taxLabel || dataToLoad.taxLabel || item.taxType || "GST",
+            rate: item.taxRate ?? item.gstRate ?? 0,
+            amount: item.taxAmount ?? item.gstAmount ?? 0,
+          }),
           baseQuantity: item.baseQuantity ?? item.quantity,
           baseRate: item.baseRate ?? item.rate,
           combinedGstRate: item.gstRate || 0,
           totalManuallyEdited: Boolean(item.totalManuallyEdited),
         })),
+        taxType: dataToLoad.taxType || prev.taxType || "GST",
+        taxLabel: dataToLoad.taxLabel || prev.taxLabel || dataToLoad.taxType || "GST",
+        taxSummary:
+          dataToLoad.taxSummary ||
+          buildTaxSummaryFromItems(dataToLoad.items || [], {
+            taxType: dataToLoad.taxType || "GST",
+            label: dataToLoad.taxLabel || dataToLoad.taxType || "GST",
+          }),
+        totalTaxAmount:
+          Number(
+            dataToLoad.totalTaxAmount ??
+            dataToLoad.totalGSTAmount ??
+            0,
+          ) || 0,
         billTo: {
           name: dataToLoad.billTo?.name || "",
           address: dataToLoad.billTo?.address || "",
@@ -1302,29 +1421,18 @@ const ManualInvoicePage = () => {
 
   useEffect(() => {
     if (!manualAmountEdit) {
-      let taxableValue = 0;
-      let cgst = 0;
-      let sgst = 0;
-      let igst = 0;
-
-      const companyStateCode = normalizeStateCode(companyDetails.gstNumber);
-      const shipToStateCode = normalizeStateCode(invoice.shipTo.stateCode);
-      const isIntraState = !!companyStateCode && !!shipToStateCode && companyStateCode === shipToStateCode;
-
-      invoice.items.forEach((item) => {
-        taxableValue += item.taxableValue || 0;
-        const gstAmount = item.gstAmount || 0;
-
-        if (isIntraState) {
-          cgst += Math.round(gstAmount / 2);
-          sgst += Math.round(gstAmount / 2);
-        } else {
-          igst += Math.round(gstAmount);
-        }
+      const taxableValue = roundMoney(
+        invoice.items.reduce((sum, item) => sum + Number(item.taxableValue || 0), 0),
+      );
+      const taxSummary = buildTaxSummaryFromItems(invoice.items, {
+        taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+        label: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
       });
-
-      // Round the total amount to nearest whole number
-      const totalAmount = Math.round(taxableValue + cgst + sgst + igst);
+      const totalTaxAmount = roundMoney(
+        taxSummary.reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
+      );
+      const legacyTaxTotals = getLegacyGstTotalsFromSummary(taxSummary);
+      const totalAmount = roundMoney(taxableValue + totalTaxAmount);
 
       let tdsAmount = invoice.tdsAmount || 0;
 
@@ -1345,17 +1453,21 @@ const ManualInvoicePage = () => {
       setInvoice((prev) => ({
         ...prev,
         totalTaxableValue: parseFloat(taxableValue.toFixed(2)),
+        taxType: prev.taxType || selectedPOData?.taxType || "GST",
+        taxLabel: prev.taxLabel || selectedPOData?.taxLabel || getPrimaryTaxLabel({ taxSummary }),
+        taxSummary,
+        totalTaxAmount: parseFloat(totalTaxAmount.toFixed(2)),
         amountDue: parseFloat(netPayable.toFixed(2)),
-        totalCGSTAmount: parseFloat(cgst.toFixed(2)),
-        totalSGSTAmount: parseFloat(sgst.toFixed(2)),
-        totalIGSTAmount: parseFloat(igst.toFixed(2)),
+        totalCGSTAmount: parseFloat(legacyTaxTotals.totalCGSTAmount.toFixed(2)),
+        totalSGSTAmount: parseFloat(legacyTaxTotals.totalSGSTAmount.toFixed(2)),
+        totalIGSTAmount: parseFloat(legacyTaxTotals.totalIGSTAmount.toFixed(2)),
         tdsAmount,
         netPayable: parseFloat(netPayable.toFixed(2)),
       }));
 
       setValueInWords(convertToWords(netPayable));
     }
-  }, [invoice.items, invoice.billTo.stateCode, invoice.shipTo.stateCode, manualAmountEdit, manualTdsEdit, hsnList, companyDetails.gstNumber]);
+  }, [invoice.items, invoice.taxType, invoice.taxLabel, manualAmountEdit, manualTdsEdit, hsnList, selectedPOData?.taxType, selectedPOData?.taxLabel]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -1438,6 +1550,11 @@ const ManualInvoicePage = () => {
           quantity: 1,
           rate: 0,
           taxableValue: 0,
+          taxType: invoice.taxType || "GST",
+          taxLabel: invoice.taxLabel || "GST",
+          taxRate: 0,
+          taxAmount: 0,
+          taxBreakdown: [],
           gstRate: 0,
           gstAmount: 0,
           total: 0,
@@ -1496,6 +1613,7 @@ const ManualInvoicePage = () => {
 
         newItems[index].gstRate = combinedGstRate;
         newItems[index].combinedGstRate = combinedGstRate;
+        newItems[index].taxRate = combinedGstRate;
       }
     }
 
@@ -1521,8 +1639,18 @@ const ManualInvoicePage = () => {
 
       newItems[index].quantity = quantity;
       newItems[index].taxableValue = taxableValue;
+      newItems[index].taxAmount = gstAmount;
       newItems[index].gstAmount = gstAmount;
       newItems[index].total = manualTotal;
+      newItems[index].taxRate = gstRate;
+      newItems[index].taxType = newItems[index].taxType || invoice.taxType || "GST";
+      newItems[index].taxLabel = newItems[index].taxLabel || invoice.taxLabel || "GST";
+      newItems[index].taxBreakdown = normalizeTaxBreakdown(newItems[index], {
+        taxType: newItems[index].taxType || invoice.taxType || "GST",
+        label: newItems[index].taxLabel || invoice.taxLabel || "GST",
+        rate: gstRate,
+        amount: gstAmount,
+      });
       newItems[index].combinedGstRate = gstRate;
       newItems[index].totalManuallyEdited = true;
 
@@ -1578,8 +1706,18 @@ const ManualInvoicePage = () => {
     );
 
     newItems[index].taxableValue = taxableValue;
+    newItems[index].taxRate = gstRate;
+    newItems[index].taxAmount = gstAmount;
     newItems[index].gstAmount = gstAmount;
     newItems[index].total = total;
+    newItems[index].taxType = newItems[index].taxType || invoice.taxType || "GST";
+    newItems[index].taxLabel = newItems[index].taxLabel || invoice.taxLabel || "GST";
+    newItems[index].taxBreakdown = normalizeTaxBreakdown(newItems[index], {
+      taxType: newItems[index].taxType || invoice.taxType || "GST",
+      label: newItems[index].taxLabel || invoice.taxLabel || "GST",
+      rate: gstRate,
+      amount: gstAmount,
+    });
     newItems[index].currentTermRemainingAmount = currentTermRemainingAmount;
     newItems[index].remainingAfterInvoice = roundMoney(
       baseRemainingAfterInvoice + currentTermRemainingAmount,
@@ -1729,17 +1867,20 @@ const ManualInvoicePage = () => {
     const billingModel = selectedPO.billingModel || "fixed";
     let paymentTermSchedule = buildPaymentTermSchedule(selectedPO);
 
-    const buildAddress = (src) => ({
-      name: src?.name || "",
-      address: src?.address || "",
-      city: src?.city || "",
-      state: src?.state || "",
-      stateCode: src?.stateCode || "",
-      country: src?.country || "",
-      pinCode: src?.pinCode || "",
-      taxIdentifierType: src?.GSTIN ? "GST" : "",
-      taxIdentifierNumber: src?.GSTIN || "",
-    });
+    const buildAddress = (src) => {
+      const primaryTax = src?.taxDetails?.find?.((entry) => entry?.taxNumber) || null;
+      return {
+        name: src?.name || "",
+        address: src?.address || "",
+        city: src?.city || "",
+        state: src?.state || "",
+        stateCode: src?.stateCode || "",
+        country: src?.country || "",
+        pinCode: src?.pinCode || "",
+        taxIdentifierType: primaryTax?.taxType || (src?.GSTIN ? "GST" : ""),
+        taxIdentifierNumber: primaryTax?.taxNumber || src?.GSTIN || "",
+      };
+    };
 
     // ── Reset all typed section states ────────────────────────
     setMilestoneRows([]);
@@ -1760,6 +1901,8 @@ const ManualInvoicePage = () => {
       const firstItem = selectedPO.items?.[0] || {};
       const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
       const defaultGstRate = Number(firstItem.gstRate || 0);
+      const defaultTaxType = firstItem.taxType || selectedPO.taxType || "GST";
+      const defaultTaxLabel = firstItem.taxLabel || selectedPO.taxLabel || defaultTaxType;
 
       // Helper: compute how much of a milestone has already been invoiced
       const getInvoicedAmountForMilestone = (milestoneId, milestoneTitle) => {
@@ -1865,8 +2008,18 @@ const ManualInvoicePage = () => {
         remainingAmountAfter: 0,
         amount: m._remaining,
         hsnSac: defaultHsn,
+        taxType: defaultTaxType,
+        taxLabel: defaultTaxLabel,
+        taxRate: defaultGstRate,
         gstRate: defaultGstRate,
         gstAmount: roundMoney((m._remaining * defaultGstRate) / 100),
+        taxAmount: roundMoney((m._remaining * defaultGstRate) / 100),
+        taxBreakdown: scaleTaxBreakdown(firstItem.taxBreakdown, m._remaining / Math.max(Number(firstItem.taxableValue || m._remaining), 1), {
+          taxType: defaultTaxType,
+          label: defaultTaxLabel,
+          rate: defaultGstRate,
+          amount: roundMoney((m._remaining * defaultGstRate) / 100),
+        }),
         total: roundMoney(m._remaining + ((m._remaining * defaultGstRate) / 100)),
         selected: true,
         isCarryForward: m._isCarryForward,
@@ -1957,14 +2110,28 @@ const ManualInvoicePage = () => {
             poItemId: item.itemId || item._id,
             description: `${item.description || ""} (${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment}/${schedule.totalInstallments})`,
             hsnSac: item.hsnSac || item.hsnCode || "",
-            quantity,
-            baseQuantity: Number(item.quantity || 0),
-            baseRate: rate,
-            poRemainingQuantity: getRemainingPOItemQuantity(item),
-            rate,
-            taxableValue: termTaxable,
-            gstRate,
-            gstAmount: termGst,
+        quantity,
+        baseQuantity: Number(item.quantity || 0),
+        baseRate: rate,
+        poRemainingQuantity: getRemainingPOItemQuantity(item),
+        rate,
+        taxableValue: termTaxable,
+        taxType: item.taxType || selectedPO.taxType || "GST",
+        taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+        taxRate: item.taxRate ?? gstRate,
+        taxAmount: termGst,
+        taxBreakdown: scaleTaxBreakdown(
+          item.taxBreakdown,
+          termTaxable / Math.max(baseTaxableAmount, 1),
+          {
+            taxType: item.taxType || selectedPO.taxType || "GST",
+            label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+            rate: item.taxRate ?? gstRate,
+            amount: termGst,
+          },
+        ),
+        gstRate,
+        gstAmount: termGst,
             total: roundMoney(termTaxable + termGst),
             combinedGstRate: item.combinedGstRate || gstRate,
             totalManuallyEdited: false,
@@ -2161,14 +2328,28 @@ const ManualInvoicePage = () => {
             poItemId: item.itemId || item._id,
             description: item.description || "",
             hsnSac: item.hsnSac || item.hsnCode || "",
-            quantity,
-            baseQuantity: remainingQuantity,
-            baseRate: rate,
-            poRemainingQuantity: remainingQuantity,
-            rate,
-            taxableValue,
-            gstRate,
-            gstAmount,
+          quantity,
+          baseQuantity: remainingQuantity,
+          baseRate: rate,
+          poRemainingQuantity: remainingQuantity,
+          rate,
+          taxableValue,
+          taxType: item.taxType || selectedPO.taxType || "GST",
+          taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+          taxRate: item.taxRate ?? gstRate,
+          taxAmount: gstAmount,
+          taxBreakdown: scaleTaxBreakdown(
+            item.taxBreakdown,
+            taxableValue / Math.max(Number(item.taxableValue || taxableValue), 1),
+            {
+              taxType: item.taxType || selectedPO.taxType || "GST",
+              label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+              rate: item.taxRate ?? gstRate,
+              amount: gstAmount,
+            },
+          ),
+          gstRate,
+          gstAmount,
             total: scheduledTotal,
             maxAllowedInvoiceAmount: scheduledTotal,
             installmentAmount: scheduledParts.installmentAmount,
@@ -2192,7 +2373,12 @@ const ManualInvoicePage = () => {
     }
 
     const totalTaxableValue = derivedItems.reduce((s, i) => s + Number(i.taxableValue || 0), 0);
-    const totalGSTAmount = derivedItems.reduce((s, i) => s + Number(i.gstAmount || 0), 0);
+    const taxSummary = buildTaxSummaryFromItems(derivedItems, {
+      taxType: selectedPO.taxType || "GST",
+      label: selectedPO.taxLabel || selectedPO.taxType || "GST",
+    });
+    const totalTaxAmount = taxSummary.reduce((s, i) => s + Number(i.amount || 0), 0);
+    const legacyTaxTotals = getLegacyGstTotalsFromSummary(taxSummary);
 
     setInvoice((prev) => ({
       ...prev,
@@ -2212,14 +2398,18 @@ const ManualInvoicePage = () => {
       dueDate: paymentTermSchedule.currentWindowEnd || (selectedPO.deliveryDate ? new Date(selectedPO.deliveryDate).toISOString().split("T")[0] : prev.dueDate),
       currency: selectedPO.currency || "INR",
       paymentMode: paymentModeMap[selectedPO.paymentTerms] || "Bank-Transfer",
-      billTo: buildAddress(selectedPO.client),
+      billTo: buildAddress(selectedPO.client || selectedPO.vendor),
       shipTo: buildAddress(selectedPO.deliverTo),
       items: derivedItems,
+      taxType: selectedPO.taxType || "GST",
+      taxLabel: selectedPO.taxLabel || selectedPO.taxType || "GST",
+      taxSummary,
+      totalTaxAmount: Number(totalTaxAmount.toFixed(2)),
       totalTaxableValue: Number(totalTaxableValue.toFixed(2)),
-      totalCGSTAmount: selectedPO.totalCGSTAmount || 0,
-      totalSGSTAmount: selectedPO.totalSGSTAmount || 0,
-      totalIGSTAmount: selectedPO.totalIGSTAmount || 0,
-      amountDue: Number((totalTaxableValue + totalGSTAmount).toFixed(2)),
+      totalCGSTAmount: legacyTaxTotals.totalCGSTAmount || 0,
+      totalSGSTAmount: legacyTaxTotals.totalSGSTAmount || 0,
+      totalIGSTAmount: legacyTaxTotals.totalIGSTAmount || 0,
+      amountDue: Number((totalTaxableValue + totalTaxAmount).toFixed(2)),
     }));
 
     setSelectedPOInfo({
@@ -2281,6 +2471,16 @@ const ManualInvoicePage = () => {
       quantity: 1,
       rate: r.amount,
       taxableValue: r.amount,
+      taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+      taxLabel: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+      taxRate: r.gstRate || 0,
+      taxAmount: r.gstAmount || 0,
+      taxBreakdown: normalizeTaxBreakdown(r, {
+        taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+        label: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+        rate: r.gstRate || 0,
+        amount: r.gstAmount || 0,
+      }),
       gstRate: r.gstRate || 0,
       gstAmount: r.gstAmount || 0,
       total: r.total,
@@ -2366,6 +2566,16 @@ const ManualInvoicePage = () => {
         quantity: r.quantity,
         rate: r.rate,
         taxableValue,
+        taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+        taxLabel: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+        taxRate: r.gstRate || 0,
+        taxAmount: gstAmount,
+        taxBreakdown: normalizeTaxBreakdown(r, {
+          taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+          label: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+          rate: r.gstRate || 0,
+          amount: gstAmount,
+        }),
         gstRate: r.gstRate || 0,
         gstAmount,
         total,
@@ -2411,6 +2621,16 @@ const ManualInvoicePage = () => {
         quantity: 1,
         rate: row.amount,
         taxableValue: row.amount,
+        taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+        taxLabel: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+        taxRate: row.gstRate || 0,
+        taxAmount: gstAmount,
+        taxBreakdown: normalizeTaxBreakdown(row, {
+          taxType: invoice.taxType || selectedPOData?.taxType || "GST",
+          label: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
+          rate: row.gstRate || 0,
+          amount: gstAmount,
+        }),
         gstRate: row.gstRate || 0,
         gstAmount,
         total,
@@ -2568,6 +2788,10 @@ const ManualInvoicePage = () => {
           updatedAt: new Date().toISOString(),
           // Ensure all financial fields are present
           currency: invoice.currency || "INR",
+          taxType: invoice.taxType,
+          taxLabel: invoice.taxLabel,
+          taxSummary: invoice.taxSummary,
+          totalTaxAmount: invoice.totalTaxAmount,
           totalTaxableValue: invoice.totalTaxableValue,
           totalCGSTAmount: invoice.totalCGSTAmount,
           totalSGSTAmount: invoice.totalSGSTAmount,
@@ -2621,6 +2845,10 @@ const ManualInvoicePage = () => {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           currency: invoice.currency || "INR",
+          taxType: invoice.taxType,
+          taxLabel: invoice.taxLabel,
+          taxSummary: invoice.taxSummary,
+          totalTaxAmount: invoice.totalTaxAmount,
           totalTaxableValue: invoice.totalTaxableValue,
           totalCGSTAmount: invoice.totalCGSTAmount,
           totalSGSTAmount: invoice.totalSGSTAmount,
@@ -2736,6 +2964,9 @@ const ManualInvoicePage = () => {
   const handleGoToList = () => {
     navigate("/invoice-data");
   };
+
+  const primaryTaxLabel = getPrimaryTaxLabel(invoice);
+  const taxSummaryList = Array.isArray(invoice.taxSummary) ? invoice.taxSummary : [];
 
   return (
     <div className="min-h-screen p-4 md:p-8">
@@ -3522,10 +3753,10 @@ const ManualInvoicePage = () => {
                         <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
                       )}
                       {showTypedTaxFields && (
-                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} %</th>
                       )}
                       {showTypedTaxFields && (
-                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} Amt</th>
                       )}
                       <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
                     </tr>
@@ -3696,10 +3927,10 @@ const ManualInvoicePage = () => {
                         <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
                       )}
                       {showTypedTaxFields && (
-                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} %</th>
                       )}
                       {showTypedTaxFields && (
-                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amt</th>
+                        <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} Amt</th>
                       )}
                       <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
                     </tr>
@@ -3821,7 +4052,7 @@ const ManualInvoicePage = () => {
                   <div className={`grid grid-cols-1 ${showTypedTaxFields ? "sm:grid-cols-3" : "sm:grid-cols-1"} gap-4`}>
                     {showTypedTaxFields && (
                       <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">GST Rate (%)</label>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">{primaryTaxLabel} Rate (%)</label>
                         <input type="number" value={retainerRow.gstRate} min="0" max="100" step="0.1"
                           onChange={(e) => handleRetainerRowChange("gstRate", parseFloat(e.target.value) || 0)}
                           className="w-full px-3 py-2 border border-gray-300 rounded-xl text-sm" />
@@ -3829,7 +4060,7 @@ const ManualInvoicePage = () => {
                     )}
                     {showTypedTaxFields && (
                       <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-1">GST Amount (₹)</label>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">{primaryTaxLabel} Amount (₹)</label>
                         <input type="number" value={(retainerRow.gstAmount || 0).toFixed(2)} readOnly
                           className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm bg-slate-50 text-right" />
                       </div>
@@ -3886,8 +4117,8 @@ const ManualInvoicePage = () => {
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Term Remaining</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST %</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">GST Amount</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} %</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} Amount</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
@@ -4156,44 +4387,31 @@ const ManualInvoicePage = () => {
                       />
                     </div>
 
-                    {/* CGST & SGST */}
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Total CGST</label>
-                        <input
-                          type="number"
-                          name="totalCGSTAmount"
-                          value={invoice.totalCGSTAmount.toFixed(2)}
-                          onChange={handleAmountChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                          readOnly
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Total SGST</label>
-                        <input
-                          type="number"
-                          name="totalSGSTAmount"
-                          value={invoice.totalSGSTAmount.toFixed(2)}
-                          onChange={handleAmountChange}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
-                          readOnly
-                        />
-                      </div>
-                    </div>
-
-                    {/* IGST */}
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">Total IGST</label>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Total Tax</label>
                       <input
                         type="number"
-                        name="totalIGSTAmount"
-                        value={invoice.totalIGSTAmount.toFixed(2)}
+                        name="totalTaxAmount"
+                        value={(invoice.totalTaxAmount || 0).toFixed(2)}
                         onChange={handleAmountChange}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                         readOnly
                       />
                     </div>
+
+                    {taxSummaryList.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {taxSummaryList.map((entry) => (
+                          <div key={`${entry.taxType}-${entry.label}`} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <div className="flex items-center justify-between text-sm">
+                              <span className="font-medium text-slate-700">{entry.label || entry.taxType}</span>
+                              <span className="font-semibold text-slate-900">{(entry.amount || 0).toFixed(2)}</span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">Rate: {(entry.rate || 0).toFixed(2)}%</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
