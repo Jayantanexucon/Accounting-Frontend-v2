@@ -4189,7 +4189,7 @@ const ManualInvoicePage = () => {
                                 />
                                 {item.poRemainingQuantity !== undefined && (
                                   <div className="mt-1 text-[10px] text-amber-600 text-right">
-                                    Left: {item.poRemainingQuantity}
+                                    PO Total: {item.poRemainingQuantity}
                                   </div>
                                 )}
                               </td>
