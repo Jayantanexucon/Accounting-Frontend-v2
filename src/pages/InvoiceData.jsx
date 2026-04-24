@@ -330,7 +330,7 @@ const InvoiceData = () => {
         : Number(invoice.remainingAmount ?? invoiceAmount - totalReceived),
     );
     const completionPercentage =
-      invoiceAmount > 0 ? (totalReceived / invoiceAmount) * 100 : 0;
+      netPayable > 0 ? (totalReceived / netPayable) * 100 : 0;
 
     let paymentStatus = invoice.paymentStatus;
     if (!paymentStatus) {

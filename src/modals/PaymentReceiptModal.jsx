@@ -149,7 +149,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         );
         const totalAmount = Number(invoiceData.amountDue || invoiceData.invoiceAmount || 0);
         const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
-        const netPayable = Number(invoiceData?.netPayable || totalAmount - invoiceTds);
+        const netPayable = totalAmount - invoiceTds;
         const pendingAmount = Math.max(0, netPayable - totalReceived);
 
         setPaymentSummary({
@@ -385,65 +385,35 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
             </div>
           ) : (
             <div className="space-y-6">
-              {/* Invoice Summary */}
-              {/* <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className={`grid gap-3 ${hasTdsReference ? "grid-cols-2 xl:grid-cols-5" : "grid-cols-1 md:grid-cols-3"}`}>
-                  <div className="rounded-lg border border-blue-200 bg-white/70 p-3 text-center">
-                    <div className="break-words text-l font-bold text-blue-700 md:text-xl">₹{totals.totalAmount.toFixed(2)}</div>
-                    <div className="mt-1 text-xs text-blue-600">Invoice Total</div>
-                  </div>
-                  <div className="rounded-lg border border-green-200 bg-white/70 p-3 text-center">
-                    <div className="break-words text-l font-bold text-green-600 md:text-xl">₹{totals.totalReceived.toFixed(2)}</div>
-                    <div className="mt-1 text-xs text-green-600">Settled</div>
-                  </div>
-                  <div className="rounded-lg border border-slate-200 bg-white/70 p-3 text-center">
-                    <div className={`break-words text-l font-bold md:text-xl ${totals.pendingAmount > 0 ? "text-red-600" : "text-green-600"}`}>₹{totals.pendingAmount.toFixed(2)}</div>
-                    <div className="mt-1 text-xs text-gray-600">Outstanding</div>
-                  </div>
-                  {hasTdsReference && (
-                    <>
-                      <div className="rounded-lg border border-violet-200 bg-white/70 p-3 text-center">
-                        <div className="break-words text-l font-bold text-violet-700 md:text-xl">₹{totalReferenceTds.toFixed(2)}</div>
-                        <div className="mt-1 text-xs text-violet-600">Total TDS</div>
-                      </div>
-                      <div className="rounded-lg border border-violet-200 bg-white/70 p-3 text-center">
-                        <div className="break-words text-l font-bold text-violet-500 md:text-xl">₹{usedReferenceTds.toFixed(2)}</div>
-                        <div className="mt-1 text-xs text-violet-500">Used TDS</div>
-                      </div>
-                      <div className="rounded-lg border border-violet-200 bg-white/70 p-3 text-center">
-                        <div className={`break-words text-l font-bold md:text-xl ${remainingReferenceTds > 0 ? "text-violet-700" : "text-slate-500"}`}>₹{remainingReferenceTds.toFixed(2)}</div>
-                        <div className="mt-1 text-xs text-gray-600">TDS Left</div>
-                      </div>
-                    </>
-                  )}
-                </div>
-                <div className="mt-3 text-sm text-blue-700">
-                  Client: <span className="font-semibold">{invoiceData?.billTo?.name}</span>
-                  {invoiceData?.billTo?.GSTIN && <span className="ml-3">GSTIN: {invoiceData.billTo.GSTIN}</span>}
-                </div>
-              </div> */}
+
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-  <div className="grid gap-2 grid-cols-1 sm:grid-cols-3">
-    {/* Total Invoice Amount */}
-    <div className="rounded-md border border-blue-200 bg-white/80 p-2 text-center">
-      <div className="text-sm font-bold text-blue-700">₹{totals.totalAmount.toFixed(2)}</div>
-      <div className="text-[11px] text-blue-600">Total Invoice Amount</div>
-    </div>
+                <div className="grid gap-2 grid-cols-2 md:grid-cols-4">
+                  {/* Total Invoice Amount */}
+                  <div className="rounded-md border border-blue-200 bg-white/80 p-2 text-center">
+                    <div className="text-xs font-bold text-blue-700">₹{totals.totalAmount.toFixed(2)}</div>
+                    <div className="text-[10px] text-blue-600">Invoice Total</div>
+                  </div>
 
-    {/* Net Payable Amount */}
-    <div className="rounded-md border border-green-200 bg-white/80 p-2 text-center">
-      <div className="text-sm font-bold text-green-600">₹{netPayable.toFixed(2)}</div>
-      <div className="text-[11px] text-green-600">Net Payable Amount</div>
-    </div>
+                  {/* TDS Amount */}
+                  <div className="rounded-md border border-violet-200 bg-white/80 p-2 text-center">
+                    <div className="text-xs font-bold text-violet-700">₹{totals.invoiceTds.toFixed(2)}</div>
+                    <div className="text-[10px] text-violet-600">TDS Deduction</div>
+                  </div>
 
-    {/* Pending Amount */}
-    <div className="rounded-md border border-slate-200 bg-white/80 p-2 text-center">
-      <div className={`text-sm font-bold ${totals.pendingAmount > 0 ? "text-red-600" : "text-green-600"}`}>
-        ₹{totals.pendingAmount.toFixed(2)}
-      </div>
-      <div className="text-[11px] text-gray-600">Pending Amount</div>
-    </div>
-  </div>
+                  {/* Net Payable Amount */}
+                  <div className="rounded-md border border-green-200 bg-white/80 p-2 text-center">
+                    <div className="text-xs font-bold text-green-600">₹{totals.netPayable.toFixed(2)}</div>
+                    <div className="text-[10px] text-green-600">Net Payable</div>
+                  </div>
+
+                  {/* Pending Amount */}
+                  <div className="rounded-md border border-slate-200 bg-white/80 p-2 text-center">
+                    <div className={`text-xs font-bold ${totals.pendingAmount > 0 ? "text-red-600" : "text-green-600"}`}>
+                      ₹{totals.pendingAmount.toFixed(2)}
+                    </div>
+                    <div className="text-[10px] text-gray-600">Pending Cash</div>
+                  </div>
+                </div>
 
   {/* Client Info - Compact */}
   <div className="mt-2 text-xs text-blue-700 flex flex-wrap items-center gap-x-3 gap-y-1">

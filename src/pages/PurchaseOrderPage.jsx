@@ -679,8 +679,7 @@ export default function PurchaseOrderPage() {
       setDistributionBreakdown([]);
       return;
     }
-    const totalDays = end.diff(start, "day") + 1;
-    let numMonths = Math.ceil(totalDays / 30);
+    let numMonths = Math.ceil(end.add(1, "day").diff(start, "month", true));
     if (numMonths < 1) numMonths = 1;
     const amountPerMonth = form.totalAmount / numMonths;
     const breakdown = [];
@@ -1821,14 +1820,14 @@ export default function PurchaseOrderPage() {
                       <p className="text-slate-600">Currency</p>
                       <p className="font-medium text-slate-800">{form.currency}</p>
                     </div>
-                    <div>
+                    {/* <div>
                       <p className="text-slate-600">PO Category</p>
                       <p className="font-medium text-slate-800 capitalize">{form.poCategory}</p>
                     </div>
                     <div>
                       <p className="text-slate-600">Billing Model</p>
                       <p className="font-medium text-slate-800 capitalize">{form.billingModel}</p>
-                    </div>
+                    </div> */}
                     <div>
                       <p className="text-slate-600">PO Reference</p>
                       <p className="font-medium text-slate-800">{form.poreferencevalue || "—"}</p>
