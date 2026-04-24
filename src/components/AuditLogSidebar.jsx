@@ -272,14 +272,95 @@ const AuditLogSidebar = ({
     return displayMap[actionType] || actionType.replace(/_/g, " ");
   };
 
+  // Generic renderer for change details
+  const renderChangeDetails = (log) => {
+    const { actionCode, changes, oldValues, newValues } = log;
+
+    // For CREATE actions, show the created data
+    if (actionCode === "CREATE" && newValues) {
+      return (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-green-800 mb-2">Created Data:</div>
+          <div className="bg-green-50 border border-green-200 rounded p-3">
+            <pre className="text-xs text-green-700 whitespace-pre-wrap">
+              {JSON.stringify(newValues, null, 2)}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+
+    // For DELETE actions, show the deleted data
+    if (actionCode === "DELETE" && oldValues) {
+      return (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-red-800 mb-2">Deleted Data:</div>
+          <div className="bg-red-50 border border-red-200 rounded p-3">
+            <pre className="text-xs text-red-700 whitespace-pre-wrap">
+              {JSON.stringify(oldValues, null, 2)}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+
+    // For UPDATE actions, show the changes
+    if (actionCode === "UPDATE" && changes && changes.length > 0) {
+      return (
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-blue-800 mb-2">Changes Made:</div>
+          {changes.map((change, idx) => {
+            const fieldName = change.field || "Field";
+            const displayFieldName = fieldName.replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
+
+            return (
+              <div key={idx} className="grid grid-cols-4 gap-3 text-sm items-start">
+                <div className="font-medium text-gray-700">{displayFieldName}</div>
+                <div className="col-span-3 grid grid-cols-2 gap-3">
+                  <div className="bg-red-50 border border-red-200 rounded p-2">
+                    <div className="text-xs text-gray-500 mb-1">Previous</div>
+                    <div className="text-red-700 text-xs">
+                      {change.oldValue !== undefined ? 
+                        (Array.isArray(change.oldValue) ? `${change.oldValue.length} items` : 
+                         typeof change.oldValue === 'object' ? JSON.stringify(change.oldValue) : 
+                         String(change.oldValue)) : 
+                        "N/A"}
+                    </div>
+                  </div>
+                  <div className="bg-green-50 border border-green-200 rounded p-2">
+                    <div className="text-xs text-gray-500 mb-1">New</div>
+                    <div className="text-green-700 text-xs">
+                      {change.newValue !== undefined ? 
+                        (Array.isArray(change.newValue) ? `${change.newValue.length} items` : 
+                         typeof change.newValue === 'object' ? JSON.stringify(change.newValue) : 
+                         String(change.newValue)) : 
+                        "N/A"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+
+    // For other actions or no changes, show a message
+    return (
+      <div className="text-sm text-gray-600 italic">
+        No change details available for this action.
+      </div>
+    );
+  };
+
   // Render journal logs based on actual data structure
   const renderJournalLog = (log) => {
-    const { actionType, logs: logEntries } = log;
+    const actionType = log.actionCode;
 
     switch (actionType) {
       case "CREATE":
         const journalData =
-          logEntries[0]?.newValue?.journal || logEntries[0]?.newValue;
+          log.newValues?.journal || log.newValues;
         return (
           <div className="space-y-4">
             <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -353,7 +434,7 @@ const AuditLogSidebar = ({
 
       case "DELETE":
         const oldJournalData =
-          logEntries[0]?.oldValue?.journal || logEntries[0]?.oldValue;
+          log.oldValues?.journal || log.oldValues;
         return (
           <div className="space-y-4">
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -421,7 +502,7 @@ const AuditLogSidebar = ({
               </div>
             </div>
             <div className="space-y-3">
-              {logEntries.map((entry, idx) => {
+              {(log.changes || []).map((entry, idx) => {
                 const fieldNames = {
                   journalLines: "Journal Lines",
                 };
@@ -544,11 +625,11 @@ const AuditLogSidebar = ({
 
   // Render invoice logs based on actual data structure
   const renderInvoiceLog = (log) => {
-    const { actionType, logs: logEntries } = log;
+    const actionType = log.actionCode;
 
     switch (actionType) {
       case "CREATE":
-        const invoiceData = logEntries[0]?.newValue;
+        const invoiceData = log.newValues;
         return (
           <div className="space-y-4">
             <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
@@ -593,7 +674,7 @@ const AuditLogSidebar = ({
                 Invoice Created (Bulk)
               </div>
             </div>
-            {renderInvoiceCreatedContent(logEntries[0]?.newValue)}
+            {renderInvoiceCreatedContent(log.newValues)}
           </div>
         );
 
@@ -619,7 +700,7 @@ const AuditLogSidebar = ({
               </div>
             </div>
             <div className="space-y-3">
-              {logEntries.map((entry, idx) => {
+              {(log.changes || []).map((entry, idx) => {
                 if (entry.field === "items") {
                   let oldItems = [];
                   let newItems = [];
@@ -3272,9 +3353,9 @@ const AuditLogSidebar = ({
                           <div className="flex-1">
                             <div className="flex items-center gap-2 mb-3 flex-wrap">
                               <span
-                                className={`px-3 py-1 rounded-full text-xs font-medium ${getActionTypeColor(log.actionType)}`}
+                                className={`px-3 py-1 rounded-full text-xs font-medium ${getActionTypeColor(log.actionCode)}`}
                               >
-                                {getActionDisplayText(log.actionType)}
+                                {getActionDisplayText(log.actionCode)}
                               </span>
                               <span
                                 className={`px-3 py-1 rounded-full text-xs font-medium ${
@@ -3362,6 +3443,13 @@ const AuditLogSidebar = ({
                             </div>
                           </div>
                         </div>
+
+                        {/* Change Details - Always show */}
+                        {(log.changes && log.changes.length > 0) || log.newValues || log.oldValues ? (
+                          <div className="mt-4 pt-4 border-t border-gray-100">
+                            {renderChangeDetails(log)}
+                          </div>
+                        ) : null}
 
                         {/* Log Details */}
                         <div className="mt-4 pt-4 border-t border-gray-100">

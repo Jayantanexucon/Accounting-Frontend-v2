@@ -142,15 +142,17 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 
   // Calculate payment information
   const calculatePaymentInfo = (invoice) => {
-    const invoiceAmount = invoice.amountDue || invoice.netPayable || 0;
+    const totalInvoiceAmount = Number(invoice.amountDue || invoice.invoiceAmount || 0);
+    const tdsAmount = Number(invoice.tdsAmount || invoice.totalTDSAmount || 0);
+    const netPayable = totalInvoiceAmount - tdsAmount;
+    const invoiceAmount = netPayable;
     const payments = invoice.payments || invoice.paymentIds || [];
 
     const paymentsTotal = payments.reduce(
       (sum, payment) =>
         sum +
         Number(
-          payment.grossAmount ??
-            payment.receivedAmount ??
+          payment.receivedAmount ??
             payment.amountReceived ??
             payment.amountPaid ??
             0,
@@ -187,6 +189,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 
     return {
       invoiceAmount,
+      totalInvoiceAmount,
+      tdsAmount,
+      netPayable,
       totalReceived,
       pendingAmount,
       totalTDSAdjusted,
@@ -731,16 +736,17 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                           </button>
                         ) : null
                       }>
-                      <div className="grid grid-cols-4 gap-3">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         {[
-                          { l:"Invoice Amount", v: formatCurrency(invoice.amountDue||0,currency), cls:"text-slate-800" },
-                          { l:"TDS Deduction",  v: formatCurrency(getInvoiceTdsAmount(invoice),currency), cls:"text-violet-700" },
-                          { l:"Total Received", v: formatCurrency(paymentInfo.totalReceived||0,currency), cls:"text-emerald-700" },
-                          { l:"Pending",        v: formatCurrency(paymentInfo.pendingAmount||0,currency), cls:"text-amber-700" },
+                          { l:"Invoice Total", v: formatCurrency(paymentInfo.totalInvoiceAmount||0,currency), cls:"text-slate-600" },
+                          { l:"TDS Deduction", v: formatCurrency(paymentInfo.tdsAmount||0,currency), cls:"text-violet-600" },
+                          { l:"Net Payable",   v: formatCurrency(paymentInfo.netPayable||0,currency), cls:"text-blue-700 font-bold" },
+                          { l:"Total Received",v: formatCurrency(paymentInfo.totalReceived||0,currency), cls:"text-emerald-700 font-bold" },
+                          { l:"Pending",       v: formatCurrency(paymentInfo.pendingAmount||0,currency), cls:"text-amber-700 font-bold" },
                         ].map(s => (
-                          <div key={s.l} className="text-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.l}</p>
-                            <p className={`text-sm font-black tabular-nums ${s.cls}`}>{s.v}</p>
+                          <div key={s.l} className="text-center p-2.5 bg-slate-50 rounded-xl border border-slate-100 flex flex-col justify-center min-h-[60px]">
+                            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">{s.l}</p>
+                            <p className={`text-xs tabular-nums ${s.cls}`}>{s.v}</p>
                           </div>
                         ))}
                       </div>
@@ -900,8 +906,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                       </div>
                       <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
                         <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Settlement Status</p>
-                        <p className={`text-sm font-black ${invoice.isFullyPaid ? "text-emerald-700" : "text-blue-700"}`}>
-                          {invoice.isFullyPaid ? "Fully Settled" : "Pending Settlement"}
+                        <p className={`text-sm font-black ${paymentInfo.paymentStatus === "fully_paid" ? "text-emerald-700" : "text-blue-700"}`}>
+                          {paymentInfo.paymentStatus === "fully_paid" ? "Fully Settled" : paymentInfo.paymentStatus === "partially_paid" ? "Partially Paid" : "Unpaid"}
                         </p>
                       </div>
                       <div className="flex items-center justify-between pt-2 border-t border-slate-100">

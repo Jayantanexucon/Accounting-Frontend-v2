@@ -72,7 +72,7 @@ const InfoCell = ({ label, value, mono = false, className = "" }) => (
 /* ══════════════════════════════════════════════════════════
    COMPONENT
 ══════════════════════════════════════════════════════════ */
-const InvoiceData = () => {
+const ViewAllInvoices = () => {
   const { user } = useAuth();
 
   /* ── state (unchanged from original) ───────────────── */
@@ -246,11 +246,12 @@ const InvoiceData = () => {
       setTdsDetailRows(filteredRows.map((row) => ({
         invoiceNo: row.invoiceNo || "-",
         clientName: row.clientName || "-",
-        paymentDate: row.paymentDate || null,
+        paymentDate: row.paymentDate,
         reference: row.reference || "-",
         receivedAmount: Number(row.receivedAmount || 0),
         tdsAmount: Number(row.tdsAmount || 0),
-        settledAmount: Number(row.settledAmount || Number(row.receivedAmount || 0) + Number(row.tdsAmount || 0)),
+        settledAmount: Number(row.settledAmount || 0),
+        type: row.type || "PAYMENT",
       })));
     } catch (error) {
       console.error("Error fetching TDS details:", error);
@@ -275,6 +276,7 @@ const InvoiceData = () => {
       "Received Amount": row.receivedAmount,
       "TDS Amount": row.tdsAmount,
       "Settled Amount": row.settledAmount,
+      "Deduction Type": row.type === "INVOICE_PROVISION" ? "Provisioned at Invoice" : "Deducted at Payment",
     }));
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
     const workbook = XLSX.utils.book_new();
@@ -993,7 +995,7 @@ const InvoiceData = () => {
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 sticky top-0">
                   <tr>
-                    {["Invoice", "Client", "Payment Date", "Reference", "Received", "TDS", "Settlement"].map((label) => (
+                    {["Invoice", "Client", "Payment Date", "Reference", "Received", "TDS", "Settlement", "Type"].map((label) => (
                       <th key={label} className="px-4 py-3 text-left font-black text-slate-500 uppercase tracking-widest">
                         {label}
                       </th>
@@ -1015,11 +1017,16 @@ const InvoiceData = () => {
                         <td className="px-4 py-3 text-emerald-700 font-bold tabular-nums">{formatAmount(row.receivedAmount)}</td>
                         <td className="px-4 py-3 text-violet-700 font-bold tabular-nums">{formatAmount(row.tdsAmount)}</td>
                         <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">{formatAmount(row.settledAmount)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.type === 'INVOICE_PROVISION' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {row.type === 'INVOICE_PROVISION' ? 'Provision' : 'Payment'}
+                          </span>
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">No TDS-adjusted payments found</td>
+                      <td colSpan={8} className="px-4 py-8 text-center text-slate-400">No TDS-adjusted payments found</td>
                     </tr>
                   )}
                 </tbody>
@@ -1034,4 +1041,4 @@ const InvoiceData = () => {
   );
 };
 
-export default InvoiceData;
+export default ViewAllInvoices;

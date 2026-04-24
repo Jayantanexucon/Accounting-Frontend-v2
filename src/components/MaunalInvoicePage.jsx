@@ -21,7 +21,7 @@ import InvoiceCreatedModal from "../modals/InvoiceCreatedModal";
 import { toast } from "react-toastify";
 
 // Lucide Icons
-import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag, List } from "lucide-react";
+import { Home, Plus, Trash2, Receipt, Download, Building, User, CreditCard, Banknote, Search, FileText, Package, Check, Loader2, ChevronDown, X, ChevronUp, ShoppingBag, List, Calendar } from "lucide-react";
 import { getCompanyByIdApi } from "../apis/userApi";
 
 const getRemainingPOItemQuantity = (item = {}) => {
@@ -1244,8 +1244,8 @@ const ManualInvoicePage = () => {
 
         const activePOs = poList.filter(
           (po) =>
-            !["CLOSED", "FULLY_INVOICED"].includes(po.status) &&
-            Number(po.remainingInvoicableAmount ?? po.totalAmount ?? 0) > 0,
+            !["CLOSED", "FULLY_INVOICED"].includes(po.status?.toUpperCase()) &&
+            (po.remainingInvoicableAmount === undefined || Number(po.remainingInvoicableAmount) > 0 || Number(po.totalAmount) > Number(po.totalInvoicedAmount))
         );
 
         setPurchaseOrders(activePOs);
@@ -1290,20 +1290,25 @@ const ManualInvoicePage = () => {
       }
     }
   }, [poIdFromUrl, purchaseOrders, autoSelectedPoId]);
-  // Filter POs based on search
   useEffect(() => {
     if (poSearch) {
       const query = poSearch.toLowerCase();
       const filtered = purchaseOrders.filter(
         (po) =>
           po.poNumber?.toLowerCase().includes(query) ||
-          po.poreferencevalue?.toLowerCase().includes(query),
+          po.poreferencevalue?.toLowerCase().includes(query) ||
+          po.client?.name?.toLowerCase().includes(query)
       );
       setFilteredPOs(filtered);
+
+      // Auto-select if exact match found and not already selected
+      if (filtered.length === 1 && filtered[0].poNumber === poSearch && !invoice.linkedPO) {
+        handleSelectPO(filtered[0]);
+      }
     } else {
       setFilteredPOs(purchaseOrders);
     }
-  }, [poSearch, purchaseOrders]);
+  }, [poSearch, purchaseOrders, invoice.linkedPO]);
 
   // Calculate due date based on invoice date (7 days after)
   useEffect(() => {

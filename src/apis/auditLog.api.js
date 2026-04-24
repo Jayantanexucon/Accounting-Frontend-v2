@@ -6,15 +6,15 @@ export const getAuditLogsApi = async (companyId, filters = {}) => {
   return data;
 };
 export const getJournalAuditSummaryApi = (companyId) => {
-  return API.get(`/audit-logs/${companyId}/audit-summary`);
+  return API.get(`/audit-logs/${companyId}/summary`);
 };
 
 export const getJournalAuditLogsApi = (companyId, journalId) => {
-  return API.get(`/audit-logs/${companyId}/${journalId}/audit-logs`);
+  return API.get(`/audit-logs/${companyId}/${journalId}/journal-updates`);
 };
 
 export const getInvoiceUpdatesApi = (companyId, invoiceId, params = {}) => {
-  return API.get(`/audit-logs/${companyId}/${invoiceId}/updates`, {
+  return API.get(`/audit-logs/${companyId}/${invoiceId}/invoice-updates`, {
     params: params
   });
 };
