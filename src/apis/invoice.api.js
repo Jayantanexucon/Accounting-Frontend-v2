@@ -237,14 +237,10 @@ export const getInvoiceTdsReportApi = async ({
   fromDate,
   toDate,
 }) => {
-  const now = new Date();
-  const start = fromDate || `${now.getFullYear()}-01-01`;
-  const end = toDate || `${now.getFullYear()}-12-31`;
-  const { data } = await API.get(`${ACCOUNTING_PAYMENT_BASE}/report/tds`, {
+  const { data } = await API.get(`${INVOICE_ACCOUNTING_BASE}/${companyId}/tds-report`, {
     params: {
-      companyId,
-      startDate: start,
-      endDate: end,
+      fromDate,
+      toDate,
     },
   });
   return data;

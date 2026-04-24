@@ -23,6 +23,7 @@ import {
   downloadInvoiceWordApi,
   getInvoiceByIdApi,
   getInvoicesApi,
+  getInvoiceTdsReportApi,
 } from "../apis/invoice.api";
 import {
   Plus,
@@ -97,6 +98,9 @@ const InvoiceData = () => {
   });
   const [paymentHistoryModal, setPaymentHistoryModal] = useState(false);
   const [tdsDetailsModalOpen, setTdsDetailsModalOpen] = useState(false);
+  const [tdsDetailRows, setTdsDetailRows] = useState([]);
+  const [tdsDetailsLoading, setTdsDetailsLoading] = useState(false);
+
   const [openLogs, setOpenLogs] = useState(false);
   const [auditModal, setAuditModal] = useState({
     open: false,
@@ -359,36 +363,29 @@ const InvoiceData = () => {
     };
   };
 
-  const getTdsDetailRows = () =>
-    (filteredAllInvoices || []).flatMap((invoice) =>
-      (invoice.payments || [])
-        .filter(
-          (payment) =>
-            Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0) > 0,
-        )
-        .map((payment) => ({
-          invoiceNo: invoice.invoiceNo,
-          clientName: invoice.billTo?.name || "-",
-          paymentDate: payment.paymentDate,
-          reference: payment.referenceNumber || payment.reference || "-",
-          receivedAmount: Number(
-            payment.receivedAmount ??
-            payment.amountReceived ??
-            payment.amountPaid ??
-            0,
-          ),
-          tdsAmount: Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
-          settledAmount: Number(
-            payment.grossAmount ??
-            Number(
-              payment.receivedAmount ??
-              payment.amountReceived ??
-              payment.amountPaid ??
-              0,
-            ) + Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0),
-          ),
-        })),
-    );
+  const fetchTdsDetails = async () => {
+    if (!user?.company?._id) return;
+    setTdsDetailsLoading(true);
+    try {
+      const response = await getInvoiceTdsReportApi({
+        companyId: user.company._id,
+      });
+      setTdsDetailRows(response.data || []);
+    } catch (error) {
+      console.error("Error fetching TDS details:", error);
+      setTdsDetailRows([]);
+    } finally {
+      setTdsDetailsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tdsDetailsModalOpen) {
+      fetchTdsDetails();
+    }
+  }, [tdsDetailsModalOpen]);
+
+  const getTdsDetailRows = () => tdsDetailRows;
 
   const handleGenerateTdsReport = () => {
     const rows = getTdsDetailRows();
@@ -405,6 +402,7 @@ const InvoiceData = () => {
       "Received Amount": row.receivedAmount,
       "TDS Amount": row.tdsAmount,
       "Settled Amount": row.settledAmount,
+      "Deduction Type": row.type === "INVOICE_PROVISION" ? "Provisioned at Invoice" : "Deducted at Payment",
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportRows);
@@ -619,10 +617,11 @@ const InvoiceData = () => {
       );
     }).length;
 
-    const totalTDS = filteredInvoices.reduce(
-      (sum, inv) => sum + (inv.tdsAmount || 0),
-      0,
-    );
+    const totalTDS = filteredInvoices.reduce((sum, inv) => {
+      const paymentTDS = (inv.payments || []).reduce((s, p) => s + Number(p.tdsAdjusted ?? p.tdsAmount ?? 0), 0);
+      const invoiceTDS = Number(inv.tdsAmount || inv.totalTDSAmount || 0);
+      return sum + paymentTDS + invoiceTDS;
+    }, 0);
 
     return {
       totalAmount,
@@ -1897,6 +1896,7 @@ const InvoiceData = () => {
                       "Received",
                       "TDS",
                       "Settlement",
+                      "Type",
                     ].map((label) => (
                       <th
                         key={label}
@@ -1908,7 +1908,13 @@ const InvoiceData = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {getTdsDetailRows().length > 0 ? (
+                  {tdsDetailsLoading ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-slate-400">
+                        Loading TDS details...
+                      </td>
+                    </tr>
+                  ) : getTdsDetailRows().length > 0 ? (
                     getTdsDetailRows().map((row, index) => (
                       <tr
                         key={`${row.invoiceNo}-${row.reference}-${index}`}
@@ -1934,6 +1940,11 @@ const InvoiceData = () => {
                         </td>
                         <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">
                           {formatAmount(row.settledAmount)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.type === 'INVOICE_PROVISION' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {row.type === 'INVOICE_PROVISION' ? 'Provision' : 'Payment'}
+                          </span>
                         </td>
                       </tr>
                     ))
