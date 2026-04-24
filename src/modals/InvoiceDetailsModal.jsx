@@ -230,6 +230,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   };
 
   const getDueDateStatus = (dueDate) => {
+    if (!dueDate) return { text: "—", color: "text-slate-400", bg: "bg-slate-50", icon: Calendar };
     const today = dayjs();
     const due = dayjs(dueDate);
 
@@ -534,11 +535,11 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                         { label:"Total Amount", value: formatCurrency(invoice.amountDue||0,currency), g:"linear-gradient(135deg,#1e3a8a,#2563eb)", blob:"#93c5fd", icon: Banknote },
                         { label:"Received",     value: formatCurrency(paymentInfo.totalReceived||0,currency), g:"linear-gradient(135deg,#064e3b,#059669)", blob:"#6ee7b7", icon: CheckCircle },
                         { label:"Pending",      value: formatCurrency(paymentInfo.pendingAmount||0,currency), g:"linear-gradient(135deg,#92400e,#d97706)", blob:"#fde68a", icon: Clock },
-                        { label:"Due Date",     value: formatDate(invoice.dueDate),
-                          sub: getDueDateStatus(invoice.dueDate).text,
-                          g: getDueDateStatus(invoice.dueDate).text === "Overdue"
+                        { label:"Payment Due Date", value: formatDate(invoice.paymentDueDate || invoice.dueDate),
+                          sub: getDueDateStatus(invoice.paymentDueDate || invoice.dueDate).text,
+                          g: getDueDateStatus(invoice.paymentDueDate || invoice.dueDate).text === "Overdue"
                             ? "linear-gradient(135deg,#7f1d1d,#dc2626)"
-                            : getDueDateStatus(invoice.dueDate).text === "Due Soon"
+                            : getDueDateStatus(invoice.paymentDueDate || invoice.dueDate).text === "Due Soon"
                             ? "linear-gradient(135deg,#92400e,#d97706)"
                             : "linear-gradient(135deg,#312e81,#7c3aed)",
                           blob: "#c4b5fd", icon: Calendar },
@@ -588,14 +589,14 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">PO Number</p>
                               <button
                                 type="button"
-                                disabled={!invoice.linkedPO?._id}
+                                disabled={!getPOId()}
                                 onClick={() => setShowPOModal(true)}
                                 className="text-xs font-semibold text-blue-700 underline underline-offset-2 disabled:text-slate-800 disabled:no-underline"
                               >
                                 {invoice.linkedPO?.poNumber || invoice.linkedPORef || "—"}
                               </button>
                             </div>
-	                          <F label="PO Reference" value={invoice.poreferencevalue} mono />
+	                          <F label="PO Reference" value={invoice.poreferencevalue || invoice.linkedPO?.poreferencevalue} mono />
 	                        </div>
 	                        <F label="Payment Terms" value={getPaymentTermsText(invoice.paymentTerms)} />
 	                        <F label="Shipping To"   value={invoice.shipTo?.name || "Same as billing"} />

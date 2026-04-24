@@ -100,24 +100,27 @@ const calculatePaymentDistributions = (po) => {
   if (!start.isValid() || !end.isValid() || end.isBefore(start) || totalAmount <= 0) return [];
 
   if (po.paymentTerms === "monthly") {
-    const totalDays = end.diff(start, "day") + 1;
-    let numMonths = Math.ceil(totalDays / 30);
-    if (numMonths < 1) numMonths = 1;
-    const amountPerMonth = totalAmount / numMonths;
+    // Build terms by walking calendar months; stop when the period start exceeds end.
+    // This avoids the over-count that arose from Math.ceil((days+1)/30).
     let current = start.clone();
-    for (let i = 0; i < numMonths; i++) {
+    let i = 0;
+    while (!current.isAfter(end)) {
       let monthEnd = current.add(1, "month").subtract(1, "day");
-      if (monthEnd.isAfter(end)) monthEnd = end;
+      if (monthEnd.isAfter(end)) monthEnd = end.clone();
       result.push({
         title: `${current.format("MMM YYYY")}`,
-        amount: amountPerMonth,
+        amount: 0, // placeholder; recalculated after loop once numMonths is known
         startDate: current.format("YYYY-MM-DD"),
         endDate: monthEnd.format("YYYY-MM-DD"),
         type: "monthly",
         index: i,
       });
       current = current.add(1, "month");
+      i++;
     }
+    const numMonths = result.length;
+    const amountPerMonth = numMonths > 0 ? totalAmount / numMonths : 0;
+    result.forEach((r) => { r.amount = amountPerMonth; });
   } else if (po.paymentTerms === "weekly") {
     const totalDays = end.diff(start, "day") + 1;
     let numWeeks = Math.ceil(totalDays / 7);
