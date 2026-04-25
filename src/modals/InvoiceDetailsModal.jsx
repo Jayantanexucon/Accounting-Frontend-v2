@@ -130,14 +130,22 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
 
   const getPaymentTermsText = (terms) => {
     const termsMap = {
+      "net-15": "Net 15 Days",
       "net-30": "Net 30 Days",
+      "net-45": "Net 45 Days",
       "net-60": "Net 60 Days",
       "net-90": "Net 90 Days",
       cod: "Cash on Delivery",
       advance: "Advance Payment",
       immediate: "Immediate Payment",
+      monthly: "Monthly",
+      weekly: "Weekly",
+      milestone: "Milestone Based",
+      hourly: "Hourly",
+      on_milestone: "On Milestone",
+      on_delivery: "On Delivery",
     };
-    return termsMap[terms] || terms;
+    return termsMap[terms] || (terms ? terms.charAt(0).toUpperCase() + terms.slice(1) : null);
   };
 
   // Calculate payment information
@@ -595,9 +603,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                                 {invoice.linkedPO?.poNumber || invoice.linkedPORef || "—"}
                               </button>
                             </div>
-	                          <F label="PO Reference" value={invoice.poreferencevalue} mono />
+	                          <F label="PO Reference" value={invoice.linkedPO?.poreferencevalue || invoice.poreferencevalue} mono />
 	                        </div>
-	                        <F label="Payment Terms" value={getPaymentTermsText(invoice.paymentTerms)} />
+	                        <F label="Payment Terms" value={getPaymentTermsText(invoice.linkedPO?.paymentTerms || invoice.paymentTerms)} />
 	                        <F label="Shipping To"   value={invoice.shipTo?.name || "Same as billing"} />
 	                      </div>
 	                    </SectionCard>

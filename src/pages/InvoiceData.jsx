@@ -1892,10 +1892,10 @@ const InvoiceData = () => {
                       "Invoice",
                       "Client",
                       "Payment Date",
-                      "Reference",
-                      "Received",
+                      // "Reference",
+                      // "Received",
                       "TDS",
-                      "Settlement",
+                      // "Settlement",
                       "Type",
                     ].map((label) => (
                       <th
@@ -1929,18 +1929,18 @@ const InvoiceData = () => {
                         <td className="px-4 py-3 text-slate-600">
                           {formatDate(row.paymentDate)}
                         </td>
-                        <td className="px-4 py-3 font-mono text-slate-500">
+                        {/* <td className="px-4 py-3 font-mono text-slate-500">
                           {row.reference}
-                        </td>
-                        <td className="px-4 py-3 text-emerald-700 font-bold tabular-nums">
+                        </td> */}
+                        {/* <td className="px-4 py-3 text-emerald-700 font-bold tabular-nums">
                           {formatAmount(row.receivedAmount)}
-                        </td>
+                        </td> */}
                         <td className="px-4 py-3 text-violet-700 font-bold tabular-nums">
                           {formatAmount(row.tdsAmount)}
                         </td>
-                        <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">
+                        {/* <td className="px-4 py-3 text-slate-900 font-bold tabular-nums">
                           {formatAmount(row.settledAmount)}
-                        </td>
+                        </td> */}
                         <td className="px-4 py-3">
                           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${row.type === 'INVOICE_PROVISION' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
                             {row.type === 'INVOICE_PROVISION' ? 'Provision' : 'Payment'}
