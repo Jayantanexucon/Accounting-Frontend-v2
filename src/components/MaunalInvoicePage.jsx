@@ -262,9 +262,9 @@ const getPoItemBaseTaxableAmount = (item = {}) => {
   if (rate > 0 && quantity > 0) return roundMoney(rate * quantity);
 
   const totalAmount = Number(item.totalAmount || item.total || 0);
-  const gstRate = Number(item.gstRate || 0);
-  return gstRate > 0
-    ? roundMoney(totalAmount / (1 + gstRate / 100))
+  const taxRate = getItemTaxRate(item);
+  return taxRate > 0
+    ? roundMoney(totalAmount / (1 + taxRate / 100))
     : roundMoney(totalAmount);
 };
 
@@ -1919,7 +1919,7 @@ const ManualInvoicePage = () => {
       // 1. Determine default HSN and GST rate from PO items if possible
       const firstItem = selectedPO.items?.[0] || {};
       const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
-      const defaultGstRate = Number(firstItem.gstRate || 0);
+      const defaultTaxRate = getItemTaxRate(firstItem);
       const defaultTaxType = firstItem.taxType || selectedPO.taxType || "GST";
       const defaultTaxLabel = firstItem.taxLabel || selectedPO.taxLabel || defaultTaxType;
 
@@ -2008,41 +2008,57 @@ const ManualInvoicePage = () => {
         return;
       }
 
+      // Determine if milestones are tax-inclusive (sum of milestones matches PO total amount)
+      const totalMilestoneSum = milestones.reduce((s, m) => s + Number(m.amount || 0), 0);
+      const isMilestoneInclusive = Math.abs(totalMilestoneSum - Number(selectedPO.totalAmount || 0)) < 1;
+
       // Convert rows to UI‑friendly format
-      const milestoneRowsUI = rows.map((m) => ({
-        _id: m._id?.toString() || String(Math.random()),
-        milestoneIndex: m._milestoneIndex,
-        title: (m._isCarryForward ? "[Remaining] " : "") + (m.title || ""),
-        description: m.description || "",
-        dueDate: m.dueDate ? new Date(m.dueDate).toISOString().split("T")[0] : "",
-        percentage: Number(
-          selectedPO.totalAmount > 0
-            ? ((m._remaining / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2)
-            : 0,
-        ),
-        originalPercentage: Number(m.percentage || 0),
-        originalAmount: m._originalAmount,
-        alreadyInvoicedAmount: m._alreadyInvoiced,
-        remainingAmountBefore: m._remaining,
-        remainingAmountAfter: 0,
-        amount: m._remaining,
-        hsnSac: defaultHsn,
-        taxType: defaultTaxType,
-        taxLabel: defaultTaxLabel,
-        taxRate: defaultGstRate,
-        gstRate: defaultGstRate,
-        gstAmount: roundMoney((m._remaining * defaultGstRate) / 100),
-        taxAmount: roundMoney((m._remaining * defaultGstRate) / 100),
-        taxBreakdown: scaleTaxBreakdown(firstItem.taxBreakdown, m._remaining / Math.max(Number(firstItem.taxableValue || m._remaining), 1), {
+      const milestoneRowsUI = rows.map((m) => {
+        const amount = m._remaining;
+        const taxRate = defaultTaxRate;
+        
+        // If milestones are inclusive, back-calculate taxable value. 
+        // Otherwise treat milestone amount as the taxable base.
+        const taxableValue = isMilestoneInclusive && taxRate > 0
+          ? roundMoney(amount / (1 + taxRate / 100))
+          : amount;
+        const taxAmount = roundMoney(amount - taxableValue);
+
+        return {
+          _id: m._id?.toString() || String(Math.random()),
+          milestoneIndex: m._milestoneIndex,
+          title: (m._isCarryForward ? "[Remaining] " : "") + (m.title || ""),
+          description: m.description || "",
+          dueDate: m.dueDate ? new Date(m.dueDate).toISOString().split("T")[0] : "",
+          percentage: Number(
+            selectedPO.totalAmount > 0
+              ? ((amount / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2)
+              : 0,
+          ),
+          originalPercentage: Number(m.percentage || 0),
+          originalAmount: m._originalAmount,
+          alreadyInvoicedAmount: m._alreadyInvoiced,
+          remainingAmountBefore: m._remaining,
+          remainingAmountAfter: 0,
+          amount: taxableValue, // UI expects taxable amount here for most inputs
+          hsnSac: defaultHsn,
           taxType: defaultTaxType,
-          label: defaultTaxLabel,
-          rate: defaultGstRate,
-          amount: roundMoney((m._remaining * defaultGstRate) / 100),
-        }),
-        total: roundMoney(m._remaining + ((m._remaining * defaultGstRate) / 100)),
-        selected: true,
-        isCarryForward: m._isCarryForward,
-      }));
+          taxLabel: defaultTaxLabel,
+          taxRate: taxRate,
+          gstRate: taxRate,
+          gstAmount: taxAmount,
+          taxAmount: taxAmount,
+          taxBreakdown: scaleTaxBreakdown(firstItem.taxBreakdown, taxableValue / Math.max(Number(firstItem.taxableValue || taxableValue), 1), {
+            taxType: defaultTaxType,
+            label: defaultTaxLabel,
+            rate: taxRate,
+            amount: taxAmount,
+          }),
+          total: amount, // The total is the milestone amount (inclusive or exclusive)
+          selected: true,
+          isCarryForward: m._isCarryForward,
+        };
+      });
 
       setMilestoneRows(milestoneRowsUI);
       derivedItems = milestoneRowsUI.map((r) => ({
@@ -2094,7 +2110,7 @@ const ManualInvoicePage = () => {
       // Detect default HSN/GST from items
       const firstItem = selectedPO.items?.[0] || {};
       const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
-      const defaultGstRate = Number(firstItem.gstRate || 0);
+      const defaultTaxRate = getItemTaxRate(firstItem);
 
       // CHECK FOR PARTIAL INVOICE CARRY-FORWARD from previous terms
       const carryForward = getPartialTermCarryForward(selectedPO, schedule);
@@ -2108,7 +2124,7 @@ const ManualInvoicePage = () => {
         derivedItems = items.map((item) => {
           const baseTaxableAmount = getPoItemBaseTaxableAmount(item);
           const rate = Number(item.rate || 0);
-          const gstRate = Number(item.gstRate || 0);
+          const taxRate = getItemTaxRate(item);
           const alreadyInvoicedTaxable = getInvoicedTaxableAmountForPoItem(linkedInvoices, item);
           const scheduledParts = calculateScheduledInvoiceParts({
             totalAmount: baseTaxableAmount,
@@ -2122,7 +2138,7 @@ const ManualInvoicePage = () => {
           const quantity = rate > 0
             ? parseFloat((termTaxable / rate).toFixed(4))
             : Number(item.quantity || 1);
-          const termGst = roundMoney((termTaxable * gstRate) / 100);
+          const termTaxAmount = roundMoney((termTaxable * taxRate) / 100);
 
           return {
             itemId: item.itemId || item._id,
@@ -2137,22 +2153,22 @@ const ManualInvoicePage = () => {
         taxableValue: termTaxable,
         taxType: item.taxType || selectedPO.taxType || "GST",
         taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-        taxRate: item.taxRate ?? gstRate,
-        taxAmount: termGst,
+        taxRate: item.taxRate ?? taxRate,
+        taxAmount: termTaxAmount,
         taxBreakdown: scaleTaxBreakdown(
           item.taxBreakdown,
           termTaxable / Math.max(baseTaxableAmount, 1),
           {
             taxType: item.taxType || selectedPO.taxType || "GST",
             label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-            rate: item.taxRate ?? gstRate,
-            amount: termGst,
+            rate: item.taxRate ?? taxRate,
+            amount: termTaxAmount,
           },
         ),
-        gstRate,
-        gstAmount: termGst,
-            total: roundMoney(termTaxable + termGst),
-            combinedGstRate: item.combinedGstRate || gstRate,
+        gstRate: taxRate,
+        gstAmount: termTaxAmount,
+            total: roundMoney(termTaxable + termTaxAmount),
+            combinedGstRate: item.combinedGstRate || taxRate,
             totalManuallyEdited: false,
             maxAllowedTaxableValue: termTaxable,
             previousCarryForward: scheduledParts.previousCarryForward,
@@ -2164,8 +2180,8 @@ const ManualInvoicePage = () => {
         }).filter(Boolean);
       } else {
         // No line items – use total taxable divided by terms.
-        const totalTaxable = defaultGstRate > 0
-          ? roundMoney(Number(selectedPO.totalAmount || 0) / (1 + defaultGstRate / 100))
+        const totalTaxable = defaultTaxRate > 0
+          ? roundMoney(Number(selectedPO.totalAmount || 0) / (1 + defaultTaxRate / 100))
           : roundMoney(Number(selectedPO.totalTaxableValue || selectedPO.totalAmount || 0));
         const alreadyInvoicedTaxable = roundMoney(
           linkedInvoices.reduce((sum, invoice) => sum + Number(invoice.totalTaxableValue || 0), 0),
@@ -2177,7 +2193,7 @@ const ManualInvoicePage = () => {
           currentInstallmentNo: schedule.currentInstallment,
         });
         const termTaxable = roundMoney(scheduledParts.recommendedInvoiceAmount);
-        const termGst = roundMoney((termTaxable * defaultGstRate) / 100);
+        const termTaxAmount = roundMoney((termTaxable * defaultTaxRate) / 100);
 
         derivedItems = termTaxable > 0 ? [{
           itemId: "term-" + schedule.currentInstallment,
@@ -2187,10 +2203,10 @@ const ManualInvoicePage = () => {
           quantity: 1,
           rate: termTaxable,
           taxableValue: termTaxable,
-          gstRate: defaultGstRate,
-          gstAmount: termGst,
-          total: roundMoney(termTaxable + termGst),
-          combinedGstRate: defaultGstRate,
+          gstRate: defaultTaxRate,
+          gstAmount: termTaxAmount,
+          total: roundMoney(termTaxable + termTaxAmount),
+          combinedGstRate: defaultTaxRate,
           totalManuallyEdited: false,
           maxAllowedTaxableValue: termTaxable,
           previousCarryForward: scheduledParts.previousCarryForward,
@@ -2225,7 +2241,7 @@ const ManualInvoicePage = () => {
       // Detect default HSN/GST from items
       const firstItem = selectedPO.items?.[0] || {};
       const defaultHsn = firstItem.hsnSac || firstItem.hsnCode || "";
-      const defaultGstRate = Number(firstItem.gstRate || 0);
+      const defaultTaxRate = getItemTaxRate(firstItem);
 
       const rows = selectedPO.resources
         .filter((r) => r.isActive !== false)
@@ -2245,9 +2261,9 @@ const ManualInvoicePage = () => {
             rate,
             quantity: 1, // user enters actual days/hours/months
             hsnSac: defaultHsn,
-            gstRate: defaultGstRate,
-            gstAmount: defaultGstRate > 0 ? roundMoney((rate * defaultGstRate) / (100 + defaultGstRate)) : 0,
-            taxableValue: defaultGstRate > 0 ? roundMoney(rate / (1 + defaultGstRate / 100)) : rate,
+            gstRate: defaultTaxRate,
+            gstAmount: defaultTaxRate > 0 ? roundMoney((rate * defaultTaxRate) / (100 + defaultTaxRate)) : 0,
+            taxableValue: defaultTaxRate > 0 ? roundMoney(rate / (1 + defaultTaxRate / 100)) : rate,
             total: rate,
           };
         });
@@ -2318,7 +2334,7 @@ const ManualInvoicePage = () => {
           const remainingQuantity = getRemainingPOItemQuantity(item);
           if (remainingQuantity <= 0) return null;
           const rate = Number(item.rate || 0);
-          const gstRate = Number(item.gstRate || 0);
+          const taxRate = getItemTaxRate(item);
           const originalTotal = Number(item.totalAmount || item.total || 0);
           const scheduledParts = calculateScheduledInvoiceParts({
             totalAmount: originalTotal,
@@ -2334,12 +2350,12 @@ const ManualInvoicePage = () => {
               );
           const taxableValue = Number(
             (
-              gstRate > 0
-                ? scheduledTotal / (1 + gstRate / 100)
+              taxRate > 0
+                ? scheduledTotal / (1 + taxRate / 100)
                 : scheduledTotal
             ).toFixed(2),
           );
-          const gstAmount = Number((scheduledTotal - taxableValue).toFixed(2));
+          const taxAmount = Number((scheduledTotal - taxableValue).toFixed(2));
           const quantity = rate > 0 ? Number((taxableValue / rate).toFixed(4)) : remainingQuantity;
           const currentTermAmount = scheduledParts.currentTermAmount;
           return {
@@ -2355,20 +2371,20 @@ const ManualInvoicePage = () => {
           taxableValue,
           taxType: item.taxType || selectedPO.taxType || "GST",
           taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-          taxRate: item.taxRate ?? gstRate,
-          taxAmount: gstAmount,
+          taxRate: item.taxRate ?? taxRate,
+          taxAmount: taxAmount,
           taxBreakdown: scaleTaxBreakdown(
             item.taxBreakdown,
             taxableValue / Math.max(Number(item.taxableValue || taxableValue), 1),
             {
               taxType: item.taxType || selectedPO.taxType || "GST",
               label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-              rate: item.taxRate ?? gstRate,
-              amount: gstAmount,
+              rate: item.taxRate ?? taxRate,
+              amount: taxAmount,
             },
           ),
-          gstRate,
-          gstAmount,
+          gstRate: taxRate,
+          gstAmount: taxAmount,
             total: scheduledTotal,
             maxAllowedInvoiceAmount: scheduledTotal,
             installmentAmount: scheduledParts.installmentAmount,
@@ -2377,7 +2393,7 @@ const ManualInvoicePage = () => {
             currentTermRemainingAmount: 0,
             baseRemainingAfterInvoice: scheduledParts.remainingAfterInvoice,
             remainingAfterInvoice: scheduledParts.remainingAfterInvoice,
-            combinedGstRate: item.combinedGstRate || gstRate,
+            combinedGstRate: item.combinedGstRate || taxRate,
             totalManuallyEdited: false,
           };
         })
@@ -2417,6 +2433,8 @@ const ManualInvoicePage = () => {
       dueDate: paymentTermSchedule.currentWindowEnd || (selectedPO.deliveryDate ? new Date(selectedPO.deliveryDate).toISOString().split("T")[0] : prev.dueDate),
       currency: selectedPO.currency || "INR",
       paymentMode: paymentModeMap[selectedPO.paymentTerms] || "Bank-Transfer",
+      paymentTerms: selectedPO.paymentTerms || "",
+      poreferencevalue: selectedPO.poreferencevalue || "",
       billTo: buildAddress(selectedPO.client || selectedPO.vendor),
       shipTo: buildAddress(selectedPO.deliverTo),
       items: derivedItems,
