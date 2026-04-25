@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import dayjs from "dayjs";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { getClientsApi } from "../apis/clientApi";
@@ -374,10 +375,14 @@ const calculateTermSchedule = (po = {}) => {
 
   let totalInstallments = 1;
   const totalDays = getDateDiffInDays(startDate, endDate);
-  const termDays = paymentTerms === "weekly" ? 7 : 30;
 
-  if (paymentTerms === "monthly" || paymentTerms === "weekly") {
-    totalInstallments = Math.max(1, Math.ceil(totalDays / termDays));
+  if (paymentTerms === "monthly") {
+    // Use dayjs month-diff to match PO creation page logic
+    const start = dayjs(startDate);
+    const end = dayjs(endDate);
+    totalInstallments = Math.max(1, Math.ceil(end.add(1, "day").diff(start, "month", true)));
+  } else if (paymentTerms === "weekly") {
+    totalInstallments = Math.max(1, Math.ceil(totalDays / 7));
   }
 
   // Current term = number of linked invoices + 1, capped at totalInstallments
@@ -386,6 +391,7 @@ const calculateTermSchedule = (po = {}) => {
 
   // Installment amount is total amount divided by total installments
   const installmentAmount = roundMoney(Number(po.totalAmount || 0) / Math.max(1, totalInstallments));
+  const termDays = paymentTerms === "weekly" ? 7 : 30;
   const currentTermStartOffset = (currentInstallment - 1) * termDays;
   const currentWindowStart = addDaysToDateString(startDate, currentTermStartOffset);
   const currentWindowEnd = addDaysToDateString(
@@ -447,7 +453,15 @@ const buildPaymentTermSchedule = (po = {}) => {
   }
 
   const totalDurationDays = Math.max(1, getDateDiffInDays(scheduleStart, scheduleEnd));
-  const totalInstallments = Math.max(1, Math.ceil(totalDurationDays / termDays));
+  let totalInstallments;
+  if (termDays === 30) {
+    // Use dayjs month-diff to match PO creation page logic
+    const start = dayjs(scheduleStart);
+    const end = dayjs(scheduleEnd);
+    totalInstallments = Math.max(1, Math.ceil(end.add(1, "day").diff(start, "month", true)));
+  } else {
+    totalInstallments = Math.max(1, Math.ceil(totalDurationDays / termDays));
+  }
   const currentInstallmentNo = Math.min(
     totalInstallments,
     Math.max(1, (po.linkedInvoices || []).length + 1),
