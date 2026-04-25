@@ -1391,38 +1391,63 @@ export default function PurchaseOrderPage() {
                         <select value={item.hsnId || ""} onChange={(e) => {
                           const id = e.target.value;
                           const taxType = determineTaxType();
-                          if (!id) { 
-                            updateItem(i, "hsnId", null); 
-                            updateItem(i, "hsnSac", ""); 
+                          
+                          // Use a single setForm call to atomically update all HSN-related fields
+                          setForm(prev => {
+                            const items = [...prev.items];
+                            const updatedItem = { ...items[i] };
                             
-                            // Set default rate based on tax type
+                            if (!id) {
+                              // HSN cleared
+                              updatedItem.hsnId = null;
+                              updatedItem.hsnSac = "";
+                              if (taxType === "GST") {
+                                updatedItem.gstRate = 18;
+                              } else {
+                                const partyCountry = getPartyCountry();
+                                const ct = getForeignCountryTax(partyCountry);
+                                updatedItem.gstRate = ct ? ct.taxRate : 0;
+                              }
+                            } else {
+                              const hsn = hsnList.find(h => h._id === id);
+                              if (hsn) {
+                                updatedItem.hsnId = id;
+                                updatedItem.hsnSac = hsn.hsnCode;
+                                if (!updatedItem.description.trim()) updatedItem.description = hsn.serviceType;
+                                
+                                if (taxType === "GST" || taxType === "RCM") {
+                                  updatedItem.gstRate = getTotalGstRate(hsn);
+                                } else if (taxType === "NONE") {
+                                  updatedItem.gstRate = 0;
+                                } else {
+                                  const partyCountry = getPartyCountry();
+                                  const ct = getForeignCountryTax(partyCountry);
+                                  updatedItem.gstRate = ct ? ct.taxRate : 0;
+                                }
+                              }
+                            }
+                            
+                            // Recalculate tax amounts for this item
+                            const taxableValue = (Number(updatedItem.quantity) || 0) * (Number(updatedItem.rate) || 0);
+                            updatedItem.taxableValue = taxableValue;
                             if (taxType === "GST") {
-                              updateItem(i, "gstRate", 18);
-                            } else {
-                              const partyCountry = getPartyCountry();
-                              const ct = getForeignCountryTax(partyCountry);
-                              updateItem(i, "gstRate", ct ? ct.taxRate : 0);
-                            }
-                            return; 
-                          }
-                          const hsn = hsnList.find(h => h._id === id);
-                          if (hsn) {
-                            updateItem(i, "hsnId", id);
-                            updateItem(i, "hsnSac", hsn.hsnCode);
-                            if (!item.description.trim()) updateItem(i, "description", hsn.serviceType);
-                            
-                            // Determine correct rate to set
-                            if (taxType === "GST" || taxType === "RCM") {
-                              updateItem(i, "gstRate", getTotalGstRate(hsn));
+                              updatedItem.gstAmount = (taxableValue * updatedItem.gstRate) / 100;
+                              updatedItem.totalAmount = taxableValue + updatedItem.gstAmount;
+                            } else if (taxType === "RCM") {
+                              updatedItem.gstAmount = (taxableValue * updatedItem.gstRate) / 100;
+                              updatedItem.totalAmount = taxableValue;
                             } else if (taxType === "NONE") {
-                              updateItem(i, "gstRate", 0);
+                              updatedItem.gstAmount = 0;
+                              updatedItem.totalAmount = taxableValue;
                             } else {
-                              // Foreign
-                              const partyCountry = getPartyCountry();
-                              const ct = getForeignCountryTax(partyCountry);
-                              updateItem(i, "gstRate", ct ? ct.taxRate : 0);
+                              updatedItem.gstAmount = (taxableValue * updatedItem.gstRate) / 100;
+                              updatedItem.totalAmount = taxableValue + updatedItem.gstAmount;
                             }
-                          }
+                            
+                            items[i] = updatedItem;
+                            const totals = calculateGstTotals(items);
+                            return { ...prev, items, ...totals, valueInWords: numberToWords(totals.totalAmount) };
+                          });
                         }} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none">
                           <option value="">HSN</option>
                           {hsnList.map(hsn => <option key={hsn._id} value={hsn._id}>{hsn.hsnCode} – {hsn.serviceType}</option>)}

@@ -100,8 +100,7 @@ const calculatePaymentDistributions = (po) => {
   if (!start.isValid() || !end.isValid() || end.isBefore(start) || totalAmount <= 0) return [];
 
   if (po.paymentTerms === "monthly") {
-    const totalDays = end.diff(start, "day") + 1;
-    let numMonths = Math.ceil(totalDays / 30);
+    let numMonths = Math.ceil(end.add(1, "day").diff(start, "month", true));
     if (numMonths < 1) numMonths = 1;
     const amountPerMonth = totalAmount / numMonths;
     let current = start.clone();
