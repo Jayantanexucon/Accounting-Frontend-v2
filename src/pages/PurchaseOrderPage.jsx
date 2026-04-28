@@ -672,6 +672,33 @@ export default function PurchaseOrderPage() {
     }
   }, [form.paymentTerms, form.poDate, form.deliveryDate, form.totalAmount, form.milestones]);
 
+  // ─── FIX: Recalculate milestone amounts when total amount changes ───
+  // When editing items in Step 2, total amount changes. Milestones set by percentage
+  // must update their amounts to reflect the new total. This ensures milestone amounts
+  // are always consistent with the PO total. (REMOVED DUPLICATE useEffect)
+  useEffect(() => {
+    if (form.paymentTerms === "milestone" && form.milestones.length > 0) {
+      setForm(prev => {
+        // Check if any milestone actually has a percentage set
+        const hasMilestoneWithPercentage = prev.milestones.some(m => m.percentage && m.percentage > 0);
+        if (!hasMilestoneWithPercentage) return prev; // No recalculation needed
+
+        const updatedMilestones = prev.milestones.map(m => {
+          // If milestone has a percentage, recalculate amount based on new total
+          if (m.percentage && m.percentage > 0) {
+            const newAmount = Math.round((prev.totalAmount * m.percentage) / 100 * 100) / 100;
+            return {
+              ...m,
+              amount: newAmount,
+            };
+          }
+          return m;
+        });
+        return { ...prev, milestones: updatedMilestones };
+      });
+    }
+  }, [form.totalAmount]); // Recalculate whenever totalAmount changes
+
   const calculateMonthlyDistribution = () => {
     const start = dayjs(form.poDate);
     const end = dayjs(form.deliveryDate);
@@ -735,6 +762,44 @@ export default function PurchaseOrderPage() {
       dueDate: m.dueDate,
     }));
     setDistributionBreakdown(breakdown);
+  };
+
+  // ─── FIX: Validate milestone percentages and amounts ───
+  const validateMilestones = () => {
+    if (form.paymentTerms !== "milestone" || form.milestones.length === 0) {
+      return { isValid: true, message: "" };
+    }
+
+    const totalPercentage = form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0);
+    const totalAmount = form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0);
+
+    // Check if all milestones have title
+    const hasEmptyTitle = form.milestones.some(m => !m.title || !m.title.trim());
+    if (hasEmptyTitle) {
+      return { isValid: false, message: "All milestones must have a title." };
+    }
+
+    // Check if all milestones have amount > 0
+    const hasZeroAmount = form.milestones.some(m => !m.amount || m.amount <= 0);
+    if (hasZeroAmount) {
+      return { isValid: false, message: "All milestones must have amount > 0." };
+    }
+
+    // Validate percentage: Allow 0.5% tolerance for rounding errors
+    const percentageTolerance = 0.5;
+    if (Math.abs(totalPercentage - 100) > percentageTolerance) {
+      return { isValid: false, message: `Milestone percentages must sum to 100% (currently ${totalPercentage.toFixed(2)}%). Adjust milestones to reach exactly 100%.` };
+    }
+
+    // Validate amount: Allow ±0.01 per item or 0.1% of total, whichever is larger
+    const amountTolerance = Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001);
+    const expectedAmount = form.totalAmount;
+    if (Math.abs(totalAmount - expectedAmount) > amountTolerance) {
+      const difference = Math.abs(totalAmount - expectedAmount);
+      return { isValid: false, message: `Milestone amounts must sum to ${formatMoney(expectedAmount)} (currently ${formatMoney(totalAmount)}). Difference: ${formatMoney(difference)}.` };
+    }
+
+    return { isValid: true, message: "" };
   };
 
   const filteredEntities = (mode === "client" ? clients : vendors).filter(e => {
@@ -904,25 +969,36 @@ export default function PurchaseOrderPage() {
 
       if (field === "percentage") {
         let percent = value === "" ? 0 : Number(value);
-        if (isNaN(percent)) percent = 0;
+        if (isNaN(percent) || percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
 
-        // Validation: Percentage cannot exceed 100%
+        // Validation: Total percentage (including this one) should not exceed 100%
         const totalPercentageWithoutCurrent = milestones
           .reduce((sum, m, i) => i !== idx ? sum + (m.percentage || 0) : sum, 0);
 
         if (percent + totalPercentageWithoutCurrent > 100) {
-          setError(`Milestone percentage cannot exceed 100%. Current total: ${totalPercentageWithoutCurrent}%`);
-          return prev;
+          // Show warning but allow setting the value - user will see the error on save
+          const totalWould = percent + totalPercentageWithoutCurrent;
+          setError(`Warning: Total percentage would be ${totalWould.toFixed(2)}% (exceeds 100%). Adjust other milestones.`);
+        } else {
+          setError(null);
         }
 
-        newMilestone.percentage = percent;
-        newMilestone.amount = (prev.totalAmount * percent) / 100;
-        setError(null);
+        // Recalculate amount based on percentage and total
+        const newAmount = prev.totalAmount > 0 ? Math.round((prev.totalAmount * percent) / 100 * 100) / 100 : 0;
+        newMilestone.percentage = Number(percent.toFixed(2));
+        newMilestone.amount = newAmount;
+
       } else if (field === "amount") {
         let amount = value === "" ? 0 : Number(value);
-        if (isNaN(amount)) amount = 0;
-        newMilestone.amount = amount;
-        newMilestone.percentage = prev.totalAmount > 0 ? (amount / prev.totalAmount) * 100 : 0;
+        if (isNaN(amount) || amount < 0) amount = 0;
+        
+        // Recalculate percentage based on amount
+        const newPercentage = prev.totalAmount > 0 ? (amount / prev.totalAmount) * 100 : 0;
+        newMilestone.amount = Math.round(amount * 100) / 100;
+        newMilestone.percentage = Number(newPercentage.toFixed(2));
+        setError(null);
+
       } else if (field === "dueDate") {
         // Validation: Due date must be between PO date and delivery date
         const poDate = dayjs(prev.poDate);
@@ -1028,11 +1104,14 @@ export default function PurchaseOrderPage() {
         return form.poDate && form.deliveryDate &&
           form.items.some(i => i.description && i.description.trim() !== "" && i.quantity > 0 && i.rate > 0);
       case 3:
-        // For milestone payment terms, ensure total percentage = 100%
+        // For milestone payment terms, validate milestones properly
         if (form.paymentTerms === "milestone") {
-          const totalPercentage = form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0);
-          return totalPercentage === 100 && form.milestones.length > 0 &&
-            form.milestones.every(m => m.title && m.title.trim() !== "" && m.dueDate);
+          const validation = validateMilestones();
+          if (!validation.isValid) {
+            setError(validation.message);
+            return false;
+          }
+          return form.milestones.length > 0;
         }
         return !!form.paymentTerms;
       case 4:
@@ -1461,7 +1540,7 @@ export default function PurchaseOrderPage() {
                         </select>
                       </div>
                       <div className="sm:col-span-1"><input type="number" min="0" value={item.rate} onChange={(e) => updateItem(i, "rate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
-                      <div className="sm:col-span-1"><input type="number" min="0" max="28" value={item.gstRate} onChange={(e) => updateItem(i, "gstRate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
+                      <div className="sm:col-span-1"><input type="number" disabled min="0" max="28" value={item.gstRate} onChange={(e) => updateItem(i, "gstRate", e.target.value)} onWheel={(e) => e.target.blur()} className="w-full px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-400/30 outline-none" /></div>
                       <div className="sm:col-span-2"><span className="text-sm font-medium text-slate-700">₹ {item.totalAmount?.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</span></div>
                       <div className="sm:col-span-1 flex justify-end">{form.items.length > 1 && <button onClick={() => removeItem(i)} className="text-slate-300 hover:text-red-500 transition"><Trash2 size={15} /></button>}</div>
                     </div>
@@ -1533,40 +1612,73 @@ export default function PurchaseOrderPage() {
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="font-semibold text-slate-800 text-xs">Milestones</h3>
-                      <p className="text-[10px] text-slate-500 mt-0.5">Define milestones and their payment amounts</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Define milestones and their payment amounts. Line item changes update milestone amounts automatically based on percentages.</p>
                     </div>
                     <button onClick={addMilestone} className={`flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-md transition ${colors.bg} ${colors.text}`}>
                       <Plus size={13} /> Add Milestone
                     </button>
                   </div>
 
-                  {/* Percentage Progress Bar */}
+                  {/* Percentage & Amount Progress Bar */}
                   {form.milestones.length > 0 && (
-                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-md">
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-medium text-slate-700">Total Percentage Allocated</span>
-                        <span className={`text-xs font-semibold ${form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100 ? "text-red-600" : "text-slate-700"}`}>
-                          {form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0).toFixed(2)}%
-                        </span>
-                      </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                        <div
-                          className={`h-full transition-all ${form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100
-                              ? "bg-red-500"
-                              : form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) === 100
-                                ? "bg-green-500"
-                                : "bg-blue-500"
+                    <div className="mb-4 p-3 bg-slate-50 border border-slate-200 rounded-md space-y-2.5">
+                      {/* Percentage Progress */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-medium text-slate-700">Percentage Allocated</span>
+                          <span className={`text-xs font-semibold ${Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) > 0.5 ? "text-red-600" : "text-green-600"}`}>
+                            {form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) > 0.5
+                                ? "bg-red-500"
+                                : "bg-green-500"
                             }`}
-                          style={{
-                            width: `${Math.min(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0), 100)}%`,
-                          }}
-                        />
+                            style={{
+                              width: `${Math.min(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0), 100)}%`,
+                            }}
+                          />
+                        </div>
                       </div>
-                      {form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) > 100 && (
-                        <p className="text-xs text-red-600 font-medium mt-1.5">⚠️ Total percentage exceeds 100%. Please adjust milestones.</p>
+
+                      {/* Amount Progress */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-medium text-slate-700">Amount Allocated</span>
+                          <span className={`text-xs font-semibold ${
+                            Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
+                              ? "text-red-600"
+                              : "text-green-600"
+                          }`}>
+                            {formatMoney(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0))}
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full transition-all ${
+                              Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
+                                ? "bg-red-500"
+                                : "bg-green-500"
+                            }`}
+                            style={{
+                              width: `${Math.min((form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) / form.totalAmount) * 100, 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Status Messages */}
+                      {Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) > 0.5 && (
+                        <p className="text-xs text-red-600 font-medium">⚠️ Percentage must sum to 100% (currently {form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0).toFixed(2)}%)</p>
                       )}
-                      {form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) === 100 && (
-                        <p className="text-xs text-green-600 font-medium mt-1.5">✓ All milestone percentages allocated.</p>
+                      {Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001) && (
+                        <p className="text-xs text-red-600 font-medium">⚠️ Amount must sum to {formatMoney(form.totalAmount)}</p>
+                      )}
+                      {Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) <= 0.5 && Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) <= Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001) && (
+                        <p className="text-xs text-green-600 font-medium">✓ Milestones properly allocated</p>
                       )}
                     </div>
                   )}
