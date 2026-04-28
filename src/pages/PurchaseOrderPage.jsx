@@ -98,12 +98,12 @@ const formatAddressLines = (address = {}) =>
 const buildTaxDetails = (entity = {}) => {
   const normalizedTaxDetails = Array.isArray(entity.taxDetails)
     ? entity.taxDetails
-        .map((tax) => ({
-          label: tax?.label || tax?.taxType || "",
-          taxType: tax?.taxType || tax?.label || "",
-          taxNumber: tax?.taxNumber || "",
-        }))
-        .filter((tax) => tax.label && tax.taxNumber)
+      .map((tax) => ({
+        label: tax?.label || tax?.taxType || "",
+        taxType: tax?.taxType || tax?.label || "",
+        taxNumber: tax?.taxNumber || "",
+      }))
+      .filter((tax) => tax.label && tax.taxNumber)
     : [];
 
   const legacyTaxFields = [
@@ -254,6 +254,13 @@ export default function PurchaseOrderPage() {
     invoiceSchedule: [],
   });
 
+  const toDateInputValue = (isoString) => {
+    if (!isoString) return "";
+    return new Date(isoString).toISOString().split("T")[0]; // "2026-04-28"
+  };
+
+
+
   const [sameAsDeliverTo, setSameAsDeliverTo] = useState(false);
   const directionColor = form.direction === "payable" ? "amber" : "blue";
   const colors = colorMap[directionColor];
@@ -277,12 +284,12 @@ export default function PurchaseOrderPage() {
       normalized === "in" ||
       normalized === "ind"
     ) return "IN";
-    
+
     // Attempt exact dictionary match using the fetched master data
     // to map strings like "United States" to "US" correctly.
     if (countryTaxList && countryTaxList.length > 0) {
-      const match = countryTaxList.find((ct) => 
-        ct.countryName.toLowerCase() ===  normalized || 
+      const match = countryTaxList.find((ct) =>
+        ct.countryName.toLowerCase() === normalized ||
         ct.countryCode.toLowerCase() === normalized
       );
       if (match) return match.countryCode.toUpperCase();
@@ -292,7 +299,7 @@ export default function PurchaseOrderPage() {
     // Fallback for missing configurations
     if (normalized === "usa" || normalized === "united states") return "US";
     if (normalized === "uk" || normalized === "united kingdom") return "GB";
-    
+
     return countryStr.trim().toUpperCase().substring(0, 2);
   };
 
@@ -328,10 +335,10 @@ export default function PurchaseOrderPage() {
    */
   const determineTaxType = () => {
     const companyCountry = getCompanyCountry();
-    const partyCountry   = getPartyCountry();
+    const partyCountry = getPartyCountry();
 
     const isCompanyIndia = companyCountry === "IN";
-    const isPartyIndia   = partyCountry   === "IN" || partyCountry === "";
+    const isPartyIndia = partyCountry === "IN" || partyCountry === "";
 
     // Case 1: India → India → GST
     if (isCompanyIndia && isPartyIndia) return "GST";
@@ -414,13 +421,13 @@ export default function PurchaseOrderPage() {
 
   const calculateGstTotals = (items = []) => {
     let totalTaxable = 0;
-    let totalTax     = 0;
-    let totalAmount  = 0;
+    let totalTax = 0;
+    let totalAmount = 0;
 
     items.forEach((item) => {
       totalTaxable += Number(item.taxableValue) || 0;
-      totalTax     += Number(item.gstAmount)    || 0;
-      totalAmount  += Number(item.totalAmount)  || 0;
+      totalTax += Number(item.gstAmount) || 0;
+      totalAmount += Number(item.totalAmount) || 0;
     });
 
     const taxType = determineTaxType();
@@ -432,7 +439,7 @@ export default function PurchaseOrderPage() {
 
     if (taxType === "GST") {
       const companyStateCode = getCompanyStateCode();
-      const shipToStateCode  = normalizeStateCode(form.deliverTo?.stateCode);
+      const shipToStateCode = normalizeStateCode(form.deliverTo?.stateCode);
       const isIntraState =
         !!companyStateCode &&
         !!shipToStateCode &&
@@ -446,11 +453,11 @@ export default function PurchaseOrderPage() {
 
     return {
       totalTaxableValue: Math.round(totalTaxable * 100) / 100,
-      totalGSTAmount:    Math.round(totalTax    * 100) / 100,
+      totalGSTAmount: Math.round(totalTax * 100) / 100,
       totalCGSTAmount,
       totalSGSTAmount,
       totalIGSTAmount,
-      totalAmount:       Math.round(totalAmount * 100) / 100,
+      totalAmount: Math.round(totalAmount * 100) / 100,
       taxType,
     };
   };
@@ -639,6 +646,13 @@ export default function PurchaseOrderPage() {
         .then((res) => {
           const d = res.data?.data || res.data;
           const fmt = (date) => (date ? new Date(date).toISOString().split("T")[0] : "");
+
+          // Load items from saved PO
+          const loadedItems = d.items?.map((item) => ({ ...item, total: item.totalAmount })) || [];
+
+          // Recalculate tax totals from items (fixes bug where old tax values were persisted)
+          const freshTotals = calculateGstTotals(loadedItems);
+
           setForm(prev => ({
             ...prev,
             ...d,
@@ -649,8 +663,14 @@ export default function PurchaseOrderPage() {
             deliverTo: d.deliverTo || prev.deliverTo,
             poDate: fmt(d.poDate),
             deliveryDate: fmt(d.deliveryDate),
-            items: d.items?.map((item) => ({ ...item, total: item.totalAmount })) || prev.items,
-            milestones: d.milestones || [],
+            items: loadedItems,
+            milestones: (d.milestones || []).map((m) => ({
+              ...m,
+              dueDate: fmt(m.dueDate), // "2026-04-28T00:00:00.000Z" → "2026-04-28"
+            })),
+            // Override with recalculated tax totals
+            ...freshTotals,
+            valueInWords: numberToWords(freshTotals.totalAmount),
           }));
         })
         .catch(err => {
@@ -670,7 +690,10 @@ export default function PurchaseOrderPage() {
     } else {
       setDistributionBreakdown([]);
     }
-  }, [form.paymentTerms, form.poDate, form.deliveryDate, form.totalAmount, form.milestones]);
+    // CRITICAL FIX: Removed form.milestones from dependency array to prevent infinite render loop
+    // Breakdown should only recalculate when PO structure changes (dates, terms, total),
+    // NOT when individual milestone values are edited by user
+  }, [form.paymentTerms, form.poDate, form.deliveryDate, form.totalAmount]);
 
   // ─── FIX: Recalculate milestone amounts when total amount changes ───
   // When editing items in Step 2, total amount changes. Milestones set by percentage
@@ -855,7 +878,7 @@ export default function PurchaseOrderPage() {
   const selectEntity = (entity) => {
     setForm(prev => {
       let updatedForm = { ...prev };
-      
+
       if (mode === "client") {
         const defaultAddress = entity.defaultAddress?.address ? entity.defaultAddress : entity;
         const shipToAddress = entity.shipToAddress?.address ? entity.shipToAddress : null;
@@ -887,7 +910,7 @@ export default function PurchaseOrderPage() {
       // Use the newly selected entity's country
       const rawPartyCountry = entity.clientCountry || entity.country || entity.defaultAddress?.country || "";
       const partyCountryCode = getCountryFlag(rawPartyCountry);
-      
+
       const isCompanyIndia = companyCountry === "IN";
       const isPartyIndia = partyCountryCode === "IN" || partyCountryCode === "";
 
@@ -926,14 +949,15 @@ export default function PurchaseOrderPage() {
           totalAmount = taxableValue + gstAmount;
         }
 
-        return { ...item, gstRate, gstAmount, totalAmount, taxableValue };
+        // CRITICAL: Sync taxRate/taxAmount with gstRate/gstAmount
+        return { ...item, gstRate, gstAmount, totalAmount, taxableValue, taxRate: gstRate, taxAmount: gstAmount, combinedTaxRate: gstRate };
       });
 
       updatedForm.items = updatedItems;
-      const finalTotals = calculateGstTotals(updatedItems); 
+      const finalTotals = calculateGstTotals(updatedItems);
       // Note: calculateGstTotals needs to be called within this logic or slightly adjusted.
       // But we can just use setForm's dependency injection or just merge.
-      
+
       return { ...updatedForm, ...finalTotals };
     });
 
@@ -962,7 +986,12 @@ export default function PurchaseOrderPage() {
     }));
   };
 
+
+
+
   const updateMilestone = (idx, field, value) => {
+    let nextError = null;
+
     setForm(prev => {
       const milestones = [...prev.milestones];
       const newMilestone = { ...milestones[idx] };
@@ -970,49 +999,48 @@ export default function PurchaseOrderPage() {
       if (field === "percentage") {
         let percent = value === "" ? 0 : Number(value);
         if (isNaN(percent) || percent < 0) percent = 0;
-        if (percent > 100) percent = 100;
 
-        // Validation: Total percentage (including this one) should not exceed 100%
-        const totalPercentageWithoutCurrent = milestones
-          .reduce((sum, m, i) => i !== idx ? sum + (m.percentage || 0) : sum, 0);
+        // ─── CLAMP: never let total exceed 100% ───
+        const totalWithoutCurrent = milestones.reduce(
+          (sum, m, i) => i !== idx ? sum + (m.percentage || 0) : sum, 0
+        );
+        const maxAllowed = Math.max(0, 100 - totalWithoutCurrent);
+        percent = Math.min(percent, maxAllowed);
 
-        if (percent + totalPercentageWithoutCurrent > 100) {
-          // Show warning but allow setting the value - user will see the error on save
-          const totalWould = percent + totalPercentageWithoutCurrent;
-          setError(`Warning: Total percentage would be ${totalWould.toFixed(2)}% (exceeds 100%). Adjust other milestones.`);
-        } else {
-          setError(null);
-        }
-
-        // Recalculate amount based on percentage and total
-        const newAmount = prev.totalAmount > 0 ? Math.round((prev.totalAmount * percent) / 100 * 100) / 100 : 0;
+        const newAmount = prev.totalAmount > 0
+          ? Math.round((prev.totalAmount * percent) / 100 * 100) / 100
+          : 0;
         newMilestone.percentage = Number(percent.toFixed(2));
         newMilestone.amount = newAmount;
 
       } else if (field === "amount") {
         let amount = value === "" ? 0 : Number(value);
         if (isNaN(amount) || amount < 0) amount = 0;
-        
-        // Recalculate percentage based on amount
-        const newPercentage = prev.totalAmount > 0 ? (amount / prev.totalAmount) * 100 : 0;
+
+        // ─── CLAMP: never let total exceed PO total ───
+        const totalWithoutCurrent = milestones.reduce(
+          (sum, m, i) => i !== idx ? sum + (m.amount || 0) : sum, 0
+        );
+        const maxAllowed = Math.max(0, prev.totalAmount - totalWithoutCurrent);
+        amount = Math.min(amount, maxAllowed);
+
+        const newPercentage = prev.totalAmount > 0
+          ? (amount / prev.totalAmount) * 100
+          : 0;
         newMilestone.amount = Math.round(amount * 100) / 100;
         newMilestone.percentage = Number(newPercentage.toFixed(2));
-        setError(null);
 
       } else if (field === "dueDate") {
-        // Validation: Due date must be between PO date and delivery date
         const poDate = dayjs(prev.poDate);
         const deliveryDate = dayjs(prev.deliveryDate);
         const milestoneDueDate = dayjs(value);
 
-        // Check if date is before PO date or after delivery date
         if (milestoneDueDate.isBefore(poDate, "day") || milestoneDueDate.isAfter(deliveryDate, "day")) {
-          setError(`Milestone due date must be between PO Date (${poDate.format("DD MMM YYYY")}) and Delivery Date (${deliveryDate.format("DD MMM YYYY")})`);
-          return prev;
+          nextError = `Due date must be between ${poDate.format("DD MMM YYYY")} and ${deliveryDate.format("DD MMM YYYY")}`;
+          return prev; // leave form unchanged
         }
-
         newMilestone[field] = value;
-        setError(null);
+
       } else {
         newMilestone[field] = value;
       }
@@ -1020,7 +1048,11 @@ export default function PurchaseOrderPage() {
       milestones[idx] = newMilestone;
       return { ...prev, milestones };
     });
+
+    // ✅ Safe — called outside the updater
+    setError(nextError);
   };
+
 
   const addItem = () => {
     setForm(prev => ({
@@ -1045,29 +1077,35 @@ export default function PurchaseOrderPage() {
 
         if (taxType === "GST") {
           // ✅ India→India: use HSN GST rate
-          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
+          items[idx].gstAmount = (taxableValue * items[idx].gstRate) / 100;
           items[idx].totalAmount = taxableValue + items[idx].gstAmount;
 
         } else if (taxType === "RCM") {
           // ✅ Foreign→India: RCM — buyer pays tax (record for reference)
-          items[idx].gstAmount   = (taxableValue * items[idx].gstRate) / 100;
+          items[idx].gstAmount = (taxableValue * items[idx].gstRate) / 100;
           items[idx].totalAmount = taxableValue; // RCM: tax not added to invoice amount
 
         } else if (taxType === "NONE") {
           // NONE: Foreign→Foreign
-          items[idx].gstAmount   = 0;
-          items[idx].gstRate     = 0;
+          items[idx].gstAmount = 0;
+          items[idx].gstRate = 0;
           items[idx].totalAmount = taxableValue;
-          
+
         } else {
           // ✅ India→Foreign (any mapped tax logic: VAT, SALES_TAX, custom)
-          const partyCountry   = getPartyCountry();
-          const countryTax     = getForeignCountryTax(partyCountry);
-          const taxRate        = countryTax ? countryTax.taxRate : 0;
-          items[idx].gstRate   = taxRate;
+          const partyCountry = getPartyCountry();
+          const countryTax = getForeignCountryTax(partyCountry);
+          const taxRate = countryTax ? countryTax.taxRate : 0;
+          items[idx].gstRate = taxRate;
           items[idx].gstAmount = (taxableValue * taxRate) / 100;
           items[idx].totalAmount = taxableValue + items[idx].gstAmount;
         }
+
+        // CRITICAL: Always sync taxRate/taxAmount with gstRate/gstAmount
+        // Backend prioritizes taxRate over gstRate
+        items[idx].taxRate = items[idx].gstRate;
+        items[idx].taxAmount = items[idx].gstAmount;
+        items[idx].combinedTaxRate = items[idx].gstRate;
       }
 
       const totals = calculateGstTotals(items);
@@ -1091,27 +1129,23 @@ export default function PurchaseOrderPage() {
     });
   }, [companyInfo, form.deliverTo?.stateCode]);
 
+  // ─── Pure — NO setState, safe to call during render ───
   const canProceed = () => {
     switch (step) {
-      case 1:
+      case 1: {
         const hasEntity = mode === "client" ? !!form.client?._id : !!form.vendor?._id;
-        // For client mode, also ensure deliverTo.name is filled
-        if (mode === "client" && hasEntity) {
-          return !!form.deliverTo?.name?.trim();
-        }
+        if (mode === "client" && hasEntity) return !!form.deliverTo?.name?.trim();
         return hasEntity;
+      }
       case 2:
-        return form.poDate && form.deliveryDate &&
-          form.items.some(i => i.description && i.description.trim() !== "" && i.quantity > 0 && i.rate > 0);
+        return (
+          !!form.poDate &&
+          !!form.deliveryDate &&
+          form.items.some(i => i.description?.trim() !== "" && i.quantity > 0 && i.rate > 0)
+        );
       case 3:
-        // For milestone payment terms, validate milestones properly
         if (form.paymentTerms === "milestone") {
-          const validation = validateMilestones();
-          if (!validation.isValid) {
-            setError(validation.message);
-            return false;
-          }
-          return form.milestones.length > 0;
+          return form.milestones.length > 0 && validateMilestones().isValid;
         }
         return !!form.paymentTerms;
       case 4:
@@ -1119,6 +1153,20 @@ export default function PurchaseOrderPage() {
       default:
         return false;
     }
+  };
+
+  // ─── Only called on click — safe to call setError here ───
+  const handleContinue = () => {
+    if (!canProceed()) {
+      if (step === 3 && form.paymentTerms === "milestone") {
+        setError(validateMilestones().message || "Please complete all milestone fields.");
+      } else {
+        setError("Please complete all required fields.");
+      }
+      return;
+    }
+    setError(null);
+    setStep(step + 1);
   };
 
   const handleSubmit = async () => {
@@ -1132,17 +1180,17 @@ export default function PurchaseOrderPage() {
       // Map client/vendor based on mode for backend
       // Backend always expects 'vendor' field (the party we're transacting with)
       const vendorForBackend = mode === "client" ? form.client : form.vendor;
-      
+
       const poData = {
         ...form,
         vendor: vendorForBackend,  // Always send the correct party as 'vendor'
         billingModel: { milestone: "milestone", monthly: "fixed", weekly: "fixed" }[form.paymentTerms] || "fixed",
         poCategory: "project",
       };
-      
+
       // Remove the client field since backend only expects vendor
       delete poData.client;
-      
+
       let result;
       if (isEditing) {
         result = await updatePurchaseOrderApi(editId, poData);
@@ -1294,9 +1342,9 @@ export default function PurchaseOrderPage() {
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs font-semibold text-slate-800">Deliver To</h3>
                     <label className="flex items-center gap-2 cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={sameAsDeliverTo} 
+                      <input
+                        type="checkbox"
+                        checked={sameAsDeliverTo}
                         onChange={(e) => {
                           setSameAsDeliverTo(e.target.checked);
                           if (e.target.checked && form.client?._id) {
@@ -1355,43 +1403,43 @@ export default function PurchaseOrderPage() {
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Name</label>
-                        <input 
-                          type="text" 
-                          placeholder="Delivery location name" 
-                          value={form.deliverTo.name} 
-                          onChange={(e) => set("deliverTo.name", e.target.value)} 
-                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        <input
+                          type="text"
+                          placeholder="Delivery location name"
+                          value={form.deliverTo.name}
+                          onChange={(e) => set("deliverTo.name", e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                         />
                       </div>
                       <div>
                         <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Address</label>
-                        <input 
-                          type="text" 
-                          placeholder="Delivery address" 
-                          value={form.deliverTo.address} 
-                          onChange={(e) => set("deliverTo.address", e.target.value)} 
-                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                        <input
+                          type="text"
+                          placeholder="Delivery address"
+                          value={form.deliverTo.address}
+                          onChange={(e) => set("deliverTo.address", e.target.value)}
+                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                         />
                       </div>
                       <div className="grid sm:grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">State Code</label>
-                          <input 
-                            type="text" 
-                            placeholder="e.g., DL, MH, KA" 
-                            value={form.deliverTo.stateCode} 
-                            onChange={(e) => set("deliverTo.stateCode", e.target.value.toUpperCase())} 
-                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          <input
+                            type="text"
+                            placeholder="e.g., DL, MH, KA"
+                            value={form.deliverTo.stateCode}
+                            onChange={(e) => set("deliverTo.stateCode", e.target.value.toUpperCase())}
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                           />
                         </div>
                         <div>
                           <label className="block text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-1.5">GSTIN</label>
-                          <input 
-                            type="text" 
-                            placeholder="GSTIN" 
-                            value={form.deliverTo.GSTIN} 
-                            onChange={(e) => set("deliverTo.GSTIN", e.target.value)} 
-                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none" 
+                          <input
+                            type="text"
+                            placeholder="GSTIN"
+                            value={form.deliverTo.GSTIN}
+                            onChange={(e) => set("deliverTo.GSTIN", e.target.value)}
+                            className="w-full px-3 py-2 text-xs border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none"
                           />
                         </div>
                       </div>
@@ -1470,12 +1518,12 @@ export default function PurchaseOrderPage() {
                         <select value={item.hsnId || ""} onChange={(e) => {
                           const id = e.target.value;
                           const taxType = determineTaxType();
-                          
+
                           // Use a single setForm call to atomically update all HSN-related fields
                           setForm(prev => {
                             const items = [...prev.items];
                             const updatedItem = { ...items[i] };
-                            
+
                             if (!id) {
                               // HSN cleared
                               updatedItem.hsnId = null;
@@ -1493,7 +1541,7 @@ export default function PurchaseOrderPage() {
                                 updatedItem.hsnId = id;
                                 updatedItem.hsnSac = hsn.hsnCode;
                                 if (!updatedItem.description.trim()) updatedItem.description = hsn.serviceType;
-                                
+
                                 if (taxType === "GST" || taxType === "RCM") {
                                   updatedItem.gstRate = getTotalGstRate(hsn);
                                 } else if (taxType === "NONE") {
@@ -1505,7 +1553,7 @@ export default function PurchaseOrderPage() {
                                 }
                               }
                             }
-                            
+
                             // Recalculate tax amounts for this item
                             const taxableValue = (Number(updatedItem.quantity) || 0) * (Number(updatedItem.rate) || 0);
                             updatedItem.taxableValue = taxableValue;
@@ -1522,7 +1570,12 @@ export default function PurchaseOrderPage() {
                               updatedItem.gstAmount = (taxableValue * updatedItem.gstRate) / 100;
                               updatedItem.totalAmount = taxableValue + updatedItem.gstAmount;
                             }
-                            
+
+                            // CRITICAL: Sync taxRate with gstRate so backend uses updated value
+                            updatedItem.taxRate = updatedItem.gstRate;
+                            updatedItem.taxAmount = updatedItem.gstAmount;
+                            updatedItem.combinedTaxRate = updatedItem.gstRate;
+
                             items[i] = updatedItem;
                             const totals = calculateGstTotals(items);
                             return { ...prev, items, ...totals, valueInWords: numberToWords(totals.totalAmount) };
@@ -1593,7 +1646,7 @@ export default function PurchaseOrderPage() {
                         const totalAmountSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.amount, 0);
                         newMilestones[newMilestones.length - 1].percentage = Number((100 - totalPercentSoFar).toFixed(2));
                         newMilestones[newMilestones.length - 1].amount = Number((form.totalAmount - totalAmountSoFar).toFixed(2));
-                        
+
                         setForm(prev => ({ ...prev, milestones: newMilestones }));
                       }
                     }
@@ -1632,11 +1685,10 @@ export default function PurchaseOrderPage() {
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                           <div
-                            className={`h-full transition-all ${
-                              Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) > 0.5
-                                ? "bg-red-500"
-                                : "bg-green-500"
-                            }`}
+                            className={`h-full transition-all ${Math.abs(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0) - 100) > 0.5
+                              ? "bg-red-500"
+                              : "bg-green-500"
+                              }`}
                             style={{
                               width: `${Math.min(form.milestones.reduce((sum, m) => sum + (m.percentage || 0), 0), 100)}%`,
                             }}
@@ -1648,21 +1700,19 @@ export default function PurchaseOrderPage() {
                       <div>
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-xs font-medium text-slate-700">Amount Allocated</span>
-                          <span className={`text-xs font-semibold ${
-                            Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
-                              ? "text-red-600"
-                              : "text-green-600"
-                          }`}>
+                          <span className={`text-xs font-semibold ${Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
+                            ? "text-red-600"
+                            : "text-green-600"
+                            }`}>
                             {formatMoney(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0))}
                           </span>
                         </div>
                         <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
                           <div
-                            className={`h-full transition-all ${
-                              Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
-                                ? "bg-red-500"
-                                : "bg-green-500"
-                            }`}
+                            className={`h-full transition-all ${Math.abs(form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) - form.totalAmount) > Math.max(form.milestones.length * 0.01, form.totalAmount * 0.001)
+                              ? "bg-red-500"
+                              : "bg-green-500"
+                              }`}
                             style={{
                               width: `${Math.min((form.milestones.reduce((sum, m) => sum + (m.amount || 0), 0) / form.totalAmount) * 100, 100)}%`,
                             }}
@@ -2173,7 +2223,16 @@ export default function PurchaseOrderPage() {
           <button onClick={() => step > 1 ? setStep(step - 1) : navigate(-1)} className="px-4 py-2 text-xs font-medium border border-slate-200 rounded-md hover:bg-slate-50 transition flex items-center gap-1.5 bg-white"><ArrowLeft size={13} /> Back</button>
           <div className="flex gap-2">
             {step < STEPS.length ? (
-              <button onClick={() => canProceed() && setStep(step + 1)} disabled={!canProceed()} className={`px-4 py-2 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${canProceed() ? `${colors.bg} ${colors.text} hover:opacity-90` : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}>Continue <ChevronRight size={13} /></button>
+              <button
+                onClick={handleContinue}
+                disabled={!canProceed()}
+                className={`px-4 py-2 text-xs font-medium rounded-md transition flex items-center gap-1.5 ${canProceed()
+                  ? `${colors.bg} ${colors.text} hover:opacity-90`
+                  : "bg-slate-100 text-slate-400 cursor-not-allowed"
+                  }`}
+              >
+                Continue <ChevronRight size={13} />
+              </button>
             ) : (
               <button onClick={handleSubmit} disabled={loading} className="px-4 py-2 text-xs font-semibold rounded-md bg-slate-800 text-white hover:bg-slate-700 transition flex items-center gap-1.5 disabled:opacity-60">{loading ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}{isEditing ? "Update PO" : "Create PO"}</button>
             )}
