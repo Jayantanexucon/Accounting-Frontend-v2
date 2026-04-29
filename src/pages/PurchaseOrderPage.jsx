@@ -1633,30 +1633,42 @@ export default function PurchaseOrderPage() {
               <p className="text-[11px] text-slate-500 mb-4">Select how the invoicing will be structured</p>
               <div className="grid gap-2 mb-6">
                 {PAYMENT_TERMS_OPTIONS.map(opt => (
-                  <button key={opt.key} onClick={() => {
-                    set("paymentTerms", opt.key);
-                    if (opt.key === "milestone") {
-                      const count = window.prompt("How many milestones would you like to create?", "3");
-                      const numCount = parseInt(count);
-                      if (!isNaN(numCount) && numCount > 0) {
-                        const newMilestones = Array.from({ length: numCount }, (_, i) => ({
-                          title: `Milestone ${i + 1}`,
-                          description: "",
-                          amount: Number((form.totalAmount / numCount).toFixed(2)),
-                          percentage: Number((100 / numCount).toFixed(2)),
-                          dueDate: today(),
-                          status: "pending",
-                        }));
-                        // Adjust the last one to ensure 100% and total accuracy
-                        const totalPercentSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.percentage, 0);
-                        const totalAmountSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.amount, 0);
-                        newMilestones[newMilestones.length - 1].percentage = Number((100 - totalPercentSoFar).toFixed(2));
-                        newMilestones[newMilestones.length - 1].amount = Number((form.totalAmount - totalAmountSoFar).toFixed(2));
+                  <button key={opt.key}
+                    onClick={() => {
+                      if (opt.key === "milestone") {
+                        const count = window.prompt("How many milestones would you like to create?", "3");
+                        const numCount = parseInt(count);
+                        if (!isNaN(numCount) && numCount > 0) {
+                          const newMilestones = Array.from({ length: numCount }, (_, i) => ({
+                            title: `Milestone ${i + 1}`,
+                            description: "",
+                            amount: Number((form.totalAmount / numCount).toFixed(2)),
+                            percentage: Number((100 / numCount).toFixed(2)),
+                            dueDate: today(),
+                            status: "pending",
+                          }));
+                          const totalPercentSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.percentage, 0);
+                          const totalAmountSoFar = newMilestones.slice(0, -1).reduce((s, m) => s + m.amount, 0);
+                          newMilestones[newMilestones.length - 1].percentage = Number((100 - totalPercentSoFar).toFixed(2));
+                          newMilestones[newMilestones.length - 1].amount = Number((form.totalAmount - totalAmountSoFar).toFixed(2));
 
-                        setForm(prev => ({ ...prev, milestones: newMilestones }));
+                          setForm(prev => ({
+                            ...prev,
+                            paymentTerms: "milestone",
+                            milestones: newMilestones,   // ✅ Set fresh milestones
+                            invoiceSchedule: [],          // ✅ Clear schedule
+                          }));
+                        }
+                      } else {
+                        // Switching away from milestone — clear milestone data
+                        setForm(prev => ({
+                          ...prev,
+                          paymentTerms: opt.key,
+                          milestones: [],        // ✅ Clear milestones when switching to monthly/weekly
+                          invoiceSchedule: [],
+                        }));
                       }
-                    }
-                  }} className={`p-3 rounded-lg border transition-all text-left ${form.paymentTerms === opt.key ? `${colors.bg} ${colors.border} ring-1 ${colors.ring}` : "bg-white border-slate-200 hover:border-slate-300"}`}>
+                    }} className={`p-3 rounded-lg border transition-all text-left ${form.paymentTerms === opt.key ? `${colors.bg} ${colors.border} ring-1 ${colors.ring}` : "bg-white border-slate-200 hover:border-slate-300"}`}>
                     <div className="flex items-start gap-2.5">
                       <opt.icon size={15} className={form.paymentTerms === opt.key ? colors.text : "text-slate-400"} />
                       <div><p className={`font-semibold text-xs ${form.paymentTerms === opt.key ? colors.text : "text-slate-700"}`}>{opt.label}</p><p className="text-[10px] text-slate-500 mt-0.5">{opt.hint}</p></div>
