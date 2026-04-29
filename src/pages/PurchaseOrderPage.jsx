@@ -685,8 +685,6 @@ export default function PurchaseOrderPage() {
       calculateMonthlyDistribution();
     } else if (form.paymentTerms === "weekly" && form.poDate && form.deliveryDate && form.totalAmount > 0) {
       calculateWeeklyDistribution();
-    } else if (form.paymentTerms === "milestone" && form.milestones.length > 0) {
-      calculateMilestoneBreakdown();
     } else {
       setDistributionBreakdown([]);
     }
@@ -694,6 +692,14 @@ export default function PurchaseOrderPage() {
     // Breakdown should only recalculate when PO structure changes (dates, terms, total),
     // NOT when individual milestone values are edited by user
   }, [form.paymentTerms, form.poDate, form.deliveryDate, form.totalAmount]);
+
+  // ─── SEPARATE: Update milestone breakdown when milestones are edited ───
+  // This effect only updates the display breakdown, NOT the form itself, so no infinite loop
+  useEffect(() => {
+    if (form.paymentTerms === "milestone" && form.milestones.length > 0) {
+      calculateMilestoneBreakdown();
+    }
+  }, [form.paymentTerms, form.milestones]);
 
   // ─── FIX: Recalculate milestone amounts when total amount changes ───
   // When editing items in Step 2, total amount changes. Milestones set by percentage
