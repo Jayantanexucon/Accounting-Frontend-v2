@@ -206,6 +206,7 @@ export const recordInvoicePaymentApi = async ({
   referenceNumber,
   remarks,
   paymentMode,
+  bankLedgerId,
   expectedAmount,
   adjustmentSource,
 }) => {
@@ -223,6 +224,7 @@ export const recordInvoicePaymentApi = async ({
     adjustmentSource,
     grossAmount: normalizedExpectedAmount + normalizedTdsAmount,
     paymentMode: normalizePaymentMode(paymentMode),
+    bankLedgerId,
     paymentDate,
     reference: referenceNumber,
     notes: remarks,

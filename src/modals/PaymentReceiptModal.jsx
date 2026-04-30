@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import dayjs from "dayjs";
 import { getJournalByIdApi } from "../apis/journalApi";
+import { getAccountsApi } from "../apis/accountApi";
 import JournalDetailsModal from "./JournalDetailsModal";
 import {
   getInvoicePaymentsApi,
@@ -18,6 +19,8 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
+  const [bankLedgers, setBankLedgers] = useState([]);
+  const [loadingBankLedgers, setLoadingBankLedgers] = useState(false);
   const [accountValidation, setAccountValidation] = useState(null);
   const [selectedPaymentMode, setSelectedPaymentMode] = useState("bank_transfer");
   const [showAdvanced, setShowAdvanced] = useState(true);
@@ -40,6 +43,27 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
 
   const getJournalId = (journalRef) =>
     typeof journalRef === "object" && journalRef !== null ? journalRef._id : journalRef;
+
+  const getDefaultBankLedgerStorageKey = () =>
+    user?.company?._id ? `defaultBankLedger:${user.company._id}` : "";
+
+  const isBankLedger = (account = {}) => {
+    const group = typeof account.groupId === "object" ? account.groupId : {};
+    const groupName = account.groupName || group.name || "";
+    const nature = group.nature || account.groupNature || "";
+    const scheduleLineItem =
+      account.scheduleMapping?.scheduleLineItem ||
+      account.scheduleLineItem ||
+      group.scheduleLineItem ||
+      "";
+
+    return (
+      account.isActive !== false &&
+      nature === "Asset" &&
+      /bank/i.test(groupName) &&
+      scheduleLineItem === "Cash and Cash Equivalents"
+    );
+  };
 
   // Payment form state
   const [formData, setFormData] = useState({
@@ -94,6 +118,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     setLoading(false);
     setError(null);
     setPaymentHistory([]);
+    setBankLedgers([]);
     setAccountValidation(null);
     setShowAdvanced(true);
     setSelectedJournal(null);
@@ -175,12 +200,38 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
       }
       const accountRes = await validateInvoiceAccountsApi(user.company._id);
       setAccountValidation(accountRes.data);
+      await loadBankLedgers();
     } catch (error) {
       console.error("Error loading invoice data:", error);
       setError("Failed to load invoice details");
       toast.error("Failed to load payment information");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBankLedgers = async () => {
+    if (!user?.company?._id) return;
+
+    setLoadingBankLedgers(true);
+    try {
+      const response = await getAccountsApi(user.company._id);
+      const ledgers = (response?.data || []).filter(isBankLedger);
+      const savedLedgerId = localStorage.getItem(getDefaultBankLedgerStorageKey());
+      const defaultLedgerId = ledgers.some((ledger) => ledger._id === savedLedgerId)
+        ? savedLedgerId
+        : ledgers[0]?._id || "";
+
+      setBankLedgers(ledgers);
+      setFormData((prev) => ({
+        ...prev,
+        bankAccountId: prev.bankAccountId || defaultLedgerId,
+      }));
+    } catch (error) {
+      console.error("Error loading bank ledgers:", error);
+      toast.error("Failed to load bank ledgers");
+    } finally {
+      setLoadingBankLedgers(false);
     }
   };
 
@@ -277,6 +328,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         companyId: user.company._id,
         clientId: invoiceData?.billTo?._id || invoiceData?.billTo?.clientId || "",
         amountPaid: formData.amountPaid,
+        bankLedgerId: formData.paymentMode === "cash" ? "" : formData.bankAccountId,
         tdsAmount: formData.tdsAmount,
         expectedAmount: expectedSettlementAmount,
         adjustmentSource: formData.adjustmentEnabled ? formData.adjustmentSource : "none",
@@ -540,6 +592,41 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                       ))}
                     </div>
                   </div>
+                  )}
+
+                  {Number(formData.amountPaid || 0) > 0 && formData.paymentMode !== "cash" && (
+                    <div className="col-span-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                      <label className="block text-sm font-semibold text-blue-900">
+                        Bank Ledger
+                      </label>
+                      <select
+                        value={formData.bankAccountId}
+                        onChange={(e) => {
+                          const ledgerId = e.target.value;
+                          setFormData((prev) => ({ ...prev, bankAccountId: ledgerId }));
+                          if (ledgerId) {
+                            localStorage.setItem(getDefaultBankLedgerStorageKey(), ledgerId);
+                          }
+                        }}
+                        disabled={loadingBankLedgers}
+                        className="mt-2 w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                      >
+                        {bankLedgers.length === 0 ? (
+                          <option value="">Bank Account will be created automatically</option>
+                        ) : (
+                          bankLedgers.map((ledger) => (
+                            <option key={ledger._id} value={ledger._id}>
+                              {ledger.name} {ledger.code ? `(${ledger.code})` : ""}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <div className="mt-1 text-xs text-blue-700">
+                        {bankLedgers.length === 0
+                          ? "No Bank Accounts ledger exists yet. The backend will create Bank Account under Assets > Current Assets > Cash and Cash Equivalents."
+                          : "The selected ledger is saved as the default for future receipts on this company."}
+                      </div>
+                    </div>
                   )}
 
                   {/* Reference Number */}
