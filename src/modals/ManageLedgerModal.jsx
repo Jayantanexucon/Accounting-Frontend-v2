@@ -2,9 +2,10 @@ import React, { useMemo, useRef, useState } from "react";
 import DialogBox from "./DialogBox";
 import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
-import { addAccountApi, updateAccountApi } from "../apis/accountApi";
+import { addAccountApi, suggestAccountScheduleMappingApi, updateAccountApi } from "../apis/accountApi";
 import { API } from "../apis/api";
 import { getInvoiceClientsApi } from "../apis/invoice.api";
+import { getScheduleGroupsForNature, getScheduleLineItems } from "../utils/scheduleIIIConfig";
 
 const GROUP_NATURE_DEFAULTS = {
   Asset: { accountType: "Balance Sheet", openingType: "Debit" },
@@ -42,6 +43,7 @@ export default function ManageLedgerModal({
   const [showClients, setShowClients] = React.useState(false);
   const [vendors, setVendors] = React.useState([]);
   const [showVendors, setShowVendors] = React.useState(false);
+  const [scheduleTouched, setScheduleTouched] = React.useState(false);
 
   const [form, setForm] = React.useState({
     name: "",
@@ -51,6 +53,9 @@ export default function ManageLedgerModal({
     isActive: true,
     linkedClientId: null,
     linkedVendorId: null,
+    scheduleMainHead: "",
+    scheduleGroup: "",
+    scheduleLineItem: "",
   });
 
   const selectedGroup = useMemo(
@@ -62,12 +67,22 @@ export default function ManageLedgerModal({
     if (!selectedGroup?.nature) return null;
     return {
       ...GROUP_NATURE_DEFAULTS[selectedGroup.nature],
-      scheduleMainHead: selectedGroup.scheduleMainHead,
-      scheduleGroup: selectedGroup.scheduleGroup,
-      scheduleLineItem: selectedGroup.scheduleLineItem,
+      scheduleMainHead: form.scheduleMainHead || selectedGroup.scheduleMainHead,
+      scheduleGroup: form.scheduleGroup || selectedGroup.scheduleGroup,
+      scheduleLineItem: form.scheduleLineItem || selectedGroup.scheduleLineItem,
       noteNo: selectedGroup.noteNo,
     };
-  }, [selectedGroup]);
+  }, [form.scheduleGroup, form.scheduleLineItem, form.scheduleMainHead, selectedGroup]);
+
+  const availableScheduleGroups = useMemo(
+    () => getScheduleGroupsForNature(selectedGroup?.nature),
+    [selectedGroup?.nature]
+  );
+
+  const availableScheduleLineItems = useMemo(
+    () => getScheduleLineItems(selectedGroup?.nature, form.scheduleGroup),
+    [form.scheduleGroup, selectedGroup?.nature]
+  );
 
   const resetAuxiliaryState = () => {
     setShowClients(false);
@@ -85,9 +100,13 @@ export default function ManageLedgerModal({
       isActive: true,
       linkedClientId: null,
       linkedVendorId: null,
+      scheduleMainHead: "",
+      scheduleGroup: "",
+      scheduleLineItem: "",
     });
     setSearch("");
     setShowDropdown(false);
+    setScheduleTouched(false);
     resetAuxiliaryState();
   };
 
@@ -147,10 +166,31 @@ export default function ManageLedgerModal({
       groupName: group.name,
       linkedClientId: null,
       linkedVendorId: null,
+      scheduleMainHead: group.scheduleMainHead || "",
+      scheduleGroup: group.scheduleGroup || "",
+      scheduleLineItem: group.scheduleLineItem || "",
     }));
     setSearch(`${group.name} (${group.nature})`);
     setShowDropdown(false);
+    setScheduleTouched(false);
     await loadReceivableOrPayableSource(group);
+
+    try {
+      const res = await suggestAccountScheduleMappingApi({
+        ledgerName: form.name,
+        groupId: group._id,
+        companyId: user.company._id,
+      });
+      const mapping = res.data || {};
+      setForm((prev) => ({
+        ...prev,
+        scheduleMainHead: mapping.scheduleMainHead || group.scheduleMainHead || "",
+        scheduleGroup: mapping.scheduleGroup || group.scheduleGroup || "",
+        scheduleLineItem: mapping.scheduleLineItem || group.scheduleLineItem || "",
+      }));
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Failed to suggest Schedule III mapping");
+    }
   };
 
   const handleChange = (event) => {
@@ -164,6 +204,21 @@ export default function ManageLedgerModal({
     if (type === "checkbox") {
       setForm((prev) => ({ ...prev, [name]: checked }));
       return;
+    }
+
+    if (name === "scheduleGroup") {
+      setScheduleTouched(true);
+      const nextLineItems = getScheduleLineItems(selectedGroup?.nature, value);
+      setForm((prev) => ({
+        ...prev,
+        scheduleGroup: value,
+        scheduleLineItem: nextLineItems.includes(prev.scheduleLineItem) ? prev.scheduleLineItem : nextLineItems[0] || "",
+      }));
+      return;
+    }
+
+    if (name === "scheduleMainHead" || name === "scheduleLineItem") {
+      setScheduleTouched(true);
     }
 
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -190,7 +245,11 @@ export default function ManageLedgerModal({
         groupName: "",
         linkedClientId: null,
         linkedVendorId: null,
+        scheduleMainHead: "",
+        scheduleGroup: "",
+        scheduleLineItem: "",
       }));
+      setScheduleTouched(false);
       resetAuxiliaryState();
     }
   };
@@ -198,8 +257,8 @@ export default function ManageLedgerModal({
   const buildPayload = () => {
     if (!form.groupId) throw new Error("Account Group is required");
     if (!form.name.trim()) throw new Error("Account Name is required");
-    if (!selectedGroup?.scheduleLineItem) {
-      throw new Error("Selected group does not have Schedule III mapping");
+    if (!form.scheduleMainHead || !form.scheduleGroup || !form.scheduleLineItem) {
+      throw new Error("Schedule III mapping is required");
     }
 
     const ledgerCode = form.name
@@ -299,9 +358,13 @@ export default function ManageLedgerModal({
         isActive: ledgerToEdit.isActive ?? true,
         linkedClientId: ledgerToEdit.linkedClientId || null,
         linkedVendorId: ledgerToEdit.linkedVendorId || null,
+        scheduleMainHead: ledgerToEdit.scheduleMapping?.scheduleMainHead || group?.scheduleMainHead || "",
+        scheduleGroup: ledgerToEdit.scheduleMapping?.scheduleGroup || group?.scheduleGroup || "",
+        scheduleLineItem: ledgerToEdit.scheduleMapping?.scheduleLineItem || group?.scheduleLineItem || "",
       });
       setSearch(group ? `${group.name} (${group.nature})` : ledgerToEdit.groupName || "");
       setShowDropdown(false);
+      setScheduleTouched(Boolean(ledgerToEdit.scheduleMapping?.scheduleLineItem));
       loadReceivableOrPayableSource(group);
     }
   }, [open, ledgerToEdit, groups]);
@@ -311,8 +374,34 @@ export default function ManageLedgerModal({
       resetForm();
       setTempLedgers([]);
       setEditingIndex(null);
+      setScheduleTouched(false);
     }
   }, [open]);
+
+  React.useEffect(() => {
+    if (!open || !form.groupId || scheduleTouched) return;
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const res = await suggestAccountScheduleMappingApi({
+          ledgerName: form.name,
+          groupId: form.groupId,
+          companyId: user.company._id,
+        });
+        const mapping = res.data || {};
+        setForm((prev) => ({
+          ...prev,
+          scheduleMainHead: mapping.scheduleMainHead || prev.scheduleMainHead,
+          scheduleGroup: mapping.scheduleGroup || prev.scheduleGroup,
+          scheduleLineItem: mapping.scheduleLineItem || prev.scheduleLineItem,
+        }));
+      } catch {
+        // Avoid noisy toasts while the user is typing the ledger name.
+      }
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [form.groupId, form.name, open, scheduleTouched, user.company._id]);
 
   return (
     <DialogBox
@@ -442,12 +531,54 @@ export default function ManageLedgerModal({
                     <p className="mt-2 text-sm font-semibold text-slate-900">{derivedInfo.accountType}</p>
                     <p className="text-xs text-slate-500">Opening type: {derivedInfo.openingType}</p>
                   </div>
-                  <div>
+                  <div className="space-y-3">
                     <p className="text-xs font-black uppercase tracking-widest text-blue-700">Schedule III Mapping</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-900">{derivedInfo.scheduleMainHead}</p>
-                    <p className="text-xs text-slate-500">
-                      {derivedInfo.scheduleGroup} • {derivedInfo.scheduleLineItem}
-                    </p>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-slate-600">Main Head</span>
+                        <select
+                          name="scheduleMainHead"
+                          value={form.scheduleMainHead}
+                          onChange={handleChange}
+                          className="w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm"
+                        >
+                          <option value={derivedInfo.scheduleMainHead}>{derivedInfo.scheduleMainHead}</option>
+                        </select>
+                      </label>
+
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-slate-600">Schedule Group</span>
+                        <select
+                          name="scheduleGroup"
+                          value={form.scheduleGroup}
+                          onChange={handleChange}
+                          className="w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm"
+                        >
+                          {availableScheduleGroups.map((groupName) => (
+                            <option key={groupName} value={groupName}>
+                              {groupName}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="space-y-1">
+                        <span className="text-xs font-semibold text-slate-600">Line Item</span>
+                        <select
+                          name="scheduleLineItem"
+                          value={form.scheduleLineItem}
+                          onChange={handleChange}
+                          className="w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-sm"
+                        >
+                          {availableScheduleLineItems.map((lineItem) => (
+                            <option key={lineItem} value={lineItem}>
+                              {lineItem}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                     {derivedInfo.noteNo && <p className="text-xs text-slate-500">Note {derivedInfo.noteNo}</p>}
                   </div>
                 </div>
@@ -496,6 +627,7 @@ export default function ManageLedgerModal({
                         const group = groups.find((item) => item._id === ledger.groupId);
                         setSearch(group ? `${group.name} (${group.nature})` : ledger.groupName);
                         setShowDropdown(false);
+                        setScheduleTouched(Boolean(ledger.scheduleLineItem));
                         await loadReceivableOrPayableSource(group);
                         setEditingIndex(index);
                       }}

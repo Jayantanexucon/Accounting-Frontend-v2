@@ -18,6 +18,7 @@ export const SCHEDULE_III_GROUP_OPTIONS = {
         "Trade Receivables",
         "Cash and Cash Equivalents",
         "Short-Term Loans and Advances",
+        "Other Assets",
         "Other Current Assets",
       ],
     },
@@ -35,6 +36,7 @@ export const SCHEDULE_III_GROUP_OPTIONS = {
       "Current Liabilities": [
         "Short-Term Borrowings",
         "Trade Payables",
+        "Other Liabilities",
         "Other Current Liabilities",
         "Short-Term Provisions",
       ],

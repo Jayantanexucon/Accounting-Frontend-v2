@@ -134,6 +134,18 @@ export const addAccountApi = async (form, companyId) => {
   return data;
 };
 
+export const suggestAccountScheduleMappingApi = async ({ ledgerName = "", groupId, groupName, companyId }) => {
+  const { data } = await API.get(`/accounting/account/schedule/suggest`, {
+    params: {
+      ledgerName,
+      groupId,
+      groupName,
+      companyId,
+    },
+  });
+  return data;
+};
+
 export const updateAccountApi = async (accountId, form) => {
   const { data } = await API.put(`/accounting/account/${accountId}`, {
     ...form,
