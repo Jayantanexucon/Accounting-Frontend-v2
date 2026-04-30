@@ -303,8 +303,10 @@ const InvoiceData = () => {
       (sum, payment) =>
         sum +
         Number(
+          payment.originalAmount ??
+          payment.settledAmount ??
+          payment.grossAmount ??
           payment.receivedAmount ??
-          payment.amountReceived ??
           payment.amountPaid ??
           0,
         ),
