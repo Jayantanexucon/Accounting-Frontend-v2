@@ -20,7 +20,7 @@ const PaymentHistoryModal = ({ open, onClose, invoice, paymentHistory = [] }) =>
   };
 
   const calculateTotals = () => {
-    const totalReceived = paymentHistory.reduce((sum, p) => sum + (p.receivedAmount || p.amountPaid || 0), 0);
+    const totalReceived = paymentHistory.reduce((sum, p) => sum + (p.originalAmount || p.settledAmount || p.receivedAmount || p.amountPaid || 0), 0);
     const totalTDS = paymentHistory.reduce((sum, p) => sum + (p.tdsAdjusted || p.tdsAmount || 0), 0);
     return { totalReceived, totalTDS };
   };
@@ -125,6 +125,11 @@ const PaymentHistoryModal = ({ open, onClose, invoice, paymentHistory = [] }) =>
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-green-600">
                         ₹{formatAmount(payment.receivedAmount || payment.amountPaid || 0)}
+                        {(payment.originalAmount || payment.adjustmentAmount) && (
+                          <div className="text-[10px] font-semibold text-amber-700">
+                            Settled ₹{formatAmount(payment.originalAmount || payment.amountPaid || 0)}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right text-purple-600">
                         {(payment.tdsAdjusted || payment.tdsAmount) > 0 ? `₹${formatAmount(payment.tdsAdjusted || payment.tdsAmount)}` : '-'}

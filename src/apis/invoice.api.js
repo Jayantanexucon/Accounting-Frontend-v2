@@ -206,9 +206,13 @@ export const recordInvoicePaymentApi = async ({
   referenceNumber,
   remarks,
   paymentMode,
+  bankLedgerId,
+  expectedAmount,
+  adjustmentSource,
 }) => {
   const normalizedAmountPaid = Number(amountPaid || 0);
   const normalizedTdsAmount = Number(tdsAmount || 0);
+  const normalizedExpectedAmount = Number(expectedAmount ?? normalizedAmountPaid);
 
   const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/record-payment`, {
     invoiceId,
@@ -216,8 +220,11 @@ export const recordInvoicePaymentApi = async ({
     clientId,
     amountPaid: normalizedAmountPaid,
     tdsAmount: normalizedTdsAmount,
-    grossAmount: normalizedAmountPaid + normalizedTdsAmount,
+    expectedAmount: normalizedExpectedAmount,
+    adjustmentSource,
+    grossAmount: normalizedExpectedAmount + normalizedTdsAmount,
     paymentMode: normalizePaymentMode(paymentMode),
+    bankLedgerId,
     paymentDate,
     reference: referenceNumber,
     notes: remarks,

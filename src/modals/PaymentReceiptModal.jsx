@@ -3,6 +3,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import dayjs from "dayjs";
 import { getJournalByIdApi } from "../apis/journalApi";
+import { getAccountsApi } from "../apis/accountApi";
 import JournalDetailsModal from "./JournalDetailsModal";
 import {
   getInvoicePaymentsApi,
@@ -18,6 +19,8 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
+  const [bankLedgers, setBankLedgers] = useState([]);
+  const [loadingBankLedgers, setLoadingBankLedgers] = useState(false);
   const [accountValidation, setAccountValidation] = useState(null);
   const [selectedPaymentMode, setSelectedPaymentMode] = useState("bank_transfer");
   const [showAdvanced, setShowAdvanced] = useState(true);
@@ -36,10 +39,31 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     Number(payment.tdsAdjusted ?? payment.tdsAmount ?? 0);
 
   const getPaymentSettledAmount = (payment = {}) =>
-    Number(payment.grossAmount ?? getPaymentReceivedAmount(payment) + getPaymentTdsAmount(payment));
+    Number(payment.originalAmount ?? payment.settledAmount ?? payment.grossAmount ?? getPaymentReceivedAmount(payment) + getPaymentTdsAmount(payment));
 
   const getJournalId = (journalRef) =>
     typeof journalRef === "object" && journalRef !== null ? journalRef._id : journalRef;
+
+  const getDefaultBankLedgerStorageKey = () =>
+    user?.company?._id ? `defaultBankLedger:${user.company._id}` : "";
+
+  const isBankLedger = (account = {}) => {
+    const group = typeof account.groupId === "object" ? account.groupId : {};
+    const groupName = account.groupName || group.name || "";
+    const nature = group.nature || account.groupNature || "";
+    const scheduleLineItem =
+      account.scheduleMapping?.scheduleLineItem ||
+      account.scheduleLineItem ||
+      group.scheduleLineItem ||
+      "";
+
+    return (
+      account.isActive !== false &&
+      nature === "Asset" &&
+      /bank/i.test(groupName) &&
+      scheduleLineItem === "Cash and Cash Equivalents"
+    );
+  };
 
   // Payment form state
   const [formData, setFormData] = useState({
@@ -49,6 +73,10 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     referenceNumber: "",
     bankAccountId: "",
     tdsAmount: 0,
+    adjustmentEnabled: false,
+    adjustmentAmount: 0,
+    adjustmentDirection: "deduction",
+    adjustmentSource: "auto",
     remarks: "",
     createJournal: true,
   });
@@ -90,6 +118,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     setLoading(false);
     setError(null);
     setPaymentHistory([]);
+    setBankLedgers([]);
     setAccountValidation(null);
     setShowAdvanced(true);
     setSelectedJournal(null);
@@ -101,6 +130,10 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
       referenceNumber: "",
       bankAccountId: "",
       tdsAmount: 0,
+      adjustmentEnabled: false,
+      adjustmentAmount: 0,
+      adjustmentDirection: "deduction",
+      adjustmentSource: "auto",
       remarks: "",
       createJournal: true,
     });
@@ -144,7 +177,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         setPaymentHistory(Array.isArray(payments) ? payments : []);
 
         const totalReceived = payments.reduce(
-          (sum, payment) => sum + getPaymentReceivedAmount(payment),
+          (sum, payment) => sum + getPaymentSettledAmount(payment),
           0,
         );
         const totalAmount = Number(invoiceData.amountDue || invoiceData.invoiceAmount || 0);
@@ -167,12 +200,38 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
       }
       const accountRes = await validateInvoiceAccountsApi(user.company._id);
       setAccountValidation(accountRes.data);
+      await loadBankLedgers();
     } catch (error) {
       console.error("Error loading invoice data:", error);
       setError("Failed to load invoice details");
       toast.error("Failed to load payment information");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBankLedgers = async () => {
+    if (!user?.company?._id) return;
+
+    setLoadingBankLedgers(true);
+    try {
+      const response = await getAccountsApi(user.company._id);
+      const ledgers = (response?.data || []).filter(isBankLedger);
+      const savedLedgerId = localStorage.getItem(getDefaultBankLedgerStorageKey());
+      const defaultLedgerId = ledgers.some((ledger) => ledger._id === savedLedgerId)
+        ? savedLedgerId
+        : ledgers[0]?._id || "";
+
+      setBankLedgers(ledgers);
+      setFormData((prev) => ({
+        ...prev,
+        bankAccountId: prev.bankAccountId || defaultLedgerId,
+      }));
+    } catch (error) {
+      console.error("Error loading bank ledgers:", error);
+      toast.error("Failed to load bank ledgers");
+    } finally {
+      setLoadingBankLedgers(false);
     }
   };
 
@@ -224,14 +283,30 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     }
 
     const pendingAmount = paymentSummary.pendingAmount || calculateDefaultAmount();
+    const actualReceiptAmount = Number(formData.amountPaid || 0);
+    const manualAdjustmentAmount = formData.adjustmentEnabled ? Number(formData.adjustmentAmount || 0) : 0;
+    const expectedSettlementAmount =
+      formData.adjustmentEnabled && formData.adjustmentDirection === "extra"
+        ? actualReceiptAmount - manualAdjustmentAmount
+        : actualReceiptAmount + manualAdjustmentAmount;
 
-    if (formData.amountPaid <= 0) {
+    if (actualReceiptAmount <= 0) {
       toast.error("Enter a payment amount");
       return;
     }
 
-    if (formData.amountPaid > pendingAmount) {
-      toast.error(`Payment exceeds outstanding amount of ₹${pendingAmount.toFixed(2)}`);
+    if (formData.adjustmentEnabled && manualAdjustmentAmount <= 0) {
+      toast.error("Enter an adjustment amount");
+      return;
+    }
+
+    if (expectedSettlementAmount <= 0) {
+      toast.error("Settlement amount must be greater than zero");
+      return;
+    }
+
+    if (expectedSettlementAmount > pendingAmount + 0.0001) {
+      toast.error(`Settlement exceeds outstanding amount of ₹${pendingAmount.toFixed(2)}`);
       return;
     }
 
@@ -253,7 +328,10 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         companyId: user.company._id,
         clientId: invoiceData?.billTo?._id || invoiceData?.billTo?.clientId || "",
         amountPaid: formData.amountPaid,
+        bankLedgerId: formData.paymentMode === "cash" ? "" : formData.bankAccountId,
         tdsAmount: formData.tdsAmount,
+        expectedAmount: expectedSettlementAmount,
+        adjustmentSource: formData.adjustmentEnabled ? formData.adjustmentSource : "none",
         paymentDate: formData.paymentDate,
         referenceNumber: formData.referenceNumber,
         remarks: formData.remarks,
@@ -295,7 +373,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     const netPayable = Number(invoiceData?.netPayable || totalAmount - invoiceTds);
     
     const totalReceived = Array.isArray(paymentHistory)
-      ? paymentHistory.reduce((sum, payment) => sum + getPaymentReceivedAmount(payment), 0)
+      ? paymentHistory.reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0)
       : 0;
     const pendingAmount = Math.max(0, netPayable - totalReceived);
 
@@ -335,15 +413,38 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
   const invoiceTds = Number(invoiceData?.tdsAmount || invoiceData?.totalTDSAmount || 0);
   const netPayable = totals.totalAmount - invoiceTds;
   const paymentAmount = Number(formData.amountPaid || 0);
-  const remainingAfterPayment = Math.max(0, totals.pendingAmount - paymentAmount);
-  const paymentExceedsOutstanding = paymentAmount > totals.pendingAmount;
+  const manualAdjustmentAmount = formData.adjustmentEnabled ? Number(formData.adjustmentAmount || 0) : 0;
+  const expectedSettlementAmount =
+    formData.adjustmentEnabled && formData.adjustmentDirection === "extra"
+      ? paymentAmount - manualAdjustmentAmount
+      : paymentAmount + manualAdjustmentAmount;
+  const adjustmentDifference = expectedSettlementAmount - paymentAmount;
+  const adjustmentAmount = formData.adjustmentEnabled ? Math.abs(adjustmentDifference) : 0;
+  const hasAdjustment = formData.adjustmentEnabled && adjustmentAmount > 0.009;
+  const adjustmentLabel =
+    adjustmentDifference > 0
+      ? formData.adjustmentSource === "forex"
+        ? "Forex Loss"
+        : ["online", "upi", "card"].includes(formData.paymentMode)
+          ? "Payment Gateway Charges"
+          : "Bank Charges"
+      : formData.adjustmentSource === "forex"
+        ? "Forex Gain"
+        : "Extra Receipt";
+  const remainingAfterPayment = Math.max(0, totals.pendingAmount - Math.max(0, expectedSettlementAmount));
   const hasNegativeValues = formData.amountPaid < 0;
+  const settlementExceedsOutstanding = expectedSettlementAmount > totals.pendingAmount + 0.0001;
+  const invalidAdjustment = formData.adjustmentEnabled && (
+    manualAdjustmentAmount <= 0 ||
+    expectedSettlementAmount <= 0 ||
+    settlementExceedsOutstanding
+  );
   const submitDisabled =
     loading ||
     totals.pendingAmount <= 0 ||
     hasNegativeValues ||
     paymentAmount <= 0 ||
-    paymentExceedsOutstanding;
+    invalidAdjustment;
 
   return (
     <div className="fixed inset-0 bg-black/30 backdrop-blur-md flex items-center justify-center z-50 p-4">
@@ -449,20 +550,19 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       <Banknote className="h-4 w-4 inline mr-1" />
-                      Payment Amount
+                      Actual Bank Receipt
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-2.5 text-gray-500">₹</span>
                       <input
                         type="number"
                         value={formData.amountPaid}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, amountPaid: Math.min(parseFloat(e.target.value) || 0, totals.pendingAmount) }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, amountPaid: parseFloat(e.target.value) || 0 }))}
                         min="0"
-                        max={totals.pendingAmount}
                         step="0.01"
                         className="w-full pl-8 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                       />
-                      <div className="text-xs text-gray-500 mt-1">Max: ₹{totals.pendingAmount.toFixed(2)}</div>
+                      <div className="text-xs text-gray-500 mt-1">Expected settlement: ₹{totals.pendingAmount.toFixed(2)}</div>
                     </div>
                   </div>
 
@@ -494,6 +594,41 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                   </div>
                   )}
 
+                  {Number(formData.amountPaid || 0) > 0 && formData.paymentMode !== "cash" && (
+                    <div className="col-span-2 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                      <label className="block text-sm font-semibold text-blue-900">
+                        Bank Ledger
+                      </label>
+                      <select
+                        value={formData.bankAccountId}
+                        onChange={(e) => {
+                          const ledgerId = e.target.value;
+                          setFormData((prev) => ({ ...prev, bankAccountId: ledgerId }));
+                          if (ledgerId) {
+                            localStorage.setItem(getDefaultBankLedgerStorageKey(), ledgerId);
+                          }
+                        }}
+                        disabled={loadingBankLedgers}
+                        className="mt-2 w-full rounded-md border border-blue-200 bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                      >
+                        {bankLedgers.length === 0 ? (
+                          <option value="">Bank Account will be created automatically</option>
+                        ) : (
+                          bankLedgers.map((ledger) => (
+                            <option key={ledger._id} value={ledger._id}>
+                              {ledger.name} {ledger.code ? `(${ledger.code})` : ""}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                      <div className="mt-1 text-xs text-blue-700">
+                        {bankLedgers.length === 0
+                          ? "No Bank Accounts ledger exists yet. The backend will create Bank Account under Assets > Current Assets > Cash and Cash Equivalents."
+                          : "The selected ledger is saved as the default for future receipts on this company."}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Reference Number */}
                   <div className="col-span-2">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Reference Number</label>
@@ -505,6 +640,86 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
                     />
                   </div>
+
+                  <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <input
+                        type="checkbox"
+                        checked={formData.adjustmentEnabled}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            adjustmentEnabled: e.target.checked,
+                            adjustmentAmount: e.target.checked ? prev.adjustmentAmount : 0,
+                          }))
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
+                      />
+                      Adjust difference manually
+                    </label>
+
+                    {formData.adjustmentEnabled && (
+                      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <label className="text-xs font-semibold text-slate-600">
+                          Adjustment Type
+                          <select
+                            value={formData.adjustmentDirection}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, adjustmentDirection: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-slate-800"
+                          >
+                            <option value="deduction">Bank/Gateway Deduction</option>
+                            <option value="extra">Extra Receipt / Gain</option>
+                          </select>
+                        </label>
+
+                        <label className="text-xs font-semibold text-slate-600">
+                          Adjustment Amount
+                          <div className="relative mt-1">
+                            <span className="absolute left-2.5 top-2 text-gray-500">₹</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={formData.adjustmentAmount}
+                              onChange={(e) =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  adjustmentAmount: parseFloat(e.target.value) || 0,
+                                }))
+                              }
+                              className="w-full rounded-md border border-slate-200 bg-white py-2 pl-7 pr-2 text-sm text-slate-800"
+                            />
+                          </div>
+                        </label>
+
+                        <label className="text-xs font-semibold text-slate-600">
+                          Source
+                          <select
+                            value={formData.adjustmentSource}
+                            onChange={(e) => setFormData((prev) => ({ ...prev, adjustmentSource: e.target.value }))}
+                            className="mt-1 w-full rounded-md border border-slate-200 bg-white px-2 py-2 text-sm text-slate-800"
+                          >
+                            <option value="auto">Auto detect</option>
+                            <option value="bank">Bank deduction</option>
+                            <option value="gateway">Payment gateway</option>
+                            <option value="forex">Foreign exchange</option>
+                          </select>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+
+                  {hasAdjustment && (
+                    <div className="col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="font-semibold text-amber-800">Manual adjustment</span>
+                        <span className="font-bold text-amber-900">₹{adjustmentAmount.toFixed(2)}</span>
+                      </div>
+                      <div className="mt-2 rounded-md bg-white/80 px-3 py-2 text-xs text-amber-800">
+                        Ledger: <span className="font-bold">{adjustmentLabel}</span>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Remarks */}
                   <div className="col-span-2">
@@ -563,12 +778,18 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                           <span className="font-semibold text-slate-900">₹{totals.pendingAmount.toFixed(2)}</span>
                         </div>
                         <div className="flex items-center justify-between mt-2">
-                          <span className="text-gray-600">Payment Amount</span>
+                          <span className="text-gray-600">Actual Bank Receipt</span>
                           <span className="font-semibold text-slate-900">₹{paymentAmount.toFixed(2)}</span>
                         </div>
+                        {hasAdjustment && (
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-gray-600">{adjustmentLabel}</span>
+                            <span className="font-semibold text-amber-700">₹{adjustmentAmount.toFixed(2)}</span>
+                          </div>
+                        )}
                         <div className="flex items-center justify-between mt-2 border-t border-emerald-200 pt-2">
                           <span className="font-medium text-gray-700">Remaining After Payment</span>
-                          <span className={`font-bold ${paymentExceedsOutstanding ? "text-red-600" : "text-slate-900"}`}>
+                          <span className="font-bold text-slate-900">
                             ₹{remainingAfterPayment.toFixed(2)}
                           </span>
                         </div>
@@ -577,11 +798,17 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                   )}
                 </div>
 
-                {(paymentExceedsOutstanding || hasNegativeValues) && (
+                {hasNegativeValues && (
                   <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                    {hasNegativeValues
-                      ? "Negative payment values are not allowed."
-                      : "Payment cannot exceed the pending amount."}
+                    Negative payment values are not allowed.
+                  </div>
+                )}
+
+                {invalidAdjustment && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    {settlementExceedsOutstanding
+                      ? "Receipt plus adjustment cannot exceed the pending amount."
+                      : "Adjustment makes the settlement invalid."}
                   </div>
                 )}
 
@@ -605,6 +832,11 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                               {Number(payment.tdsAdjusted || payment.tdsAmount || 0) > 0 && (
                                 <div className="text-xs text-violet-600 mt-1">
                                   TDS: ₹{getPaymentTdsAmount(payment).toFixed(2)} | Settlement: ₹{getPaymentSettledAmount(payment).toFixed(2)}
+                                </div>
+                              )}
+                              {Number(payment.adjustmentAmount || 0) > 0 && (
+                                <div className="text-xs text-amber-700 mt-1">
+                                  {String(payment.adjustmentType || "ADJUSTMENT").replace(/_/g, " ")}: ₹{Number(payment.adjustmentAmount || 0).toFixed(2)}
                                 </div>
                               )}
                             </div>
