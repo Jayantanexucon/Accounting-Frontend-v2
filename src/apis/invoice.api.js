@@ -252,3 +252,12 @@ export const getInvoiceTdsReportApi = async ({
   });
   return data;
 };
+
+export const reverseInvoicePaymentApi = async ({ companyId, paymentId, invoiceId }) => {
+  const { data } = await API.post(`${INVOICE_ACCOUNTING_BASE}/${companyId}/reverse-payment`, {
+    paymentId,
+    invoiceId,
+  });
+  return data;
+};
+

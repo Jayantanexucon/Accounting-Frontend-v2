@@ -33,6 +33,7 @@ import {
   Calculator,
   Shield,
   Package,
+  RotateCcw,
 } from "lucide-react";
 import dayjs from "dayjs";
 import { useAuth } from "../contexts/AuthContext";
@@ -46,6 +47,7 @@ import {
   downloadInvoicePdfApi,
   downloadInvoiceWordApi,
   getInvoiceByIdApi,
+  reverseInvoicePaymentApi,
 } from "../apis/invoice.api";
 
 const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
@@ -61,6 +63,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   const [showPOModal, setShowPOModal] = useState(false);
   const [selectedJournal, setSelectedJournal] = useState(null);
   const [showJournalModal, setShowJournalModal] = useState(false);
+  const [reversingPaymentId, setReversingPaymentId] = useState(null);
 
   // Fetch invoice details
   useEffect(() => {
@@ -128,6 +131,26 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     }
   };
 
+  const handleReversePayment = async (paymentId) => {
+    if (!invoice || !user?.company?._id) return;
+    if (reversingPaymentId) return; // already in progress
+    try {
+      setReversingPaymentId(paymentId);
+      await reverseInvoicePaymentApi({
+        companyId: user.company._id,
+        paymentId,
+        invoiceId: invoice._id,
+      });
+      toast.success("Payment reversed successfully. Reversal journal has been posted.");
+      await fetchInvoiceDetails();
+    } catch (err) {
+      console.error("Error reversing payment:", err);
+      toast.error(err?.response?.data?.message || "Failed to reverse payment");
+    } finally {
+      setReversingPaymentId(null);
+    }
+  };
+
   const getPaymentTermsText = (terms) => {
     const termsMap = {
       "net-15": "Net 15 Days",
@@ -156,7 +179,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     const invoiceAmount = netPayable;
     const payments = invoice.payments || invoice.paymentIds || [];
 
-    const paymentsTotal = payments.reduce(
+    const activePayments = payments.filter((p) => !p.isReversed);
+
+    const paymentsTotal = activePayments.reduce(
       (sum, payment) =>
         sum +
         Number(
@@ -167,18 +192,18 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
         ),
       0,
     );
-    const totalTDSAdjusted = payments.reduce(
+    const totalTDSAdjusted = activePayments.reduce(
       (sum, payment) => sum + Number(payment.tdsAdjusted || payment.tdsAmount || 0),
       0,
     );
 
     const totalReceived =
-      payments.length > 0
+      activePayments.length > 0
         ? paymentsTotal
         : Number(invoice.paidAmount ?? Math.max(0, invoiceAmount - Number(invoice.remainingAmount ?? invoiceAmount)));
     const pendingAmount = Math.max(
       0,
-      payments.length > 0
+      activePayments.length > 0
         ? invoiceAmount - totalReceived
         : Number(invoice.remainingAmount ?? invoiceAmount - totalReceived),
     );
@@ -799,6 +824,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               <div>
                                 <p className="text-xs font-bold text-slate-800 group-hover:text-emerald-700 transition-colors">
                                   Payment #{i+1}
+                                  {p.isReversed && (
+                                    <span className="ml-2 px-1.5 py-0.5 rounded-full text-[9px] font-black bg-red-100 text-red-600 border border-red-200">Reversed</span>
+                                  )}
                                 </p>
                                 <div className="flex items-center gap-3 mt-0.5 text-[10px] text-slate-400">
                                   <span>{formatDate(p.paymentDate)}</span>
@@ -808,13 +836,13 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                               </div>
                             </div>
                             <div className="text-right shrink-0">
-                              <p className="text-xs font-black text-emerald-700 tabular-nums">
+                              <p className={`text-xs font-black tabular-nums ${p.isReversed ? "text-slate-400 line-through" : "text-emerald-700"}`}>
                                 {formatCurrency(p.amountReceived ?? p.receivedAmount ?? p.amountPaid, currency)}
                               </p>
                               <p className="text-[9px] text-slate-400 font-semibold mt-0.5">
                                 Pending impact: {formatCurrency(p.grossAmount ?? p.receivedAmount ?? p.amountPaid, currency)}
                               </p>
-                              <div className="flex items-center justify-end gap-2 mt-0.5">
+                              <div className="flex items-center justify-end gap-2 mt-1 flex-wrap">
                                 {p.tdsAdjusted>0 && <span className="text-[9px] text-violet-600 font-bold">TDS: {formatCurrency(p.tdsAdjusted,currency)}</span>}
                                 {(p.paymentJournal || p.journalId) && (
                                   <button
@@ -826,9 +854,47 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                                     Journal: {p.paymentJournal?.number || p.journalId?.number || "View"}
                                   </button>
                                 )}
-                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${p.status==="posted" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200"}`}>
-                                  {p.status||"recorded"}
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full border ${p.isReversed ? "bg-red-100 text-red-600 border-red-200" : p.status==="posted" ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200"}`}>
+                                  {p.isReversed ? "reversed" : (p.status||"recorded")}
                                 </span>
+                              </div>
+                              {/* Reverse Payment Controls */}
+                              <div className="flex items-center justify-end gap-2 mt-1.5 flex-wrap">
+                                {p.isReversed ? (
+                                  <>
+                                    <button
+                                      disabled
+                                      className="flex items-center gap-1 px-2 py-1 text-[9px] font-bold rounded-lg bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                                    >
+                                      <RotateCcw size={9} />
+                                      Payment Reversed
+                                    </button>
+                                    {(p.reversalJournalId) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleOpenJournal(p.reversalJournalId?._id || p.reversalJournalId)}
+                                        className="text-[9px] text-purple-600 font-bold hover:text-purple-800 flex items-center gap-1 transition-colors"
+                                      >
+                                        <BookOpen size={9} />
+                                        View Reversed Posting →
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    disabled={reversingPaymentId === p._id}
+                                    onClick={() => handleReversePayment(p._id)}
+                                    className={`flex items-center gap-1 px-2 py-1 text-[9px] font-bold rounded-lg border transition-all ${
+                                      reversingPaymentId === p._id
+                                        ? "bg-slate-100 text-slate-400 border-slate-200 cursor-wait"
+                                        : "bg-red-50 text-red-600 border-red-200 hover:bg-red-100 hover:text-red-700"
+                                    }`}
+                                  >
+                                    <RotateCcw size={9} className={reversingPaymentId === p._id ? "animate-spin" : ""} />
+                                    {reversingPaymentId === p._id ? "Reversing…" : "Reverse Payment"}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>

@@ -152,8 +152,14 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
       return paymentSummary.pendingAmount;
     }
 
-    // Calculate pending amount from invoiceData
-    const totalReceived = invoiceData.payments?.reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0) || 0;
+    // Calculate pending amount from invoiceData — exclude reversed payments
+    const activePayments = (invoiceData.payments || invoiceData.paymentIds || []).filter(
+      (p) => !p.isReversed,
+    );
+    const totalReceived = activePayments.reduce(
+      (sum, payment) => sum + getPaymentSettledAmount(payment),
+      0,
+    );
 
     const totalAmount = invoiceData.amountDue || invoiceData.invoiceAmount || 0;
     const pendingAmount = totalAmount - totalReceived;
@@ -176,7 +182,9 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
         const payments = Array.isArray(paymentRes.data) ? paymentRes.data : [];
         setPaymentHistory(Array.isArray(payments) ? payments : []);
 
-        const totalReceived = payments.reduce(
+        // Exclude reversed payments so pending amount reflects true outstanding
+        const activePayments = payments.filter((p) => !p.isReversed);
+        const totalReceived = activePayments.reduce(
           (sum, payment) => sum + getPaymentSettledAmount(payment),
           0,
         );
@@ -373,7 +381,7 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
     const netPayable = Number(invoiceData?.netPayable || totalAmount - invoiceTds);
     
     const totalReceived = Array.isArray(paymentHistory)
-      ? paymentHistory.reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0)
+      ? paymentHistory.filter((p) => !p.isReversed).reduce((sum, payment) => sum + getPaymentSettledAmount(payment), 0)
       : 0;
     const pendingAmount = Math.max(0, netPayable - totalReceived);
 
@@ -821,34 +829,58 @@ const PaymentReceiptModal = ({ open, onClose, onSuccess, invoiceData }) => {
                     </h4>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
                       {paymentHistory.map((payment, idx) => (
-                        <div key={idx} className="bg-gray-50 p-3 rounded-lg border border-gray-200">
-                          <div className="flex justify-between items-center">
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-lg border ${
+                            payment.isReversed
+                              ? "bg-red-50 border-red-200"
+                              : "bg-gray-50 border-gray-200"
+                          }`}
+                        >
+                          <div className="flex justify-between items-start">
                             <div>
-                              <div className="font-medium text-sm">₹{getPaymentReceivedAmount(payment).toFixed(2)}</div>
-                              <div className="text-xs text-gray-600">
+                              <div className="flex items-center gap-2">
+                                <div className={`font-medium text-sm ${payment.isReversed ? "line-through text-slate-400" : ""}`}>
+                                  ₹{getPaymentReceivedAmount(payment).toFixed(2)}
+                                </div>
+                                {payment.isReversed && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-600 border border-red-200">
+                                    ↩ Reversed
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`text-xs mt-0.5 ${payment.isReversed ? "text-slate-400" : "text-gray-600"}`}>
                                 {dayjs(payment.paymentDate).format("DD MMM YYYY")}
                                 {payment.referenceNumber && ` • ${payment.referenceNumber}`}
                               </div>
                               {Number(payment.tdsAdjusted || payment.tdsAmount || 0) > 0 && (
-                                <div className="text-xs text-violet-600 mt-1">
+                                <div className={`text-xs mt-1 ${payment.isReversed ? "text-slate-400" : "text-violet-600"}`}>
                                   TDS: ₹{getPaymentTdsAmount(payment).toFixed(2)} | Settlement: ₹{getPaymentSettledAmount(payment).toFixed(2)}
                                 </div>
                               )}
                               {Number(payment.adjustmentAmount || 0) > 0 && (
-                                <div className="text-xs text-amber-700 mt-1">
+                                <div className={`text-xs mt-1 ${payment.isReversed ? "text-slate-400" : "text-amber-700"}`}>
                                   {String(payment.adjustmentType || "ADJUSTMENT").replace(/_/g, " ")}: ₹{Number(payment.adjustmentAmount || 0).toFixed(2)}
                                 </div>
                               )}
                             </div>
                             <div className="text-right">
-                              <span className={`px-2 py-1 text-xs rounded-full ${payment.status === "posted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}>
+                              <span
+                                className={`px-2 py-1 text-xs rounded-full ${
+                                  payment.isReversed
+                                    ? "bg-red-100 text-red-500 line-through"
+                                    : payment.status === "posted"
+                                    ? "bg-green-100 text-green-800"
+                                    : "bg-yellow-100 text-yellow-800"
+                                }`}
+                              >
                                 {payment.paymentMode || "bank_transfer"}
                               </span>
                               {payment.journalId && (
                                 <button
                                   type="button"
                                   onClick={() => handleOpenJournal(payment.journalId)}
-                                  className="text-xs text-blue-600 mt-1 font-semibold hover:text-blue-800"
+                                  className="text-xs text-blue-600 mt-1 font-semibold hover:text-blue-800 block"
                                 >
                                   Journal: {payment.paymentJournal?.number || payment.journalNumber || "View"}
                                 </button>
