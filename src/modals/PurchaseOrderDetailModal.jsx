@@ -32,10 +32,15 @@ import { useNavigate } from "react-router-dom";
 /* ── helpers ──────────────────────────────────────────── */
 const fmt = (d) => (d ? dayjs(d).format("DD MMM YYYY") : "—");
 const fmtT = (d) => (d ? dayjs(d).format("DD MMM YYYY, hh:mm A") : "—");
+const normalizeCurrency = (currency = "INR") => {
+  const code = String(currency || "INR").trim().toUpperCase();
+  if (["RS", "₹", "RUPEE", "RUPEES"].includes(code)) return "INR";
+  return /^[A-Z]{3}$/.test(code) ? code : "INR";
+};
 const fmtC = (amt, currency = "INR") =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
-    currency: currency || "INR",
+    currency: normalizeCurrency(currency),
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amt || 0);
@@ -1074,7 +1079,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                           </tbody>
                           <tfoot>
                             <tr style={{ background: "linear-gradient(90deg,#f1f5f9 0%,#dbeafe 100%)" }}>
-                              <td colSpan={4} className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Totals</td>
+                              <td colSpan={5} className="px-4 py-3 text-right text-[10px] font-black text-slate-500 uppercase tracking-widest">Totals</td>
                               <td className="px-4 py-3 font-black text-slate-700 tabular-nums">{fmtC(po.totalTaxableValue, currency)}</td>
                               <td className="px-4 py-3" />
                               <td className="px-4 py-3 font-black text-amber-700 tabular-nums">
