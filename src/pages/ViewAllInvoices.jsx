@@ -182,7 +182,9 @@ const ViewAllInvoices = () => {
 
 
   useEffect(() => {
-    const invoiceId = new URLSearchParams(location.search).get("invoiceId");
+    const searchParams = new URLSearchParams(location.search);
+    const invoiceId = searchParams.get("invoiceId");
+    const tab = searchParams.get("tab");
     if (!invoiceId || autoOpenedInvoiceId === invoiceId) return;
     const existing = [...invoices, ...allInvoices].find((inv) => inv._id === invoiceId);
     if (existing) {
@@ -967,7 +969,12 @@ const ViewAllInvoices = () => {
       {createLedgerModal.open && (
         <CreateLedgerFromInvoiceModal open={createLedgerModal.open} onClose={() => setCreateLedgerModal({ open: false, invoiceNo: null, invoiceData: null })} onSuccess={handleLedgerCreated} initialInvoiceNo={createLedgerModal.invoiceNo} invoiceData={createLedgerModal.invoiceData} />
       )}
-      <InvoiceDetailModal isOpen={detailModalOpen} onClose={() => setDetailModalOpen(false)} invoiceId={selectedInvoiceForDetail?._id} />
+      <InvoiceDetailModal 
+        isOpen={detailModalOpen} 
+        onClose={() => setDetailModalOpen(false)} 
+        invoiceId={selectedInvoiceForDetail?._id} 
+        defaultTab={new URLSearchParams(location.search).get("tab") || "overview"}
+      />
       {paymentModal.open && (
         <PaymentReceiptModal open={paymentModal.open} onClose={() => setPaymentModal({ open: false, invoiceData: null })} onSuccess={handlePaymentRecorded} invoiceData={paymentModal.invoiceData} />
       )}

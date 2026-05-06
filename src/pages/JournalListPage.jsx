@@ -317,12 +317,12 @@ const [loadingStats, setLoadingStats] = useState(false);
       };
     }
 
-    if (journal.sourceType === "PAYMENT") {
+    if (journal.sourceType === "PAYMENT" || journal.sourceType === "REVERSAL") {
       return {
         enabled: true,
-        label: "Open Payment",
+        label: "Open Invoice",
         variant: "primary",
-        icon: FiDollarSign,
+        icon: FiFileText,
       };
     }
 
@@ -427,6 +427,8 @@ const [loadingStats, setLoadingStats] = useState(false);
         return "bg-slate-100 text-slate-700 border-slate-200";
       case "EXCEL":
         return "bg-emerald-100 text-emerald-800 border-emerald-200";
+      case "REVERSAL":
+        return "bg-red-100 text-red-800 border-red-200";
       default:
         return "bg-gray-100 text-gray-700 border-gray-200";
     }
@@ -519,30 +521,50 @@ const [loadingStats, setLoadingStats] = useState(false);
   };
 
   const openSourceDocument = useCallback(
-    (journal) => {
+    (journal, showToast = false) => {
       if (!journal) return;
 
       if (journal.sourceType === "INVOICE" && journal.sourceId) {
-        toast.info(SYSTEM_JOURNAL_MESSAGE);
+        if (showToast) toast.info(SYSTEM_JOURNAL_MESSAGE);
         navigate(`/invoice-data/viewall-invoices?invoiceId=${journal.sourceId}`);
         return;
       }
 
       if (journal.sourceType === "PAYMENT") {
-        toast.info(SYSTEM_JOURNAL_MESSAGE);
+        if (showToast) toast.info(SYSTEM_JOURNAL_MESSAGE);
         const params = new URLSearchParams();
         params.set("tab", "payments");
-        const paymentInvoiceId = journal.paymentLinks?.[0]?.invoiceId;
-        if (paymentInvoiceId) {
-          params.set("invoiceId", paymentInvoiceId);
+        
+        // Use sourceId as invoiceId if available, otherwise check paymentLinks
+        const invoiceId = journal.sourceId || journal.paymentLinks?.[0]?.invoiceId;
+        if (invoiceId) {
+          params.set("invoiceId", invoiceId);
         }
+        
         if (journal.referenceNumber) {
           params.set("reference", journal.referenceNumber);
         }
-        if (journal.sourceId) {
-          params.set("paymentId", journal.sourceId);
-        }
         navigate(`/invoice-data/viewall-invoices?${params.toString()}`);
+        return;
+      }
+
+      if (journal.sourceType === "REVERSAL") {
+        if (showToast) toast.info(SYSTEM_JOURNAL_MESSAGE);
+        const params = new URLSearchParams();
+        params.set("tab", "payments");
+        
+        // Use sourceId as invoiceId if available, otherwise check paymentLinks
+        const invoiceId = journal.sourceId || journal.paymentLinks?.[0]?.invoiceId;
+        if (invoiceId) {
+          params.set("invoiceId", invoiceId);
+        }
+        
+        if (journal.referenceNumber) {
+          params.set("reference", journal.referenceNumber);
+        }
+        
+        navigate(`/invoice-data/viewall-invoices?${params.toString()}`);
+        return;
       }
     },
     [navigate],
@@ -551,7 +573,7 @@ const [loadingStats, setLoadingStats] = useState(false);
   const handleReferenceClick = (journal, e) => {
     e.stopPropagation();
 
-    if (journal?.sourceType === "INVOICE" || journal?.sourceType === "PAYMENT") {
+    if (journal?.sourceType === "INVOICE" || journal?.sourceType === "PAYMENT" || journal?.sourceType === "REVERSAL") {
       openSourceDocument(journal);
     }
   };
@@ -736,14 +758,14 @@ const [loadingStats, setLoadingStats] = useState(false);
   const voucherTypes = ["SALES", "PURCHASE", "PAYMENT", "RECEIPT", "CONTRA", "JOURNAL"];
 
   // Source type options
-  const sourceTypes = ["MANUAL", "EXCEL", "INVOICE", "PAYMENT", "ADJUSTMENT"];
+  const sourceTypes = ["MANUAL", "EXCEL", "INVOICE", "PAYMENT", "REVERSAL", "ADJUSTMENT"];
 
   // Handle edit button click
   const handleEditClick = async (journal, e) => {
     e.stopPropagation();
 
-    if (journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT") {
-      openSourceDocument(journal);
+    if (journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT" || journal.sourceType === "REVERSAL") {
+      openSourceDocument(journal, true);
       return;
     }
 
@@ -1132,9 +1154,9 @@ const [loadingStats, setLoadingStats] = useState(false);
                               <button
                                 type="button"
                                 onClick={(e) => handleReferenceClick(journal, e)}
-                                disabled={journal.sourceType !== "INVOICE" && journal.sourceType !== "PAYMENT"}
+                                disabled={journal.sourceType !== "INVOICE" && journal.sourceType !== "PAYMENT" && journal.sourceType !== "REVERSAL"}
                                 className={`text-xs font-bold ${
-                                  journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT"
+                                  journal.sourceType === "INVOICE" || journal.sourceType === "PAYMENT" || journal.sourceType === "REVERSAL"
                                     ? "text-blue-700 hover:text-blue-900 underline cursor-pointer"
                                     : "text-slate-400 cursor-default"
                                 }`}
@@ -1340,7 +1362,22 @@ const [loadingStats, setLoadingStats] = useState(false);
                     </div>
                     <div className="p-4 bg-gray-50 rounded-lg">
                       <p className="text-xs text-gray-500 mb-1">Reference Number</p>
-                      <p className="font-semibold text-gray-900">{selectedJournal.referenceNumber || "N/A"}</p>
+                      {selectedJournal.referenceNumber ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleReferenceClick(selectedJournal, e)}
+                          disabled={selectedJournal.sourceType !== "INVOICE" && selectedJournal.sourceType !== "PAYMENT" && selectedJournal.sourceType !== "REVERSAL"}
+                          className={`text-left font-semibold ${
+                            selectedJournal.sourceType === "INVOICE" || selectedJournal.sourceType === "PAYMENT" || selectedJournal.sourceType === "REVERSAL"
+                              ? "text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                              : "text-gray-900 cursor-default"
+                          }`}
+                        >
+                          {selectedJournal.referenceNumber}
+                        </button>
+                      ) : (
+                        <p className="font-semibold text-gray-900">N/A</p>
+                      )}
                     </div>
                     <div className="p-4 bg-gray-50 rounded-lg">
                       <p className="text-xs text-gray-500 mb-1">Party</p>
