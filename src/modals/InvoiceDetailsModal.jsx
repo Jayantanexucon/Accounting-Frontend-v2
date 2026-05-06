@@ -50,13 +50,13 @@ import {
   reverseInvoicePaymentApi,
 } from "../apis/invoice.api";
 
-const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
+const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview" }) => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [invoice, setInvoice] = useState(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(defaultTab || "overview");
   const [paymentReceiptModal, setPaymentReceiptModal] = useState(false);
   const [createLedgerModal, setCreateLedgerModal] = useState(false);
   const [showTdsDetails, setShowTdsDetails] = useState(false);
@@ -70,7 +70,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     if (isOpen && invoiceId) {
       fetchInvoiceDetails();
     }
-  }, [isOpen, invoiceId]);
+    if (isOpen && defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [isOpen, invoiceId, defaultTab]);
 
   const fetchInvoiceDetails = async () => {
     setLoading(true);
