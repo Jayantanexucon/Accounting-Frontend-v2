@@ -1130,16 +1130,27 @@ const InvoiceData = () => {
                               />
                               {paymentBadge.text}
                             </span>
-                            <span
+                            {/* <span
                               className={`px-2 py-0.5 text-[10px] font-black rounded-full border uppercase tracking-wider ${lifecycleBadge.color}`}
                             >
                               {lifecycleBadge.text}
-                            </span>
+                            </span> */}
                             {journalPosted && (
                               <span className="px-2 py-0.5 text-[10px] font-black rounded-full border border-emerald-200 text-emerald-700 bg-emerald-50 uppercase tracking-wider">
                                 ✓ Journal
                               </span>
                             )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewDetails(invoice, e);
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100 transition-all"
+                              title="View Details"
+                            >
+                              <FileText size={9} /> View Details
+                            </button>
+
                             {invoice.tdsAmount > 0 && (
                               <span className="px-2 py-0.5 text-[10px] font-black rounded-full border border-violet-200 text-violet-700 bg-violet-50 uppercase tracking-wider">
                                 TDS
@@ -1211,16 +1222,6 @@ const InvoiceData = () => {
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleViewDetails(invoice, e);
-                            }}
-                            className="p-2 rounded-xl bg-slate-100 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 transition-all"
-                            title="View Details"
-                          >
-                            <FileText size={14} />
-                          </button>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1743,6 +1744,8 @@ const InvoiceData = () => {
                                 <CheckCircle size={12} /> Sales Journal Posted
                               </span>
                             )}
+
+                       
 
                             {canEditInvoice &&
                               invoice.salesJournalId &&

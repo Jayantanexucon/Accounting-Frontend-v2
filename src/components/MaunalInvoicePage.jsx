@@ -45,12 +45,30 @@ const roundMoney = (value = 0) =>
 const normalizeTaxBreakdown = (item = {}, fallback = {}) => {
   const list = Array.isArray(item?.taxBreakdown) ? item.taxBreakdown : [];
   if (list.length > 0) {
-    return list.map((entry) => ({
+    const currentTaxAmount = roundMoney(
+      item?.taxAmount ?? item?.gstAmount ?? fallback.amount ?? 0,
+    );
+    const normalized = list.map((entry) => ({
       taxType: entry?.taxType || entry?.label || fallback.taxType || "GST",
       label: entry?.label || entry?.taxType || fallback.label || fallback.taxType || "GST",
       rate: Number(entry?.rate || 0),
       amount: roundMoney(entry?.amount || 0),
     }));
+    const totalRate = normalized.reduce((sum, entry) => sum + Number(entry.rate || 0), 0);
+
+    if (currentTaxAmount > 0 && totalRate > 0) {
+      let allocated = 0;
+      return normalized.map((entry, index) => {
+        const amount =
+          index === normalized.length - 1
+            ? roundMoney(currentTaxAmount - allocated)
+            : roundMoney((currentTaxAmount * Number(entry.rate || 0)) / totalRate);
+        allocated = roundMoney(allocated + amount);
+        return { ...entry, amount };
+      });
+    }
+
+    return normalized;
   }
 
   const taxType = item?.taxType || item?.taxLabel || fallback.taxType || "GST";
@@ -4146,17 +4164,17 @@ const ManualInvoicePage = () => {
                         <thead className="bg-slate-50/50">
                           <tr>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">S. No.</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Description</th>
+                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[280px]">Description</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Prev Remaining</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Current Term</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">HSN/SAC</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Qty</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Rate</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Taxable Value</th>
+                            <th className="px-2 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[84px]">HSN/SAC</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[72px]">Qty</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[84px]">Rate</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[108px]">Taxable Value</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Term Remaining</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} %</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">{primaryTaxLabel} Amount</th>
-                            <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Total</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[64px]">{primaryTaxLabel} %</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[96px]">{primaryTaxLabel} Amount</th>
+                            <th className="px-2 py-4 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest min-w-[112px]">Total</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After</th>
                             <th className="px-4 py-4 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest text-center">Action</th>
                           </tr>
@@ -4166,7 +4184,7 @@ const ManualInvoicePage = () => {
                             <tr key={index} className="hover:bg-gray-50">
                               <td className="px-3 py-3 text-center font-semibold text-gray-700 align-top">{index + 1}</td>
 
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-4 py-3 align-top min-w-[280px]">
                                 <input
                                   type="text"
                                   value={item.description}
@@ -4187,12 +4205,12 @@ const ManualInvoicePage = () => {
                               <td className="px-4 py-3 text-right font-medium text-slate-700 align-top min-w-[120px]">
                                 {(item.currentTermAmount || 0).toFixed(2)}
                               </td>
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-2 py-3 align-top min-w-[96px]">
                                 <select
                                   value={item.hsnSac}
                                   onChange={(e) => handleItemChange(index, "hsnSac", e.target.value)}
                                   disabled={isFromPO}
-                                  className={`w-full px-2 py-1 border rounded ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500 cursor-not-allowed" : "border-gray-300"}`}
+                                  className={`w-[10ch] px-2 py-1 border rounded ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500 cursor-not-allowed" : "border-gray-300"}`}
                                 >
                                   <option value="" disabled>
                                     Select HSN/SAC
@@ -4213,12 +4231,12 @@ const ManualInvoicePage = () => {
                                 })()}
                               </td>
 
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-2 py-3 align-top">
                                 <input
                                   type="number"
                                   value={item.quantity}
                                   onChange={(e) => handleItemChange(index, "quantity", e.target.value)}
-                                  className="w-full min-w-[120px] px-3 py-2 border border-gray-300 rounded text-right"
+                                  className="w-[7ch] px-2 py-2 border border-gray-300 rounded text-right"
                                   min="0"
                                   max={item.poRemainingQuantity || undefined}
                                   step="0.0001"
@@ -4231,24 +4249,24 @@ const ManualInvoicePage = () => {
                                 )}
                               </td>
 
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-2 py-3 align-top">
                                 <input
                                   type="number"
                                   value={item.rate}
                                   readOnly
-                                  className="w-full min-w-[120px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
+                                  className="w-[9ch] px-2 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
                                   min="0"
                                   step="1"
                                   inputMode="decimal"
                                 />
                               </td>
 
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-2 py-3 align-top">
                                 <input
                                   type="number"
                                   value={item.taxableValue}
                                   onChange={(e) => handleItemChange(index, "taxableValue", e.target.value)}
-                                  className="w-full min-w-[140px] px-3 py-2 border border-gray-300 rounded text-right"
+                                  className="w-[12ch] px-2 py-2 border border-gray-300 rounded text-right"
                                   min="0"
                                   step="0.01"
                                   inputMode="decimal"
@@ -4257,25 +4275,25 @@ const ManualInvoicePage = () => {
                               <td className="px-4 py-3 text-right font-medium text-amber-600 align-top min-w-[130px]">
                                 {(item.currentTermRemainingAmount || 0).toFixed(2)}
                               </td>
-                              <td className="px-4 py-3 text-right font-medium align-top">
+                              <td className="px-2 py-3 text-right font-medium align-top">
                                 <input
                                   type="number"
                                   value={item.gstRate}
                                   readOnly
-                                  className="w-full min-w-[100px] px-3 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
+                                  className="w-[6ch] px-2 py-2 border border-gray-200 rounded text-right bg-slate-50 text-slate-500"
                                   min="0"
                                   max="100"
                                   step="0.1"
                                 />
                               </td>
-                              <td className="px-4 py-3 text-right font-medium align-top">{item.gstAmount?.toFixed(2) || "0.00"}</td>
-                              <td className="px-4 py-3 align-top">
+                              <td className="px-2 py-3 text-right font-medium align-top tabular-nums min-w-[96px]">{item.gstAmount?.toFixed(2) || "0.00"}</td>
+                              <td className="px-2 py-3 align-top">
                                 <input
                                   type="number"
                                   value={item.total}
                                   readOnly={isFromPO}
                                   onChange={(e) => handleItemChange(index, "total", e.target.value)}
-                                  className={`w-full min-w-[150px] px-3 py-2 border rounded text-right font-semibold ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500" : "border-gray-300 text-gray-900"}`}
+                                  className={`w-[13ch] px-2 py-2 border rounded text-right font-semibold ${isFromPO ? "border-gray-200 bg-slate-50 text-slate-500" : "border-gray-300 text-gray-900"}`}
                                   min="0"
                                   max={item.maxAllowedInvoiceAmount || undefined}
                                   step="0.01"

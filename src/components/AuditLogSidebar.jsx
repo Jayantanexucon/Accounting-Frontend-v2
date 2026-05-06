@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getAuditLogsApi } from "../apis/auditLog.api";
 
 const AuditLogSidebar = ({
@@ -14,6 +14,8 @@ const AuditLogSidebar = ({
   const [toDate, setToDate] = useState("");
   const [module, setModule] = useState(""); // Single module filter for home page
   const [isLoading, setIsLoading] = useState(false);
+  const [expandedChanges, setExpandedChanges] = useState({});
+  const [expandedLogChanges, setExpandedLogChanges] = useState({});
 
   // Determine if this is home page (no specific modules provided)
   const isHomePage = !modules || modules.length === 0;
@@ -29,14 +31,7 @@ const AuditLogSidebar = ({
     if (isHomePage) {
       setModule("");
     }
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (!fromDate || !toDate) return;
-
-    loadLogs();
-  }, [fromDate, toDate, isOpen]);
+  }, [isHomePage, isOpen]);
 
   const handleDateNavigation = (direction) => {
     const from = new Date(fromDate);
@@ -51,11 +46,12 @@ const AuditLogSidebar = ({
         from.setDate(from.getDate() + 1);
         to.setDate(to.getDate() + 1);
         break;
-      case "today":
+      case "today": {
         const today = new Date();
         from.setTime(today.getTime());
         to.setTime(today.getTime());
         break;
+      }
       default:
         return;
     }
@@ -115,7 +111,7 @@ const AuditLogSidebar = ({
     setToDate(to.toISOString().split("T")[0]);
   };
 
-  const loadLogs = async () => {
+  const loadLogs = useCallback(async () => {
     if (!companyId) {
       console.error("Company ID is required");
       return;
@@ -141,7 +137,14 @@ const AuditLogSidebar = ({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [companyId, fromDate, isHomePage, module, toDate]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!fromDate || !toDate) return;
+
+    loadLogs();
+  }, [fromDate, isOpen, loadLogs, toDate]);
 
   // Filter logs based on modules prop or module filter
   const filteredLogs =
@@ -178,6 +181,534 @@ const AuditLogSidebar = ({
       minute: "2-digit",
       hour12: true,
     });
+  };
+
+  const INTERNAL_FIELDS = new Set([
+    "_id",
+    "id",
+    "__v",
+    "createdAt",
+    "updatedAt",
+    "createdBy",
+    "updatedBy",
+    "companyId",
+    "entityId",
+    "vendorId",
+    "clientId",
+    "userId",
+    "ipAddress",
+    "userAgent",
+  ]);
+
+  const BUSINESS_FIELD_LABELS = {
+    poNumber: "PO Number",
+    invoiceNo: "Invoice No.",
+    number: "Number",
+    poDate: "PO Date",
+    invoiceDate: "Invoice Date",
+    deliveryDate: "Delivery Date",
+    dueDate: "Due Date",
+    vendor: "Vendor",
+    vendorName: "Vendor",
+    client: "Client",
+    clientName: "Client",
+    totalAmount: "Total Amount",
+    amountDue: "Amount Due",
+    netPayable: "Net Payable",
+    status: "Status",
+    approvalStatus: "Approval Status",
+    items: "Items",
+    invoiceSchedule: "Invoice Schedule",
+    linkedInvoices: "Linked Invoices",
+    journalLines: "Journal Lines",
+  };
+
+  const parseMaybeJson = (value) => {
+    if (typeof value !== "string") return value;
+
+    const trimmed = value.trim();
+    if (!trimmed || (!trimmed.startsWith("{") && !trimmed.startsWith("["))) {
+      return value;
+    }
+
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  };
+
+  const isEmptyAuditValue = (value) => {
+    const parsedValue = parseMaybeJson(value);
+    return (
+      parsedValue === null ||
+      parsedValue === undefined ||
+      parsedValue === "" ||
+      (Array.isArray(parsedValue) && parsedValue.length === 0)
+    );
+  };
+
+  const isInternalField = (field = "") => {
+    if (!field) return true;
+    const fieldParts = String(field).split(".");
+    const lastPart = fieldParts[fieldParts.length - 1];
+    return INTERNAL_FIELDS.has(field) || INTERNAL_FIELDS.has(lastPart);
+  };
+
+  const formatFieldLabel = (field = "Field") =>
+    BUSINESS_FIELD_LABELS[field] ||
+    String(field)
+      .replace(/([A-Z])/g, " $1")
+      .replace(/[_-]/g, " ")
+      .replace(/^./, (str) => str.toUpperCase());
+
+  const getObjectDisplayValue = (value) => {
+    if (!value || typeof value !== "object") return null;
+
+    return (
+      value.name ||
+      value.vendorName ||
+      value.clientName ||
+      value.companyName ||
+      value.accountName ||
+      value.poNumber ||
+      value.invoiceNo ||
+      value.number ||
+      value.description ||
+      value.itemDescription ||
+      value.serviceName ||
+      null
+    );
+  };
+
+  const formatAuditDate = (value) => {
+    if (!value) return "N/A";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return date.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const formatAuditCurrency = (value) => {
+    if (value === undefined || value === null || value === "") return "N/A";
+    const numericValue = Number(value);
+    if (Number.isNaN(numericValue)) return String(value);
+    return `₹${numericValue.toLocaleString("en-IN", {
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const shouldFormatAsDate = (field, value) => {
+    if (!value || typeof value !== "string") return false;
+    if (!/date/i.test(field)) return false;
+    return !Number.isNaN(new Date(value).getTime());
+  };
+
+  const shouldFormatAsCurrency = (field) =>
+    /amount|total|value|payable|rate|price|taxable/i.test(field);
+
+  const getItemAmount = (item = {}) =>
+    item.total ??
+    item.amount ??
+    item.totalAmount ??
+    item.netAmount ??
+    item.taxableValue ??
+    item.rate ??
+    item.price ??
+    0;
+
+  const getItemLabel = (item = {}, index) =>
+    item.description ||
+    item.itemDescription ||
+    item.serviceName ||
+    item.itemName ||
+    item.name ||
+    item.hsnDescription ||
+    `Item ${index + 1}`;
+
+  const simplifyAuditValue = (field, value) => {
+    const parsedValue = parseMaybeJson(value);
+
+    if (parsedValue === null || parsedValue === undefined || parsedValue === "") {
+      return { kind: "empty", label: "N/A" };
+    }
+
+    if (Array.isArray(parsedValue)) {
+      return {
+        kind: "array",
+        count: parsedValue.length,
+        items: parsedValue.slice(0, 8).map((item, index) => ({
+          label:
+            typeof item === "object"
+              ? getItemLabel(item, index)
+              : String(item || `Item ${index + 1}`),
+          amount:
+            typeof item === "object" && shouldFormatAsCurrency(field)
+              ? formatAuditCurrency(getItemAmount(item))
+              : typeof item === "object" && field === "items"
+                ? formatAuditCurrency(getItemAmount(item))
+                : null,
+        })),
+      };
+    }
+
+    if (typeof parsedValue === "object") {
+      const displayValue = getObjectDisplayValue(parsedValue);
+      return { kind: "text", label: displayValue || "Updated object" };
+    }
+
+    if (typeof parsedValue === "boolean") {
+      return { kind: "text", label: parsedValue ? "Yes" : "No" };
+    }
+
+    if (shouldFormatAsDate(field, parsedValue)) {
+      return { kind: "text", label: formatAuditDate(parsedValue) };
+    }
+
+    if (typeof parsedValue === "number" && shouldFormatAsCurrency(field)) {
+      return { kind: "text", label: formatAuditCurrency(parsedValue) };
+    }
+
+    return { kind: "text", label: String(parsedValue) };
+  };
+
+  const valuesAreSame = (oldValue, newValue) =>
+    JSON.stringify(parseMaybeJson(oldValue)) === JSON.stringify(parseMaybeJson(newValue));
+
+  const getChangeType = (change) => {
+    const oldValue = parseMaybeJson(change.oldValue);
+    const newValue = parseMaybeJson(change.newValue);
+    const oldEmpty = isEmptyAuditValue(change.oldValue);
+    const newEmpty = isEmptyAuditValue(change.newValue);
+
+    if (oldEmpty && (!newEmpty || Array.isArray(newValue))) return "added";
+    if (!oldEmpty && newEmpty) return "removed";
+    if (Array.isArray(oldValue) || Array.isArray(newValue)) {
+      return "array";
+    }
+    return "updated";
+  };
+
+  const getBusinessValue = (source, key) => {
+    if (!source || typeof source !== "object") return undefined;
+    if (source[key] !== undefined) return source[key];
+
+    if (key === "vendor") return source.vendorName || source.vendor?.name || source.vendor?.vendorName;
+    if (key === "client") return source.clientName || source.client?.name || source.client?.clientName;
+    return undefined;
+  };
+
+  const getKeyInformation = (log) => {
+    const source =
+      log.actionCode === "DELETE"
+        ? parseMaybeJson(log.oldValues)
+        : parseMaybeJson(log.newValues);
+
+    const fields = [
+      "poNumber",
+      "invoiceNo",
+      "poDate",
+      "invoiceDate",
+      "deliveryDate",
+      "dueDate",
+      "vendor",
+      "client",
+      "totalAmount",
+      "amountDue",
+      "netPayable",
+      "status",
+      "approvalStatus",
+    ];
+
+    return fields
+      .map((field) => {
+        const value = getBusinessValue(source, field);
+        if (value === undefined || value === null || value === "") return null;
+
+        const formattedValue = simplifyAuditValue(field, value);
+        return {
+          label: formatFieldLabel(field),
+          value: formattedValue.label,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 6);
+  };
+
+  const getFallbackChanges = (log) => {
+    const source =
+      log.actionCode === "DELETE"
+        ? parseMaybeJson(log.oldValues)
+        : parseMaybeJson(log.newValues);
+
+    if (!source || typeof source !== "object") return [];
+
+    return Object.entries(source)
+      .filter(([field, value]) => !isInternalField(field) && !isEmptyAuditValue(value))
+      .map(([field, value]) => ({
+        field,
+        oldValue: log.actionCode === "DELETE" ? value : undefined,
+        newValue: log.actionCode === "DELETE" ? undefined : value,
+      }));
+  };
+
+  const getAuditChanges = (log) => {
+    const rawChanges = Array.isArray(log.changes)
+      ? log.changes
+      : Array.isArray(log.logs)
+        ? log.logs
+        : [];
+
+    const changes = rawChanges.length > 0 ? rawChanges : getFallbackChanges(log);
+
+    return changes
+      .filter((change) => change && !isInternalField(change.field))
+      .filter((change) => !valuesAreSame(change.oldValue, change.newValue))
+      .map((change) => ({
+        field: change.field,
+        label: formatFieldLabel(change.field),
+        type: getChangeType(change),
+        old: simplifyAuditValue(change.field, change.oldValue),
+        new: simplifyAuditValue(change.field, change.newValue),
+      }));
+  };
+
+  const getActionMeta = (actionCode = "") => {
+    if (/delete|removed/i.test(actionCode)) {
+      return {
+        iconClass: "bg-red-500",
+        titleVerb: "Deleted",
+        badgeClass: "bg-red-50 text-red-700 border-red-200",
+      };
+    }
+
+    if (/create|added|import|bulk/i.test(actionCode)) {
+      return {
+        iconClass: "bg-green-500",
+        titleVerb: "Created",
+        badgeClass: "bg-green-50 text-green-700 border-green-200",
+      };
+    }
+
+    return {
+      iconClass: "bg-yellow-400",
+      titleVerb: "Updated",
+      badgeClass: "bg-yellow-50 text-yellow-800 border-yellow-200",
+    };
+  };
+
+  const getEntityTitle = (log) => {
+    const source =
+      log.actionCode === "DELETE"
+        ? parseMaybeJson(log.oldValues)
+        : parseMaybeJson(log.newValues);
+
+    return (
+      source?.poNumber ||
+      source?.invoiceNo ||
+      source?.number ||
+      source?.name ||
+      source?.vendorName ||
+      source?.clientName ||
+      source?.accountName ||
+      source?.companyName ||
+      ""
+    );
+  };
+
+  function formatAuditLog(log) {
+    const actionMeta = getActionMeta(log.actionCode || log.action || "");
+    const entityLabel = (log.entityType || log.module || "Activity")
+      .replace(/_/g, " ")
+      .replace(/([a-z])([A-Z])/g, "$1 $2");
+
+    return {
+      id: log.id || log._id || `${log.timestamp}-${log.description}`,
+      title: log.description || `${actionMeta.titleVerb} ${entityLabel}`,
+      entityTitle: getEntityTitle(log),
+      user: log.performedBy?.name || "System",
+      role: log.performedBy?.role || "Unknown",
+      time: log.date && log.time ? `${log.date}, ${log.time}` : `${formatDate(log.timestamp || log.createdAt)}, ${formatTime(log.timestamp || log.createdAt)}`,
+      status: log.status || "SUCCESS",
+      actionCode: log.actionCode || log.action,
+      actionMeta,
+      keyInformation: getKeyInformation(log),
+      changes: getAuditChanges(log),
+    };
+  }
+
+  const renderAuditValue = (value, tone = "neutral") => {
+    if (value.kind === "array") {
+      return (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500">
+            {value.count} item{value.count === 1 ? "" : "s"}
+          </div>
+          {value.items.length > 0 && (
+            <div className="space-y-1">
+              {value.items.map((item, index) => (
+                <div key={`${item.label}-${index}`} className="flex items-start justify-between gap-3 text-xs">
+                  <span className="text-gray-700">{item.label}</span>
+                  {item.amount && <span className="font-medium text-gray-900 whitespace-nowrap">{item.amount}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const toneClass =
+      tone === "old"
+        ? "text-red-700"
+        : tone === "new"
+          ? "text-green-700"
+          : "text-gray-700";
+
+    return <div className={`text-xs ${toneClass}`}>{value.label}</div>;
+  };
+
+  const renderStructuredAuditLog = (log) => {
+    const auditLog = formatAuditLog(log);
+    const visibleChanges = expandedLogChanges[auditLog.id]
+      ? auditLog.changes
+      : auditLog.changes.slice(0, 3);
+
+    return (
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <div className="flex items-start gap-3">
+            <span className={`mt-1 h-3 w-3 rounded-full ${auditLog.actionMeta.iconClass}`} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900">{auditLog.title}</h3>
+                  {auditLog.entityTitle && (
+                    <p className="mt-1 text-sm font-semibold text-gray-700">{auditLog.entityTitle}</p>
+                  )}
+                </div>
+                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-bold ${auditLog.actionMeta.badgeClass}`}>
+                  {auditLog.status}
+                </span>
+              </div>
+              <div className="mt-3 space-y-1 text-xs text-gray-600">
+                <div>{auditLog.user} ({auditLog.role})</div>
+                <div>{auditLog.time}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {auditLog.keyInformation.length > 0 && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500">Key Information</h4>
+            <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+              {auditLog.keyInformation.map((item) => (
+                <div key={item.label}>
+                  <div className="text-[11px] font-medium text-gray-500">{item.label}</div>
+                  <div className="mt-0.5 text-sm font-semibold text-gray-900">{item.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div>
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-xs font-bold uppercase tracking-wide text-gray-500">
+              Changes ({auditLog.changes.length})
+            </h4>
+            {auditLog.changes.length > 3 && (
+              <button
+                type="button"
+                onClick={() =>
+                  setExpandedLogChanges((prev) => ({
+                    ...prev,
+                    [auditLog.id]: !prev[auditLog.id],
+                  }))
+                }
+                className="text-xs font-semibold text-blue-600 hover:text-blue-800"
+              >
+                {expandedLogChanges[auditLog.id] ? "View Less" : "View More"}
+              </button>
+            )}
+          </div>
+
+          {auditLog.changes.length === 0 ? (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-500">
+              No changed business fields available.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {visibleChanges.map((change, index) => {
+                const changeId = `${auditLog.id}-${change.field}-${index}`;
+                const isExpanded = expandedChanges[changeId] ?? index < 3;
+                const isArrayChange = change.old.kind === "array" || change.new.kind === "array";
+                const oldEmpty = change.old.kind === "empty";
+                const newEmpty = change.new.kind === "empty";
+
+                return (
+                  <div key={changeId} className="rounded-lg border border-gray-200 bg-white">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExpandedChanges((prev) => ({
+                          ...prev,
+                          [changeId]: !isExpanded,
+                        }))
+                      }
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                    >
+                      <div>
+                        <div className="text-sm font-semibold text-gray-900">
+                          {isArrayChange ? `${change.label} Updated (${change.new.count || change.old.count} items)` : change.label}
+                        </div>
+                        {(change.type === "added" || change.type === "removed") && (
+                          <div className="mt-0.5 text-xs text-gray-500">
+                            {change.type === "added" ? `Added (${change.new.count ?? 0} items)` : "Removed"}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-xs font-semibold text-gray-500">{isExpanded ? "Collapse" : "Expand"}</span>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-100 px-4 py-3">
+                        {isArrayChange && oldEmpty ? (
+                          <div className="text-sm text-gray-600">
+                            {change.label}: Added ({change.new.count ?? 0} items)
+                          </div>
+                        ) : isArrayChange && newEmpty ? (
+                          <div className="text-sm text-gray-600">
+                            {change.label}: Removed ({change.old.count ?? 0} items)
+                          </div>
+                        ) : isArrayChange ? (
+                          renderAuditValue(change.new, "new")
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-md border border-red-100 bg-red-50 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-red-500">Old</div>
+                              {renderAuditValue(change.old, "old")}
+                            </div>
+                            <div className="rounded-md border border-green-100 bg-green-50 p-3">
+                              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-green-600">New</div>
+                              {renderAuditValue(change.new, "new")}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   // Get color for action type badge
@@ -269,2614 +800,7 @@ const AuditLogSidebar = ({
       BULK_CREATE: "Invoice Create(Excel)",
     };
 
-    return displayMap[actionType] || actionType.replace(/_/g, " ");
-  };
-
-  // Generic renderer for change details
-  const renderChangeDetails = (log) => {
-    const { actionCode, changes, oldValues, newValues } = log;
-
-    // For CREATE actions, show the created data
-    if (actionCode === "CREATE" && newValues) {
-      return (
-        <div className="space-y-3">
-          <div className="text-sm font-medium text-green-800 mb-2">Created Data:</div>
-          <div className="bg-green-50 border border-green-200 rounded p-3">
-            <pre className="text-xs text-green-700 whitespace-pre-wrap">
-              {JSON.stringify(newValues, null, 2)}
-            </pre>
-          </div>
-        </div>
-      );
-    }
-
-    // For DELETE actions, show the deleted data
-    if (actionCode === "DELETE" && oldValues) {
-      return (
-        <div className="space-y-3">
-          <div className="text-sm font-medium text-red-800 mb-2">Deleted Data:</div>
-          <div className="bg-red-50 border border-red-200 rounded p-3">
-            <pre className="text-xs text-red-700 whitespace-pre-wrap">
-              {JSON.stringify(oldValues, null, 2)}
-            </pre>
-          </div>
-        </div>
-      );
-    }
-
-    // For UPDATE actions, show the changes
-    if (actionCode === "UPDATE" && changes && changes.length > 0) {
-      return (
-        <div className="space-y-3">
-          <div className="text-sm font-medium text-blue-800 mb-2">Changes Made:</div>
-          {changes.map((change, idx) => {
-            const fieldName = change.field || "Field";
-            const displayFieldName = fieldName.replace(/([A-Z])/g, " $1").replace(/^./, str => str.toUpperCase());
-
-            return (
-              <div key={idx} className="grid grid-cols-4 gap-3 text-sm items-start">
-                <div className="font-medium text-gray-700">{displayFieldName}</div>
-                <div className="col-span-3 grid grid-cols-2 gap-3">
-                  <div className="bg-red-50 border border-red-200 rounded p-2">
-                    <div className="text-xs text-gray-500 mb-1">Previous</div>
-                    <div className="text-red-700 text-xs">
-                      {change.oldValue !== undefined ? 
-                        (Array.isArray(change.oldValue) ? `${change.oldValue.length} items` : 
-                         typeof change.oldValue === 'object' ? JSON.stringify(change.oldValue) : 
-                         String(change.oldValue)) : 
-                        "N/A"}
-                    </div>
-                  </div>
-                  <div className="bg-green-50 border border-green-200 rounded p-2">
-                    <div className="text-xs text-gray-500 mb-1">New</div>
-                    <div className="text-green-700 text-xs">
-                      {change.newValue !== undefined ? 
-                        (Array.isArray(change.newValue) ? `${change.newValue.length} items` : 
-                         typeof change.newValue === 'object' ? JSON.stringify(change.newValue) : 
-                         String(change.newValue)) : 
-                        "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      );
-    }
-
-    // For other actions or no changes, show a message
-    return (
-      <div className="text-sm text-gray-600 italic">
-        No change details available for this action.
-      </div>
-    );
-  };
-
-  // Render journal logs based on actual data structure
-  const renderJournalLog = (log) => {
-    const actionType = log.actionCode;
-
-    switch (actionType) {
-      case "CREATE":
-        const journalData =
-          log.newValues?.journal || log.newValues;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Journal Created
-              </div>
-            </div>
-            {journalData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Journal Number
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {journalData.number || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Voucher Type
-                    </div>
-                    <div className="text-sm">
-                      {journalData.voucherType || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Date
-                    </div>
-                    <div className="text-sm">
-                      {formatDate(journalData.date)}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Status
-                    </div>
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${journalData.posted ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
-                    >
-                      {journalData.posted ? "Posted" : "Draft"}
-                    </span>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Narration
-                    </div>
-                    <div className="text-sm">
-                      {journalData.narration || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "DELETE":
-        const oldJournalData =
-          log.oldValues?.journal || log.oldValues;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="font-medium text-red-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                Journal Deleted
-              </div>
-            </div>
-            {oldJournalData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Journal Number
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      {oldJournalData.number || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Voucher Type
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldJournalData.voucherType || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "UPDATE":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Journal Updated
-              </div>
-            </div>
-            <div className="space-y-3">
-              {(log.changes || []).map((entry, idx) => {
-                const fieldNames = {
-                  journalLines: "Journal Lines",
-                };
-                const fieldName =
-                  fieldNames[entry.field] ||
-                  entry.field
-                    .replace(/([A-Z])/g, " $1")
-                    .replace(/^./, (str) => str.toUpperCase());
-
-                return (
-                  <div
-                    key={idx}
-                    className="grid grid-cols-4 gap-3 text-sm items-center"
-                  >
-                    <div className="font-medium text-gray-700">{fieldName}</div>
-                    <div className="col-span-3 grid grid-cols-2 gap-3">
-                      <div className="bg-red-50 border border-red-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Previous
-                        </div>
-                        <div className="text-red-700 line-through text-xs">
-                          {entry.oldValue
-                            ? Array.isArray(entry.oldValue)
-                              ? `${entry.oldValue.length} lines`
-                              : JSON.stringify(entry.oldValue).substring(
-                                  0,
-                                  100,
-                                ) + "..."
-                            : "N/A"}
-                        </div>
-                      </div>
-                      <div className="bg-green-50 border border-green-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Updated
-                        </div>
-                        <div className="text-green-700 text-xs">
-                          {entry.newValue
-                            ? Array.isArray(entry.newValue)
-                              ? `${entry.newValue.length} lines`
-                              : JSON.stringify(entry.newValue).substring(
-                                  0,
-                                  100,
-                                ) + "..."
-                            : "N/A"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  const renderInvoiceCreatedContent = (invoiceData) => {
-    if (!invoiceData) return null;
-    return (
-      <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">
-              Invoice Number
-            </div>
-            <div className="text-sm font-semibold">
-              {invoiceData.invoiceNo || "N/A"}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">Amount Due</div>
-            <div className="text-sm font-semibold">
-              ₹{formatCurrency(invoiceData.amountDue)}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">
-              Invoice Date
-            </div>
-            <div className="text-sm">{formatDate(invoiceData.invoiceDate)}</div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">Due Date</div>
-            <div className="text-sm">{formatDate(invoiceData.dueDate)}</div>
-          </div>
-          {invoiceData.billTo && (
-            <div className="col-span-2 space-y-1">
-              <div className="text-sm font-medium text-gray-500">Bill To</div>
-              <div className="text-sm">{invoiceData.billTo.name || "N/A"}</div>
-            </div>
-          )}
-        </div>
-        {invoiceData.items && invoiceData.items.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <div className="text-sm font-medium text-gray-700 mb-2">
-              Items ({invoiceData.items.length})
-            </div>
-            <div className="space-y-2">
-              {invoiceData.items.slice(0, 3).map((item, idx) => (
-                <div key={idx} className="flex justify-between text-sm">
-                  <span>{item.description || `Item ${idx + 1}`}</span>
-                  <span>₹{formatCurrency(item.total)}</span>
-                </div>
-              ))}
-              {invoiceData.items.length > 3 && (
-                <div className="text-xs text-gray-500 italic">
-                  + {invoiceData.items.length - 3} more item
-                  {invoiceData.items.length - 3 !== 1 ? "s" : ""}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Render invoice logs based on actual data structure
-  const renderInvoiceLog = (log) => {
-    const actionType = log.actionCode;
-
-    switch (actionType) {
-      case "CREATE":
-        const invoiceData = log.newValues;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Invoice Created
-              </div>
-            </div>
-            {renderInvoiceCreatedContent(logEntries[0]?.newValue)}
-          </div>
-        );
-      case "BULK_CREATE":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Invoice Created (Bulk)
-              </div>
-            </div>
-            {renderInvoiceCreatedContent(log.newValues)}
-          </div>
-        );
-
-      case "UPDATE":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Invoice Updated
-              </div>
-            </div>
-            <div className="space-y-3">
-              {(log.changes || []).map((entry, idx) => {
-                if (entry.field === "items") {
-                  let oldItems = [];
-                  let newItems = [];
-
-                  try {
-                    oldItems =
-                      typeof entry.oldValue === "string"
-                        ? JSON.parse(entry.oldValue)
-                        : entry.oldValue || [];
-                    newItems =
-                      typeof entry.newValue === "string"
-                        ? JSON.parse(entry.newValue)
-                        : entry.newValue || [];
-                  } catch (e) {
-                    oldItems = entry.oldValue || [];
-                    newItems = entry.newValue || [];
-                  }
-
-                  const oldTotal = Array.isArray(oldItems)
-                    ? oldItems.reduce((sum, item) => sum + (item.total || 0), 0)
-                    : 0;
-                  const newTotal = Array.isArray(newItems)
-                    ? newItems.reduce((sum, item) => sum + (item.total || 0), 0)
-                    : 0;
-
-                  return (
-                    <div
-                      key={idx}
-                      className="border border-gray-200 rounded-lg p-3"
-                    >
-                      <div className="font-medium text-sm mb-2 text-gray-700">
-                        Items Updated
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 mb-1">
-                            Previous Items
-                          </div>
-                          {Array.isArray(oldItems) && oldItems.length > 0 ? (
-                            <div className="space-y-1">
-                              <div className="text-xs">
-                                {oldItems.length} item
-                                {oldItems.length !== 1 ? "s" : ""}
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                Total: ₹{formatCurrency(oldTotal)}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              No items
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 mb-1">
-                            Updated Items
-                          </div>
-                          {Array.isArray(newItems) && newItems.length > 0 ? (
-                            <div className="space-y-1">
-                              <div className="text-xs">
-                                {newItems.length} item
-                                {newItems.length !== 1 ? "s" : ""}
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                Total: ₹{formatCurrency(newTotal)}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              No items
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const fieldNames = {
-                  invoiceDate: "Invoice Date",
-                  dueDate: "Due Date",
-                  amountDue: "Amount Due",
-                  status: "Status",
-                  billTo: "Bill To",
-                  items: "Items",
-                };
-
-                const fieldName =
-                  fieldNames[entry.field] ||
-                  entry.field
-                    .replace(/([A-Z])/g, " $1")
-                    .replace(/^./, (str) => str.toUpperCase());
-
-                return (
-                  <div
-                    key={idx}
-                    className="grid grid-cols-4 gap-3 text-sm items-center"
-                  >
-                    <div className="font-medium text-gray-700">{fieldName}</div>
-                    <div className="col-span-3 grid grid-cols-2 gap-3">
-                      <div className="bg-red-50 border border-red-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Previous
-                        </div>
-                        <div className="text-red-700 line-through text-xs">
-                          {entry.field.includes("Date") && entry.oldValue
-                            ? formatDate(entry.oldValue)
-                            : entry.field === "amountDue"
-                              ? `₹${formatCurrency(entry.oldValue)}`
-                              : entry.oldValue !== null &&
-                                  entry.oldValue !== undefined
-                                ? typeof entry.oldValue === "object"
-                                  ? JSON.stringify(entry.oldValue).substring(
-                                      0,
-                                      100,
-                                    ) + "..."
-                                  : String(entry.oldValue)
-                                : "N/A"}
-                        </div>
-                      </div>
-                      <div className="bg-green-50 border border-green-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Updated
-                        </div>
-                        <div className="text-green-700 text-xs">
-                          {entry.field.includes("Date") && entry.newValue
-                            ? formatDate(entry.newValue)
-                            : entry.field === "amountDue"
-                              ? `₹${formatCurrency(entry.newValue)}`
-                              : entry.newValue !== null &&
-                                  entry.newValue !== undefined
-                                ? typeof entry.newValue === "object"
-                                  ? JSON.stringify(entry.newValue).substring(
-                                      0,
-                                      100,
-                                    ) + "..."
-                                  : String(entry.newValue)
-                                : "N/A"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-
-      case "DELETE":
-        const oldInvoiceData = logEntries[0]?.oldValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="font-medium text-red-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                Invoice Deleted
-              </div>
-            </div>
-            {oldInvoiceData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Invoice Number
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      {oldInvoiceData.invoiceNo || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Amount Due
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      ₹{formatCurrency(oldInvoiceData.amountDue)}
-                    </div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Bill To
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldInvoiceData.billTo?.name || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render invoice accounting logs
-  const renderInvoiceAccountingLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "SALES_JOURNAL_POSTED":
-        const journalData =
-          logEntries[0]?.newValue?.salesJournal || logEntries[0]?.newValue;
-        const accountingStatus =
-          logEntries[1]?.newValue || logEntries[0]?.newValue?.accountingStatus;
-
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="font-medium text-blue-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Sales Journal Posted
-              </div>
-            </div>
-            <div className="space-y-3">
-              {journalData && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Journal Number
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {journalData.journalNumber || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Journal Date
-                    </div>
-                    <div className="text-sm">
-                      {formatDate(journalData.journalDate)}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {accountingStatus && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Accounting Status
-                    </div>
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${accountingStatus === "journal_posted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
-                    >
-                      {accountingStatus.replace(/_/g, " ").toUpperCase()}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render client logs
-  const renderClientLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "CLIENT_CREATED":
-        const clientData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Client Created
-              </div>
-            </div>
-            {clientData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Client Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {clientData.clientName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Client Code
-                    </div>
-                    <div className="text-sm">
-                      {clientData.clientCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Contact Person
-                    </div>
-                    <div className="text-sm">
-                      {clientData.contactPerson || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Contact Number
-                    </div>
-                    <div className="text-sm">
-                      {clientData.contactNumber || "N/A"}
-                    </div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Email
-                    </div>
-                    <div className="text-sm">{clientData.email || "N/A"}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "CLIENT_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Client Updated
-              </div>
-            </div>
-            {logEntries.length > 0 ? (
-              <div className="space-y-3">
-                {logEntries.map((entry, idx) => {
-                  const fieldNames = {
-                    clientName: "Client Name",
-                    contactPerson: "Contact Person",
-                    contactNumber: "Contact Number",
-                    email: "Email",
-                    status: "Status",
-                  };
-
-                  const fieldName =
-                    fieldNames[entry.field] ||
-                    entry.field
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (str) => str.toUpperCase());
-
-                  return (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-4 gap-3 text-sm items-center"
-                    >
-                      <div className="font-medium text-gray-700">
-                        {fieldName}
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-3">
-                        <div className="bg-red-50 border border-red-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Previous
-                          </div>
-                          <div className="text-red-700 line-through">
-                            {entry.oldValue !== null &&
-                            entry.oldValue !== undefined
-                              ? String(entry.oldValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                        <div className="bg-green-50 border border-green-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Updated
-                          </div>
-                          <div className="text-green-700">
-                            {entry.newValue !== null &&
-                            entry.newValue !== undefined
-                              ? String(entry.newValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600 italic">
-                No specific field changes recorded
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render vendor logs
-  const renderVendorLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "VENDOR_CREATED":
-        const vendorData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Vendor Created
-              </div>
-            </div>
-            {vendorData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Vendor Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {vendorData.vendorName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Vendor Code
-                    </div>
-                    <div className="text-sm">
-                      {vendorData.vendorCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Contact Person
-                    </div>
-                    <div className="text-sm">
-                      {vendorData.contactPerson || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Phone Number
-                    </div>
-                    <div className="text-sm">
-                      {vendorData.phoneNumber || "N/A"}
-                    </div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Email
-                    </div>
-                    <div className="text-sm">{vendorData.email || "N/A"}</div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Address
-                    </div>
-                    <div className="text-sm">
-                      {vendorData.registeredAddress || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "VENDOR_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Vendor Updated
-              </div>
-            </div>
-            {logEntries.length > 0 ? (
-              <div className="space-y-3">
-                {logEntries.map((entry, idx) => {
-                  const fieldNames = {
-                    vendorName: "Vendor Name",
-                    contactPerson: "Contact Person",
-                    phoneNumber: "Phone Number",
-                    email: "Email",
-                    status: "Status",
-                  };
-
-                  const fieldName =
-                    fieldNames[entry.field] ||
-                    entry.field
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (str) => str.toUpperCase());
-
-                  return (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-4 gap-3 text-sm items-center"
-                    >
-                      <div className="font-medium text-gray-700">
-                        {fieldName}
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-3">
-                        <div className="bg-red-50 border border-red-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Previous
-                          </div>
-                          <div className="text-red-700 line-through">
-                            {entry.oldValue !== null &&
-                            entry.oldValue !== undefined
-                              ? String(entry.oldValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                        <div className="bg-green-50 border border-green-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Updated
-                          </div>
-                          <div className="text-green-700">
-                            {entry.newValue !== null &&
-                            entry.newValue !== undefined
-                              ? String(entry.newValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600 italic">
-                No specific field changes recorded
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render account logs
-  const renderAccountLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "ACCOUNT_CREATED":
-        const accountData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Account Created
-              </div>
-            </div>
-            {accountData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Account Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {accountData.name || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Account Code
-                    </div>
-                    <div className="text-sm">{accountData.code || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Account Type
-                    </div>
-                    <div className="text-sm">{accountData.type || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Name
-                    </div>
-                    <div className="text-sm">
-                      {accountData.groupName || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Helper to render PO created content (used for both single and bulk)
-  const renderPOCreatedContent = (poData) => {
-    if (!poData) return null;
-
-    // Determine client display name (could be string or object)
-    let clientName = "N/A";
-    if (poData.client) {
-      if (typeof poData.client === "string") clientName = poData.client;
-      else if (poData.client.name) clientName = poData.client.name;
-    }
-
-    // Format addresses if available
-    const clientAddress = poData.client?.address
-      ? typeof poData.client.address === "string"
-        ? poData.client.address
-        : ""
-      : "";
-
-    return (
-      <div className="space-y-3">
-        {/* Basic PO Info */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">PO Number</div>
-            <div className="text-sm font-semibold">
-              {poData.poNumber || "N/A"}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">
-              Total Amount
-            </div>
-            <div className="text-sm font-semibold">
-              ₹{formatCurrency(poData.totalAmount)}
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">PO Date</div>
-            <div className="text-sm">{formatDate(poData.poDate)}</div>
-          </div>
-          <div className="space-y-1">
-            <div className="text-sm font-medium text-gray-500">
-              Delivery Date
-            </div>
-            <div className="text-sm">{formatDate(poData.deliveryDate)}</div>
-          </div>
-          <div className="col-span-2 space-y-1">
-            <div className="text-sm font-medium text-gray-500">Client</div>
-            <div className="text-sm">
-              {clientName}
-              {clientAddress && (
-                <span className="text-gray-600">, {clientAddress}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Items preview (similar to invoice) */}
-        {poData.items && poData.items.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-gray-200">
-            <div className="text-sm font-medium text-gray-700 mb-2">
-              Items ({poData.items.length})
-            </div>
-            <div className="space-y-2">
-              {poData.items.slice(0, 3).map((item, idx) => (
-                <div key={idx} className="flex justify-between text-sm">
-                  <span>
-                    {item.description || `Item ${idx + 1}`}
-                    <span className="text-gray-500 text-xs ml-2">
-                      ({item.quantity} x ₹{formatCurrency(item.rate)})
-                    </span>
-                  </span>
-                  <span>₹{formatCurrency(item.total)}</span>
-                </div>
-              ))}
-              {poData.items.length > 3 && (
-                <div className="text-xs text-gray-500 italic">
-                  + {poData.items.length - 3} more item
-                  {poData.items.length - 3 !== 1 ? "s" : ""}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tax summary (optional) */}
-        {(poData.totalTaxableValue > 0 ||
-          poData.totalCGSTAmount > 0 ||
-          poData.totalSGSTAmount > 0) && (
-          <div className="mt-4 pt-4 border-t border-gray-200 text-sm">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <span className="text-gray-500">Taxable Value:</span>
-                <span className="ml-2 font-medium">
-                  ₹{formatCurrency(poData.totalTaxableValue)}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">CGST:</span>
-                <span className="ml-2 font-medium">
-                  ₹{formatCurrency(poData.totalCGSTAmount)}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">SGST:</span>
-                <span className="ml-2 font-medium">
-                  ₹{formatCurrency(poData.totalSGSTAmount)}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">IGST:</span>
-                <span className="ml-2 font-medium">
-                  ₹{formatCurrency(poData.totalIGSTAmount)}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Render purchase order logs
-  const renderPurchaseOrderLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "PO_CREATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Purchase Order Created
-              </div>
-            </div>
-            {renderPOCreatedContent(logEntries[0]?.newValue)}
-          </div>
-        );
-
-      case "PO_CREATED From Excal sheets":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Purchase Order Created (Excel)
-              </div>
-            </div>
-            {renderPOCreatedContent(logEntries[0]?.newValue)}
-          </div>
-        );
-
-      case "PO_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Purchase Order Updated
-              </div>
-            </div>
-            <div className="space-y-3">
-              {logEntries.map((entry, idx) => {
-                if (entry.field === "items") {
-                  let oldItems = [];
-                  let newItems = [];
-
-                  try {
-                    oldItems =
-                      typeof entry.oldValue === "string"
-                        ? JSON.parse(entry.oldValue)
-                        : entry.oldValue || [];
-                    newItems =
-                      typeof entry.newValue === "string"
-                        ? JSON.parse(entry.newValue)
-                        : entry.newValue || [];
-                  } catch (e) {
-                    oldItems = entry.oldValue || [];
-                    newItems = entry.newValue || [];
-                  }
-
-                  const oldTotal = Array.isArray(oldItems)
-                    ? oldItems.reduce((sum, item) => sum + (item.total || 0), 0)
-                    : 0;
-                  const newTotal = Array.isArray(newItems)
-                    ? newItems.reduce((sum, item) => sum + (item.total || 0), 0)
-                    : 0;
-
-                  return (
-                    <div
-                      key={idx}
-                      className="border border-gray-200 rounded-lg p-3"
-                    >
-                      <div className="font-medium text-sm mb-2 text-gray-700">
-                        Items Updated
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 mb-1">
-                            Previous Items
-                          </div>
-                          {Array.isArray(oldItems) && oldItems.length > 0 ? (
-                            <div className="space-y-1">
-                              <div className="text-xs">
-                                {oldItems.length} item
-                                {oldItems.length !== 1 ? "s" : ""}
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                Total: ₹{formatCurrency(oldTotal)}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              No items
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-gray-500 mb-1">
-                            Updated Items
-                          </div>
-                          {Array.isArray(newItems) && newItems.length > 0 ? (
-                            <div className="space-y-1">
-                              <div className="text-xs">
-                                {newItems.length} item
-                                {newItems.length !== 1 ? "s" : ""}
-                              </div>
-                              <div className="text-xs text-gray-600">
-                                Total: ₹{formatCurrency(newTotal)}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-xs text-gray-500">
-                              No items
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                }
-
-                const fieldNames = {
-                  poNumber: "PO Number",
-                  totalAmount: "Total Amount",
-                  vendor: "Vendor",
-                };
-
-                const fieldName =
-                  fieldNames[entry.field] ||
-                  entry.field
-                    .replace(/([A-Z])/g, " $1")
-                    .replace(/^./, (str) => str.toUpperCase());
-
-                return (
-                  <div
-                    key={idx}
-                    className="grid grid-cols-4 gap-3 text-sm items-center"
-                  >
-                    <div className="font-medium text-gray-700">{fieldName}</div>
-                    <div className="col-span-3 grid grid-cols-2 gap-3">
-                      <div className="bg-red-50 border border-red-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Previous
-                        </div>
-                        <div className="text-red-700 line-through">
-                          {entry.field === "totalAmount" && entry.oldValue
-                            ? `₹${formatCurrency(entry.oldValue)}`
-                            : entry.oldValue !== null &&
-                                entry.oldValue !== undefined
-                              ? String(entry.oldValue)
-                              : "N/A"}
-                        </div>
-                      </div>
-                      <div className="bg-green-50 border border-green-200 rounded p-2">
-                        <div className="text-xs text-gray-500 mb-1">
-                          Updated
-                        </div>
-                        <div className="text-green-700">
-                          {entry.field === "totalAmount" && entry.newValue
-                            ? `₹${formatCurrency(entry.newValue)}`
-                            : entry.newValue !== null &&
-                                entry.newValue !== undefined
-                              ? String(entry.newValue)
-                              : "N/A"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        );
-
-      case "PO_DELETED":
-        const oldPOData = logEntries[0]?.oldValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="font-medium text-red-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                Purchase Order Deleted
-              </div>
-            </div>
-            {oldPOData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      PO Number
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      {oldPOData.poNumber || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Total Amount
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      ₹{formatCurrency(oldPOData.totalAmount)}
-                    </div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Vendor
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldPOData.vendor || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render Payment logs
-  const renderPaymentLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "PAYMENT_RECORDED_AND_JOURNAL_POSTED":
-        // Find payment details and status change
-        const paymentLog = logEntries.find(
-          (entry) => entry.field === "payment",
-        );
-        const statusLog = logEntries.find(
-          (entry) => entry.field === "invoicePaymentStatus",
-        );
-
-        const paymentData = paymentLog?.newValue;
-        const oldStatus = statusLog?.oldValue;
-        const newStatus = statusLog?.newValue;
-        const statusChanged = oldStatus !== newStatus;
-
-        return (
-          <div className="space-y-4">
-            {/* Header */}
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="font-medium text-blue-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Payment Recorded & Journal Posted
-              </div>
-            </div>
-
-            {/* Payment Details */}
-            <div className="space-y-4">
-              {paymentData && (
-                <div className="border border-gray-200 rounded-lg p-4">
-                  <div className="font-medium text-sm text-gray-700 mb-3">
-                    Payment Details
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          Payment Date
-                        </div>
-                        <div className="text-sm font-semibold">
-                          {formatDate(paymentData.paymentDate)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          Payment Mode
-                        </div>
-                        <div className="text-sm capitalize">
-                          {paymentData.paymentMode?.replace(/_/g, " ") || "N/A"}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          Reference Number
-                        </div>
-                        <div className="text-sm">
-                          {paymentData.referenceNumber || "N/A"}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          Received Amount
-                        </div>
-                        <div className="text-sm font-semibold text-green-600">
-                          ₹{formatCurrency(paymentData.receivedAmount)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          TDS Adjusted
-                        </div>
-                        <div className="text-sm">
-                          ₹{formatCurrency(paymentData.tdsAdjusted)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs font-medium text-gray-500">
-                          Payment Status
-                        </div>
-                        <span
-                          className={`px-2 py-1 rounded text-xs ${paymentData.status === "posted" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"}`}
-                        >
-                          {paymentData.status?.replace(/_/g, " ") || "N/A"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Invoice Payment Status Change */}
-              {statusLog && (
-                <div
-                  className={`border ${statusChanged ? "border-yellow-200" : "border-gray-200"} rounded-lg p-4 ${statusChanged ? "bg-yellow-50" : "bg-gray-50"}`}
-                >
-                  <div className="font-medium text-sm text-gray-700 mb-3">
-                    Invoice Payment Status
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 mb-1">
-                        Previous Status
-                      </div>
-                      <div className="flex items-center">
-                        <span
-                          className={`px-2 py-1 rounded text-xs ${
-                            oldStatus === "fully_paid"
-                              ? "bg-green-100 text-green-800"
-                              : oldStatus === "partially_paid"
-                                ? "bg-yellow-100 text-yellow-800"
-                                : "bg-gray-100 text-gray-800"
-                          }`}
-                        >
-                          {oldStatus ? oldStatus.replace(/_/g, " ") : "N/A"}
-                        </span>
-                        {statusChanged && (
-                          <svg
-                            className="w-4 h-4 mx-2 text-gray-400"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2}
-                              d="M9 5l7 7-7 7"
-                            />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-xs font-medium text-gray-500 mb-1">
-                        Current Status
-                      </div>
-                      <span
-                        className={`px-2 py-1 rounded text-xs ${
-                          newStatus === "fully_paid"
-                            ? "bg-green-100 text-green-800"
-                            : newStatus === "partially_paid"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {newStatus ? newStatus.replace(/_/g, " ") : "N/A"}
-                      </span>
-                    </div>
-                  </div>
-                  {!statusChanged && (
-                    <div className="mt-2 text-xs text-gray-500 italic">
-                      Status remained unchanged
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Summary */}
-              <div className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                <div className="flex items-center">
-                  <svg
-                    className="w-4 h-4 text-gray-500 mr-2"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span className="text-sm font-medium text-gray-700">
-                    Journal Entry
-                  </span>
-                </div>
-                <div className="text-sm text-gray-600">
-                  Automatically created and posted
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render Auth logs
-  const renderAuthLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "USER_REGISTERED":
-        const userData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                User Registered
-              </div>
-            </div>
-            {userData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Full Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {userData.fullName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Email
-                    </div>
-                    <div className="text-sm">{userData.email || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Role
-                    </div>
-                    <div className="text-sm">{userData.role || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Status
-                    </div>
-                    <span
-                      className={`px-2 py-1 rounded text-xs ${userData.isActive ? "bg-green-100 text-green-800" : "bg-gray-100 text-gray-800"}`}
-                    >
-                      {userData.isActive ? "Active" : "Inactive"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "USER_LOGIN":
-        const loginData = logEntries[0]?.newValue || logEntries[0];
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="font-medium text-blue-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"
-                  />
-                </svg>
-                User Login
-              </div>
-            </div>
-            {loginData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      User
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {loginData.userName || loginData.email || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Login Time
-                    </div>
-                    <div className="text-sm">{formatTime(log.createdAt)}</div>
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <div className="text-sm font-medium text-gray-500">
-                      IP Address
-                    </div>
-                    <div className="text-sm">
-                      {loginData.ipAddress || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "USER_LOGOUT":
-        const logoutData = logEntries[0]?.newValue || logEntries[0];
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="font-medium text-blue-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-                  />
-                </svg>
-                User Logout
-              </div>
-            </div>
-            {logoutData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      User
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {logoutData.userName || logoutData.email || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Logout Time
-                    </div>
-                    <div className="text-sm">{formatTime(log.createdAt)}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render Company logs
-  const renderCompanyLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "COMPANY_CREATED":
-        const companyData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Company Created
-              </div>
-            </div>
-            {companyData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Company Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {companyData.companyName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Company Code
-                    </div>
-                    <div className="text-sm">
-                      {companyData.companyCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">PAN</div>
-                    <div className="text-sm">{companyData.pan || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      GSTIN
-                    </div>
-                    <div className="text-sm">{companyData.gstin || "N/A"}</div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Address
-                    </div>
-                    <div className="text-sm">
-                      {companyData.address || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "EMPLOYEE_ADDED":
-        const employeeData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Employee Added
-              </div>
-            </div>
-            {employeeData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Employee Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {employeeData.name || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Employee ID
-                    </div>
-                    <div className="text-sm">
-                      {employeeData.employeeId || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Role
-                    </div>
-                    <div className="text-sm">{employeeData.role || "N/A"}</div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Department
-                    </div>
-                    <div className="text-sm">
-                      {employeeData.department || "N/A"}
-                    </div>
-                  </div>
-                  <div className="col-span-2 space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Email
-                    </div>
-                    <div className="text-sm">{employeeData.email || "N/A"}</div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "EMPLOYEE_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Employee Updated
-              </div>
-            </div>
-            {logEntries.length > 0 ? (
-              <div className="space-y-3">
-                {logEntries.map((entry, idx) => {
-                  const fieldNames = {
-                    name: "Name",
-                    employeeId: "Employee ID",
-                    role: "Role",
-                    department: "Department",
-                    email: "Email",
-                    status: "Status",
-                  };
-
-                  const fieldName =
-                    fieldNames[entry.field] ||
-                    entry.field
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (str) => str.toUpperCase());
-
-                  return (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-4 gap-3 text-sm items-center"
-                    >
-                      <div className="font-medium text-gray-700">
-                        {fieldName}
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-3">
-                        <div className="bg-red-50 border border-red-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Previous
-                          </div>
-                          <div className="text-red-700 line-through">
-                            {entry.oldValue !== null &&
-                            entry.oldValue !== undefined
-                              ? String(entry.oldValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                        <div className="bg-green-50 border border-green-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Updated
-                          </div>
-                          <div className="text-green-700">
-                            {entry.newValue !== null &&
-                            entry.newValue !== undefined
-                              ? String(entry.newValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600 italic">
-                No specific field changes recorded
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render Group logs
-  const renderGroupLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "GROUP_CREATED":
-        const groupData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                Group Created
-              </div>
-            </div>
-            {groupData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Name
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {groupData.groupName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Code
-                    </div>
-                    <div className="text-sm">
-                      {groupData.groupCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Type
-                    </div>
-                    <div className="text-sm">
-                      {groupData.groupType || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Parent Group
-                    </div>
-                    <div className="text-sm">
-                      {groupData.parentGroup || "None"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "GROUP_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                Group Updated
-              </div>
-            </div>
-            {logEntries.length > 0 ? (
-              <div className="space-y-3">
-                {logEntries.map((entry, idx) => {
-                  const fieldNames = {
-                    groupName: "Group Name",
-                    groupCode: "Group Code",
-                    groupType: "Group Type",
-                    parentGroup: "Parent Group",
-                    status: "Status",
-                  };
-
-                  const fieldName =
-                    fieldNames[entry.field] ||
-                    entry.field
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (str) => str.toUpperCase());
-
-                  return (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-4 gap-3 text-sm items-center"
-                    >
-                      <div className="font-medium text-gray-700">
-                        {fieldName}
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-3">
-                        <div className="bg-red-50 border border-red-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Previous
-                          </div>
-                          <div className="text-red-700 line-through">
-                            {entry.oldValue !== null &&
-                            entry.oldValue !== undefined
-                              ? String(entry.oldValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                        <div className="bg-green-50 border border-green-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Updated
-                          </div>
-                          <div className="text-green-700">
-                            {entry.newValue !== null &&
-                            entry.newValue !== undefined
-                              ? String(entry.newValue)
-                              : "N/A"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600 italic">
-                No specific field changes recorded
-              </div>
-            )}
-          </div>
-        );
-
-      case "GROUP_DELETED":
-        const oldGroupData = logEntries[0]?.oldValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="font-medium text-red-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                Group Deleted
-              </div>
-            </div>
-            {oldGroupData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Name
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      {oldGroupData.groupName || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Code
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldGroupData.groupCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Group Type
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldGroupData.groupType || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Render HSN logs
-  const renderHsnLog = (log) => {
-    const { actionType, logs: logEntries } = log;
-
-    switch (actionType) {
-      case "HSN_CREATED":
-        const hsnData = logEntries[0]?.newValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-              <div className="font-medium text-green-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
-                HSN Created
-              </div>
-            </div>
-            {hsnData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      HSN Code
-                    </div>
-                    <div className="text-sm font-semibold">
-                      {hsnData.hsnCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Description
-                    </div>
-                    <div className="text-sm">
-                      {hsnData.description || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      GST Rate
-                    </div>
-                    <div className="text-sm">
-                      {hsnData.gstRate ? `${hsnData.gstRate}%` : "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      CESS Rate
-                    </div>
-                    <div className="text-sm">
-                      {hsnData.cessRate ? `${hsnData.cessRate}%` : "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      case "HSN_UPDATED":
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-              <div className="font-medium text-yellow-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  />
-                </svg>
-                HSN Updated
-              </div>
-            </div>
-            {logEntries.length > 0 ? (
-              <div className="space-y-3">
-                {logEntries.map((entry, idx) => {
-                  const fieldNames = {
-                    hsnCode: "HSN Code",
-                    description: "Description",
-                    gstRate: "GST Rate",
-                    cessRate: "CESS Rate",
-                  };
-
-                  const fieldName =
-                    fieldNames[entry.field] ||
-                    entry.field
-                      .replace(/([A-Z])/g, " $1")
-                      .replace(/^./, (str) => str.toUpperCase());
-
-                  return (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-4 gap-3 text-sm items-center"
-                    >
-                      <div className="font-medium text-gray-700">
-                        {fieldName}
-                      </div>
-                      <div className="col-span-3 grid grid-cols-2 gap-3">
-                        <div className="bg-red-50 border border-red-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Previous
-                          </div>
-                          <div className="text-red-700 line-through">
-                            {entry.field.includes("Rate") && entry.oldValue
-                              ? `${entry.oldValue}%`
-                              : entry.oldValue !== null &&
-                                  entry.oldValue !== undefined
-                                ? String(entry.oldValue)
-                                : "N/A"}
-                          </div>
-                        </div>
-                        <div className="bg-green-50 border border-green-200 rounded p-2">
-                          <div className="text-xs text-gray-500 mb-1">
-                            Updated
-                          </div>
-                          <div className="text-green-700">
-                            {entry.field.includes("Rate") && entry.newValue
-                              ? `${entry.newValue}%`
-                              : entry.newValue !== null &&
-                                  entry.newValue !== undefined
-                                ? String(entry.newValue)
-                                : "N/A"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600 italic">
-                No specific field changes recorded
-              </div>
-            )}
-          </div>
-        );
-
-      case "HSN_DELETED":
-        const oldHsnData = logEntries[0]?.oldValue;
-        return (
-          <div className="space-y-4">
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="font-medium text-red-800 flex items-center">
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                  />
-                </svg>
-                HSN Deleted
-              </div>
-            </div>
-            {oldHsnData && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      HSN Code
-                    </div>
-                    <div className="text-sm font-semibold line-through text-red-600">
-                      {oldHsnData.hsnCode || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      Description
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldHsnData.description || "N/A"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <div className="text-sm font-medium text-gray-500">
-                      GST Rate
-                    </div>
-                    <div className="text-sm line-through text-red-600">
-                      {oldHsnData.gstRate ? `${oldHsnData.gstRate}%` : "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        );
-
-      default:
-        return renderGenericLog(log);
-    }
-  };
-
-  // Generic log renderer for unknown module types or actions
-  const renderGenericLog = (log) => {
-    const { logs: logEntries } = log;
-
-    if (!logEntries || logEntries.length === 0) {
-      return (
-        <div className="text-sm text-gray-600 italic">
-          No change details available for this action.
-        </div>
-      );
-    }
-
-    return (
-      <div className="space-y-2">
-        {logEntries.map((l, i) => {
-          // Handle different field structures
-          const fieldName = l.field || "Field";
-
-          return (
-            <div key={i} className="grid grid-cols-3 gap-2 text-sm">
-              <div className="font-medium">
-                {fieldName
-                  .replace(/([A-Z])/g, " $1")
-                  .replace(/^./, (str) => str.toUpperCase())}
-                :
-              </div>
-              <div className="text-red-600 line-through text-xs">
-                {l.oldValue !== null && l.oldValue !== undefined
-                  ? typeof l.oldValue === "object"
-                    ? JSON.stringify(l.oldValue).substring(0, 100) + "..."
-                    : String(l.oldValue)
-                  : "N/A"}
-              </div>
-              <div className="text-green-600 text-xs">
-                {l.newValue !== null && l.newValue !== undefined
-                  ? typeof l.newValue === "object"
-                    ? JSON.stringify(l.newValue).substring(0, 100) + "..."
-                    : String(l.newValue)
-                  : "N/A"}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
-
-  // Main render function for logs
-  const renderLogDetails = (log) => {
-    switch (log.module) {
-      case "AUTH":
-        return renderAuthLog(log);
-      case "COMPANY":
-        return renderCompanyLog(log);
-      case "GROUP":
-        return renderGroupLog(log);
-      case "HSN":
-        return renderHsnLog(log);
-      case "JOURNAL":
-        return renderJournalLog(log);
-      case "INVOICE":
-        return renderInvoiceLog(log);
-      case "INVOICE_ACCOUNTING":
-        return renderInvoiceAccountingLog(log);
-      case "PAYMENT":
-        return renderPaymentLog(log);
-      case "CLIENT":
-        return renderClientLog(log);
-      case "VENDOR":
-        return renderVendorLog(log);
-      case "ACCOUNT":
-        return renderAccountLog(log);
-      case "PURCHASE_ORDER":
-        return renderPurchaseOrderLog(log);
-      default:
-        return renderGenericLog(log);
-    }
+    return displayMap[actionType] || String(actionType || "Activity").replace(/_/g, " ");
   };
 
   if (!isOpen) return null;
@@ -3344,8 +1268,8 @@ const AuditLogSidebar = ({
                 <div className="space-y-4">
                   {filteredLogs.map((log) => (
                     <div
-                      key={log._id}
-                      className="bg-white border border-gray-500 rounded-xl shadow-xl hover:shadow-md transition-shadow"
+                      key={log.id || log._id}
+                      className="bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow"
                     >
                       <div className="p-5">
                         {/* Header */}
@@ -3411,49 +1335,26 @@ const AuditLogSidebar = ({
                               </svg>
                               <span className="font-medium mr-2">By:</span>{" "}
                               {log.performedBy?.name || "System"}
-                              {log.entityId && (
-                                <>
-                                  <span className="mx-2 text-gray-300">•</span>
-                                  <svg
-                                    className="w-4 h-4 mr-1.5 text-gray-400"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    viewBox="0 0 24 24"
-                                  >
-                                    <path
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      strokeWidth={2}
-                                      d="M10 6H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V8a2 2 0 00-2-2h-5m-4 0V5a2 2 0 114 0v1m-4 0a2 2 0 104 0m-5 8a2 2 0 100-4 2 2 0 000 4zm0 0c1.306 0 2.417.835 2.83 2M9 14a3.001 3.001 0 00-2.83 2M15 11h3m-3 4h2"
-                                    />
-                                  </svg>
-                                  <span className="font-medium mr-1">ID:</span>{" "}
-                                  {log.entityId.substring(0, 8)}...
-                                </>
+                              {log.performedBy?.role && (
+                                <span className="ml-1 text-gray-500">
+                                  ({log.performedBy.role})
+                                </span>
                               )}
                             </div>
                           </div>
 
                           <div className="text-right">
                             <div className="text-sm font-medium text-gray-900">
-                              {formatTime(log.createdAt)}
+                              {log.time || formatTime(log.timestamp || log.createdAt)}
                             </div>
                             <div className="text-xs text-gray-500">
-                              {formatDate(log.createdAt)}
+                              {log.date || formatDate(log.timestamp || log.createdAt)}
                             </div>
                           </div>
                         </div>
 
-                        {/* Change Details - Always show */}
-                        {(log.changes && log.changes.length > 0) || log.newValues || log.oldValues ? (
-                          <div className="mt-4 pt-4 border-t border-gray-100">
-                            {renderChangeDetails(log)}
-                          </div>
-                        ) : null}
-
-                        {/* Log Details */}
                         <div className="mt-4 pt-4 border-t border-gray-100">
-                          {renderLogDetails(log)}
+                          {renderStructuredAuditLog(log)}
                         </div>
                       </div>
                     </div>

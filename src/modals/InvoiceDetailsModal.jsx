@@ -108,8 +108,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     }).format(amount || 0);
   };
 
-  const getItemTaxLabel = (item = {}) =>
-    item?.taxLabel || item?.taxType || invoice?.taxLabel || invoice?.taxType || "Tax";
+  const getItemTaxLabel = (item = {}) => {
+    const label = item?.taxLabel || item?.taxType || invoice?.taxLabel || invoice?.taxType || "Tax";
+    return ["CGST", "SGST", "IGST"].includes(String(label).toUpperCase()) ? "GST" : label;
+  };
 
   const getItemTaxRate = (item = {}) =>
     Number(item?.taxRate ?? item?.combinedTaxRate ?? item?.gstRate ?? 0);
@@ -180,16 +182,33 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     const payments = invoice.payments || invoice.paymentIds || [];
 
     const activePayments = payments.filter((p) => !p.isReversed);
+    const getReceivedAmount = (payment = {}) =>
+      Number(
+        payment.receivedAmount ??
+          payment.amountReceived ??
+          payment.amountPaid ??
+          0,
+      );
+    const getSettlementAmount = (payment = {}) => {
+      if (payment.originalAmount != null) return Number(payment.originalAmount || 0);
+      if (payment.settledAmount != null) return Number(payment.settledAmount || 0);
+      if (payment.expectedAmount != null) return Number(payment.expectedAmount || 0);
+      if (payment.grossAmount != null) {
+        return Math.max(
+          0,
+          Number(payment.grossAmount || 0) -
+            Number(payment.tdsAmount || payment.tdsAdjusted || 0),
+        );
+      }
+      return getReceivedAmount(payment) + Number(payment.adjustmentAmount || 0);
+    };
 
     const paymentsTotal = activePayments.reduce(
-      (sum, payment) =>
-        sum +
-        Number(
-          payment.receivedAmount ??
-            payment.amountReceived ??
-            payment.amountPaid ??
-            0,
-        ),
+      (sum, payment) => sum + getReceivedAmount(payment),
+      0,
+    );
+    const settledTotal = activePayments.reduce(
+      (sum, payment) => sum + getSettlementAmount(payment),
       0,
     );
     const totalTDSAdjusted = activePayments.reduce(
@@ -201,23 +220,23 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
       activePayments.length > 0
         ? paymentsTotal
         : Number(invoice.paidAmount ?? Math.max(0, invoiceAmount - Number(invoice.remainingAmount ?? invoiceAmount)));
+    const totalSettled =
+      activePayments.length > 0
+        ? settledTotal
+        : Number(invoice.paidAmount ?? totalReceived);
     const pendingAmount = Math.max(
       0,
       activePayments.length > 0
-        ? invoiceAmount - totalReceived
-        : Number(invoice.remainingAmount ?? invoiceAmount - totalReceived),
+        ? invoiceAmount - totalSettled
+        : Number(invoice.remainingAmount ?? invoiceAmount - totalSettled),
     );
-    const completionPercentage = invoiceAmount > 0 ? (totalReceived / invoiceAmount) * 100 : 0;
+    const completionPercentage = invoiceAmount > 0 ? (totalSettled / invoiceAmount) * 100 : 0;
 
-    let paymentStatus = invoice.paymentStatus;
-    if (!paymentStatus) {
-      if (pendingAmount <= 0) {
-        paymentStatus = "fully_paid";
-      } else if (totalReceived > 0) {
-        paymentStatus = "partially_paid";
-      } else {
-        paymentStatus = "unpaid";
-      }
+    let paymentStatus = "unpaid";
+    if (invoice.isFullyPaid || invoice.status === "PAID" || invoice.status === "RECONCILED" || pendingAmount <= 0.01) {
+      paymentStatus = "fully_paid";
+    } else if (totalSettled > 0) {
+      paymentStatus = "partially_paid";
     }
 
     return {
@@ -226,9 +245,11 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
       tdsAmount,
       netPayable,
       totalReceived,
+      totalSettled,
+      totalDeductions: Math.max(0, totalSettled - totalReceived),
       pendingAmount,
       totalTDSAdjusted,
-      completionPercentage,
+      completionPercentage: Math.min(100, completionPercentage),
       paymentStatus,
       paymentCount: payments.length,
       lastPaymentDate: payments.length > 0 ? payments[payments.length - 1].paymentDate : null,
@@ -294,10 +315,36 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
     if (invoice?.totalTaxAmount != null) {
       return Number(invoice.totalTaxAmount || 0);
     }
-    const cgst = invoice.totalCGSTAmount || 0;
-    const sgst = invoice.totalSGSTAmount || 0;
-    const igst = invoice.totalIGSTAmount || 0;
+    const cgst = invoice?.totalCGSTAmount || 0;
+    const sgst = invoice?.totalSGSTAmount || 0;
+    const igst = invoice?.totalIGSTAmount || 0;
     return cgst + sgst + igst;
+  };
+
+  const getTaxBreakdownRows = (invoice, fallbackLabel = "Tax") => {
+    const summaryRows = (Array.isArray(invoice?.taxSummary) ? invoice.taxSummary : [])
+      .map((entry) => ({
+        l: entry.label || entry.taxType || fallbackLabel,
+        amount: Number(entry.amount || 0),
+      }))
+      .filter((entry) => entry.amount > 0);
+
+    if (summaryRows.length > 0) {
+      return summaryRows;
+    }
+
+    const legacyRows = [
+      { l: "CGST", amount: Number(invoice?.totalCGSTAmount || 0) },
+      { l: "SGST", amount: Number(invoice?.totalSGSTAmount || 0) },
+      { l: "IGST", amount: Number(invoice?.totalIGSTAmount || 0) },
+    ].filter((entry) => entry.amount > 0);
+
+    if (legacyRows.length > 0) {
+      return legacyRows;
+    }
+
+    const totalTax = calculateTotalTax(invoice);
+    return totalTax > 0 ? [{ l: `Total ${fallbackLabel}`, amount: totalTax }] : [];
   };
 
   const getInvoiceTdsAmount = (invoice) =>
@@ -452,7 +499,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
   const paymentInfo = invoice ? calculatePaymentInfo(invoice) : {};
   const currency    = invoice?.currency || "INR";
   const taxLabel = invoice?.taxLabel || invoice?.taxType || "Tax";
-  const taxSummary = Array.isArray(invoice?.taxSummary) ? invoice.taxSummary : [];
+  const itemTaxLabel = ["CGST", "SGST", "IGST"].includes(String(taxLabel).toUpperCase()) ? "GST" : taxLabel;
+  const taxBreakdownRows = getTaxBreakdownRows(invoice, taxLabel);
   const isApprovedInvoice = invoice?.approvalStatus === "Approved";
   const TABS = ["overview","items","payments","accounting","documents"];
 
@@ -642,7 +690,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {[
                           { l:"Taxable Value", v: formatCurrency(invoice.totalTaxableValue||0,currency), cls:"bg-slate-50 border-slate-100" },
-                          { l:`Total ${taxLabel}`,     v: formatCurrency(calculateTotalTax(invoice),currency),   cls:"bg-slate-50 border-slate-100" },
+                          { l:`Total ${itemTaxLabel}`, v: formatCurrency(calculateTotalTax(invoice),currency), cls:"bg-slate-50 border-slate-100" },
                           { l:"TDS (Reference Only)", v: formatCurrency(getInvoiceTdsAmount(invoice),currency), cls:"bg-violet-50 border-violet-100" },
                           { l:"Invoice Total", v: formatCurrency(invoice.amountDue || invoice.netPayable || 0,currency), cls:"bg-blue-50 border-blue-100" },
                         ].map(s => (
@@ -653,12 +701,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                         ))}
                       </div>
 
-                        <div className={`grid gap-3 pt-3 border-t border-slate-100 ${taxSummary.length > 1 ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1"}`}>
-                          {(taxSummary.length > 0 ? taxSummary : [
-                            { l:"CGST", amount: invoice.totalCGSTAmount||0 },
-                            { l:"SGST", amount: invoice.totalSGSTAmount||0 },
-                            { l:"IGST", amount: invoice.totalIGSTAmount||0 },
-                          ]).map((entry) => {
+                        <div className={`grid gap-3 pt-3 border-t border-slate-100 ${taxBreakdownRows.length > 1 ? "grid-cols-1 md:grid-cols-3" : "grid-cols-1"}`}>
+                          {taxBreakdownRows.map((entry) => {
                             const label = entry.l || entry.label || entry.taxType || taxLabel;
                             const value = entry.amount ?? 0;
                             return (
@@ -711,7 +755,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId }) => {
                       <table className="w-full text-xs">
                         <thead>
                           <tr style={{ background: "linear-gradient(90deg,#f1f5f9,#dbeafe)" }}>
-                            {["Description","HSN/SAC","Qty","Rate","Taxable Value",`${taxLabel} %`,`${taxLabel} Amt`,"Total"].map(h => (
+                            {["Description","HSN/SAC","Qty","Rate","Taxable Value",`${itemTaxLabel} %`,`${itemTaxLabel} Amt`,"Total"].map(h => (
                               <th key={h} className="px-4 py-3 text-left text-[10px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{h}</th>
                             ))}
                            </tr>
