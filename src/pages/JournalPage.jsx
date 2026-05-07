@@ -15,6 +15,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Info,
+  RefreshCcw,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { useAuth } from "../contexts/AuthContext";
@@ -25,6 +26,7 @@ import {
   addJournalApi,
   allJournalApi,
   updateJournalApi,
+  getJournalByIdApi,
 } from "../apis/journalApi";
 import {
   getInvoiceByIdApi,
@@ -37,6 +39,7 @@ import { checkAuthorization } from "../utils/checkAuthorization";
 import AuditLogSidebar from "../components/AuditLogSidebar";
 import { useLocation, useNavigate } from "react-router-dom";
 import ManageLedgerModal from "../modals/ManageLedgerModal";
+import { motion, AnimatePresence } from "framer-motion";
 import { FiUploadCloud } from "react-icons/fi";
 
 /* ── shared input class ─────────────────────────────────── */
@@ -124,11 +127,25 @@ export default function ManualJournalPage() {
   // Load editing journal from navigation state
   useEffect(() => {
     const fetchEditingJournal = async () => {
-      if (location.state?.editingJournal) {
+      let journalToEdit = location.state?.editingJournal;
+
+      if (!journalToEdit && location.state?.editingJournalId) {
+        try {
+          const response = await getJournalByIdApi(user?.company?._id, location.state.editingJournalId);
+          journalToEdit = response.data;
+        } catch (error) {
+          console.error("Error fetching journal:", error);
+          toast.error("Failed to load journal details");
+          navigate("/accounting/journals/list");
+          return;
+        }
+      }
+
+      if (journalToEdit) {
         try {
           if (
-            location.state.editingJournal.sourceType &&
-            !["MANUAL", "EXCEL"].includes(location.state.editingJournal.sourceType)
+            journalToEdit.sourceType &&
+            !["MANUAL", "EXCEL", "REVERSAL"].includes(journalToEdit.sourceType)
           ) {
             toast.info(
               "This journal is system-generated. Please edit the source document.",
@@ -138,12 +155,10 @@ export default function ManualJournalPage() {
           }
 
           setIsEditMode(true);
-          setEditingJournal(location.state.editingJournal);
-          setVoucherType(
-            location.state.editingJournal.voucherType || "JOURNAL",
-          );
+          setEditingJournal(journalToEdit);
+          setVoucherType(journalToEdit.voucherType || "JOURNAL");
 
-          const formattedLines = location.state.editingJournal.lines.map(
+          const formattedLines = journalToEdit.lines.map(
             (line, index) => ({
               id: Date.now() + index,
               accountId: line.account?._id || line.accountId,
@@ -153,31 +168,26 @@ export default function ManualJournalPage() {
           );
 
           setForm({
-            date: new Date(location.state.editingJournal.date)
-              .toISOString()
-              .split("T")[0],
-            narration: location.state.editingJournal.narration || "",
-            externalDocNo: location.state.editingJournal.externalDocNo || "",
-            lines: formattedLines,
+            date: journalToEdit.date
+              ? new Date(journalToEdit.date).toISOString().split("T")[0]
+              : new Date().toISOString().split("T")[0],
+            narration: journalToEdit.narration || "",
+            externalDocNo: journalToEdit.externalDocNo || "",
+            lines: formattedLines.length > 0 ? formattedLines : form.lines,
           });
 
-          if (
-            location.state.editingJournal.sourceType === "INVOICE" &&
-            location.state.editingJournal.sourceId
-          ) {
+          if (journalToEdit.sourceId && journalToEdit.sourceType === "INVOICE") {
             setSelectedInvoice({
-              _id: location.state.editingJournal.sourceId,
-              invoiceNo: location.state.editingJournal.referenceNumber,
+              _id: journalToEdit.sourceId,
+              invoiceNo: journalToEdit.referenceNumber,
               billTo: {
-                _id: location.state.editingJournal.partyId,
-                name: location.state.editingJournal.partyName,
+                _id: journalToEdit.partyId,
+                name: journalToEdit.partyName,
               },
             });
           }
 
-          toast.success(
-            `Editing Journal: ${location.state.editingJournal.number}`,
-          );
+          toast.success(`Editing Journal: ${journalToEdit.number}`);
         } catch (error) {
           console.error("Error loading editing journal:", error);
           toast.error("Failed to load journal for editing");
@@ -558,7 +568,7 @@ export default function ManualJournalPage() {
       } else {
         await addJournalApi(journalData, user?.company?._id);
         toast.success("Journal entry saved successfully!");
-        handleReset();
+        navigate("/accounting/journals");
       }
     } catch (error) {
       console.error("Save error:", error);
@@ -570,7 +580,6 @@ export default function ManualJournalPage() {
     }
   };
 
-  // Reset form
   const handleReset = () => {
     setForm({
       date: new Date().toISOString().split("T")[0],
@@ -873,6 +882,7 @@ export default function ManualJournalPage() {
                     )}
                   </button>
                 )}
+
 
                 {/* Reset / Cancel */}
                 <button
@@ -1468,6 +1478,7 @@ export default function ManualJournalPage() {
         title="Journal Audit Trail"
         subtitle="Tracking all journal activities"
       />
+
     </>
   );
 }

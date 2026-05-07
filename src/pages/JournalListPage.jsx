@@ -3,7 +3,7 @@ import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import LoadingComponent from "../components/LoadingComponent";
-import { allJournalApi, deleteJournalApi, getJournalStatsApi } from "../apis/journalApi";
+import { allJournalApi, deleteJournalApi, getJournalStatsApi, reverseJournalApi, getJournalByIdApi } from "../apis/journalApi";
 import { ApprovalManager } from "../utils/approvalManager";
 import axios from "axios";
 import { format } from "date-fns";
@@ -48,6 +48,10 @@ export default function JournalListPage() {
   const [search, setSearch] = useState("");
   const [selectedJournal, setSelectedJournal] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showReverseConfirm, setShowReverseConfirm] = useState(false);
+  const [journalToReverse, setJournalToReverse] = useState(null);
+  const [reversing, setReversing] = useState(false);
   const [auditLogs, setAuditLogs] = useState([]);
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -520,6 +524,28 @@ const [loadingStats, setLoadingStats] = useState(false);
     }
   };
 
+  const openJournalDetailById = async (journalId) => {
+    try {
+      // First check if it's already in our list
+      const existing = journals.find(j => j._id === journalId);
+      if (existing) {
+        setSelectedJournal(existing);
+        setShowDetailsModal(true);
+        return;
+      }
+
+      // If not in list, fetch it
+      const res = await getJournalByIdApi(user?.company?._id, journalId);
+      if (res.data) {
+        setSelectedJournal(res.data);
+        setShowDetailsModal(true);
+      }
+    } catch (error) {
+      console.error("Error opening journal detail:", error);
+      toast.error("Failed to load journal details");
+    }
+  };
+
   const openSourceDocument = useCallback(
     (journal, showToast = false) => {
       if (!journal) return;
@@ -550,6 +576,13 @@ const [loadingStats, setLoadingStats] = useState(false);
 
       if (journal.sourceType === "REVERSAL") {
         if (showToast) toast.info(SYSTEM_JOURNAL_MESSAGE);
+        
+        // Manual reversals link back to the parent journal ID (sourceId)
+        if (journal.sourceId && !journal.referenceNumber?.startsWith("INV-")) {
+          openJournalDetailById(journal.sourceId);
+          return;
+        }
+
         const params = new URLSearchParams();
         params.set("tab", "payments");
         
@@ -569,6 +602,35 @@ const [loadingStats, setLoadingStats] = useState(false);
     },
     [navigate],
   );
+
+  const handleReverseClick = (journal, e) => {
+    e.stopPropagation();
+    setJournalToReverse(journal);
+    setShowReverseConfirm(true);
+  };
+
+  const handleReverse = async () => {
+    if (!journalToReverse) return;
+    try {
+      setReversing(true);
+      const res = await reverseJournalApi(user?.company?._id, journalToReverse._id);
+      toast.success(res.message || "Journal reversed successfully!");
+      setShowReverseConfirm(false);
+      setJournalToReverse(null);
+      // Wait a bit for the backend to process before refreshing
+      setTimeout(() => {
+        allJournalApi(user?.company?._id).then((res) => {
+          setJournals(res.data || []);
+          setLoading(false);
+        });
+      }, 500);
+    } catch (error) {
+      console.error("Reversal error:", error);
+      toast.error(error?.response?.data?.message || "Error reversing journal");
+    } finally {
+      setReversing(false);
+    }
+  };
 
   const handleReferenceClick = (journal, e) => {
     e.stopPropagation();
@@ -1192,6 +1254,23 @@ const [loadingStats, setLoadingStats] = useState(false);
                                 </button>
                               )}
 
+                                {isAdmin && !["INVOICE", "PAYMENT", "REVERSAL"].includes(journal.sourceType) && (
+                                  <button
+                                    onClick={(e) => handleReverseClick(journal, e)}
+                                    disabled={journal.isReversed}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-sm transition-all ${
+                                      journal.isReversed
+                                        ? "bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed"
+                                        : "bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100 cursor-pointer"
+                                    }`}
+                                    title={journal.isReversed ? "Already Reversed" : "Reverse Journal"}
+                                  >
+                                    <FiRefreshCw className={`h-3 w-3 ${journal.isReversed ? "" : "animate-spin-slow"}`} />
+                                    <span className="hidden sm:inline">
+                                      {journal.isReversed ? "Reversed" : "Reverse"}
+                                    </span>
+                                  </button>
+                                )}
                               {deleteStatus && (
                                 <button
                                   onClick={(e) => handleDeleteClick(journal, e)}
@@ -1575,6 +1654,66 @@ const [loadingStats, setLoadingStats] = useState(false);
                   <>
                     <FiTrash2 className="h-4 w-4" />
                     Delete Journal
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reverse Confirmation Modal */}
+      {showReverseConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm transition-all duration-300">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 border border-slate-100 transform transition-all">
+            <div className="flex flex-col items-center text-center mb-8">
+              <div className="p-4 bg-amber-100 rounded-2xl mb-4 shadow-inner">
+                <FiRefreshCw className="h-8 w-8 text-amber-600 animate-spin-slow" />
+              </div>
+              <h3 className="text-2xl font-black text-slate-900 mb-2 tracking-tight">
+                Reverse Journal Entry?
+              </h3>
+              <p className="text-sm text-slate-500 leading-relaxed max-w-[280px]">
+                Are you sure you want to reverse journal <strong>{journalToReverse?.number}</strong>? This will create a mirrored entry.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-8 space-y-2">
+              <div className="flex justify-between text-xs text-slate-500 font-medium">
+                <span>Date</span>
+                <span className="text-slate-900">{journalToReverse && format(new Date(journalToReverse.date), "dd MMM yyyy")}</span>
+              </div>
+              <div className="flex justify-between text-xs text-slate-500 font-medium border-t border-slate-200 pt-2">
+                <span>Total Amount</span>
+                <span className="text-slate-900 font-bold">₹{calculateTotals(journalToReverse?.lines || []).totalDebit.toLocaleString()}</span>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowReverseConfirm(false);
+                  setJournalToReverse(null);
+                }}
+                disabled={reversing}
+                className="flex-1 px-4 py-3 text-sm font-bold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReverse}
+                disabled={reversing}
+                className="flex-1 px-4 py-3 text-sm font-bold text-white bg-amber-600 rounded-xl hover:bg-amber-700 shadow-lg shadow-amber-600/20 disabled:opacity-50 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {reversing ? (
+                  <>
+                    <div className="h-4 w-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Reversing...
+                  </>
+                ) : (
+                  <>
+                    <FiRefreshCw className="h-4 w-4" />
+                    Yes, Reverse
                   </>
                 )}
               </button>
