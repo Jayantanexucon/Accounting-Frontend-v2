@@ -180,6 +180,13 @@ export const requestJournalEditApprovalApi = async (companyId, journalId, payloa
   return data;
 };
 
+export const reverseJournalApi = async (companyId, journalId) => {
+  const { data } = await API.post(`/accounting/journal/${journalId}/reverse`, {
+    companyId,
+  });
+  return data;
+};
+
 export const requestJournalDeleteApprovalApi = async (companyId, journalId) => {
   const { data } = await API.post(`/accounting/journal/${journalId}/request-delete`, {
     companyId,

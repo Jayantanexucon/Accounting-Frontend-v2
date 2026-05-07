@@ -64,6 +64,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
   const [selectedJournal, setSelectedJournal] = useState(null);
   const [showJournalModal, setShowJournalModal] = useState(false);
   const [reversingPaymentId, setReversingPaymentId] = useState(null);
+  const [showReverseConfirm, setShowReverseConfirm] = useState(false);
+  const [paymentToReverse, setPaymentToReverse] = useState(null);
 
   // Fetch invoice details
   useEffect(() => {
@@ -136,17 +138,24 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
     }
   };
 
-  const handleReversePayment = async (paymentId) => {
-    if (!invoice || !user?.company?._id) return;
-    if (reversingPaymentId) return; // already in progress
+  const handleReverseClick = (payment) => {
+    setPaymentToReverse(payment);
+    setShowReverseConfirm(true);
+  };
+
+  const handleConfirmReverse = async () => {
+    if (!paymentToReverse || !invoice || !user?.company?._id) return;
+    if (reversingPaymentId) return;
     try {
-      setReversingPaymentId(paymentId);
+      setReversingPaymentId(paymentToReverse._id);
       await reverseInvoicePaymentApi({
         companyId: user.company._id,
-        paymentId,
+        paymentId: paymentToReverse._id,
         invoiceId: invoice._id,
       });
       toast.success("Payment reversed successfully. Reversal journal has been posted.");
+      setShowReverseConfirm(false);
+      setPaymentToReverse(null);
       await fetchInvoiceDetails();
     } catch (err) {
       console.error("Error reversing payment:", err);
@@ -931,7 +940,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
                                   <button
                                     type="button"
                                     disabled={reversingPaymentId === p._id}
-                                    onClick={() => handleReversePayment(p._id)}
+                                    onClick={() => handleReverseClick(p)}
                                     className={`flex items-center gap-1 px-2 py-1 text-[9px] font-bold rounded-lg border transition-all ${
                                       reversingPaymentId === p._id
                                         ? "bg-slate-100 text-slate-400 border-slate-200 cursor-wait"
@@ -1261,6 +1270,63 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
           initialInvoiceNo={invoice.invoiceNo}
           invoiceData={invoice}
         />
+      )}
+
+      {/* Reversal Confirmation Modal */}
+      {showReverseConfirm && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-100">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="p-3 bg-red-100 rounded-2xl mb-4">
+                <RotateCcw className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Reverse Payment?</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Are you sure you want to reverse this payment of <strong>{formatCurrency(paymentToReverse?.amountReceived ?? paymentToReverse?.receivedAmount ?? paymentToReverse?.amountPaid, currency)}</strong>? This will create a reversal journal entry.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-3 mb-6 space-y-2 border border-slate-200">
+              <div className="flex justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider">
+                <span>Date</span>
+                <span className="text-slate-900">{paymentToReverse && formatDate(paymentToReverse.paymentDate)}</span>
+              </div>
+              {paymentToReverse?.referenceNumber && (
+                <div className="flex justify-between text-[10px] text-slate-500 font-bold uppercase tracking-wider border-t border-slate-200 pt-2">
+                  <span>Reference</span>
+                  <span className="text-slate-900 font-mono">{paymentToReverse.referenceNumber}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowReverseConfirm(false);
+                  setPaymentToReverse(null);
+                }}
+                disabled={reversingPaymentId}
+                className="flex-1 px-4 py-2.5 text-xs font-bold text-slate-600 bg-slate-100 rounded-xl hover:bg-slate-200 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmReverse}
+                disabled={reversingPaymentId}
+                className="flex-1 px-4 py-2.5 text-xs font-bold text-white bg-red-600 rounded-xl hover:bg-red-700 shadow-lg shadow-red-600/20 disabled:opacity-50 transition-all flex items-center justify-center gap-2"
+              >
+                {reversingPaymentId ? (
+                  <>
+                    <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Yes, Reverse"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
     </>
