@@ -621,6 +621,52 @@ export default function BankReconciliationPage() {
     }
   };
 
+  const handleDownloadTemplate = () => {
+    const rows = [
+      {
+        "Transaction Date": "06-05-2026",
+        "Value Date": "06-05-2026",
+        Amount: 5900,
+        Direction: "CREDIT",
+        Reference: "UTR123456789",
+        Description: "NEFT from ABC Pvt Ltd",
+        Balance: 125000.5,
+      },
+      {
+        "Transaction Date": "07-05-2026",
+        "Value Date": "07-05-2026",
+        Amount: 2500,
+        Direction: "DEBIT",
+        Reference: "CHG998877",
+        Description: "Bank charges",
+        Balance: 122500.5,
+      },
+    ];
+    const worksheet = XLSX.utils.json_to_sheet(rows, {
+      header: [
+        "Transaction Date",
+        "Value Date",
+        "Amount",
+        "Direction",
+        "Reference",
+        "Description",
+        "Balance",
+      ],
+    });
+    worksheet["!cols"] = [
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 18 },
+      { wch: 30 },
+      { wch: 14 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Bank Statement");
+    XLSX.writeFile(workbook, "bank-reconciliation-upload-template.xlsx");
+  };
+
   const toggleDraft = (payment, value) => {
     setAllocationDrafts((current) => ({
       ...current,
@@ -785,6 +831,15 @@ export default function BankReconciliationPage() {
                 onChange={handleFileUpload}
               />
             </label>
+
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <FileText size={14} />
+              Download Excel Format
+            </button>
 
             <button
               onClick={() => autoMutation.mutate()}
