@@ -142,6 +142,105 @@ const parseUploadedDate = (value) => {
   return null;
 };
 
+const BANK_STATEMENT_FIELDS = [
+  { key: "transactionDate", label: "Date" },
+  { key: "description", label: "Particulars" },
+  { key: "referenceNumber", label: "Instrument No" },
+  { key: "debitAmount", label: "Withdrawals" },
+  { key: "creditAmount", label: "Deposits" },
+  { key: "closingBalance", label: "Balance" },
+];
+
+const FIELD_ALIASES = {
+  transactionDate: ["date", "transaction date", "txn date", "posting date", "value date"],
+  description: ["particulars", "narration", "description", "remarks", "transaction details", "details"],
+  referenceNumber: ["instrument no", "ref no", "reference", "utr", "utr number", "transaction id", "cheque no", "chq no", "ref number"],
+  debitAmount: ["withdrawal", "withdrawals", "debit", "debit amount", "dr amount", "paid out"],
+  creditAmount: ["deposit", "deposits", "credit", "credit amount", "cr amount", "paid in"],
+  closingBalance: ["balance", "closing balance", "running balance", "available balance"],
+};
+
+const normalizeHeader = (value = "") =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+const detectColumnMapping = (columns = []) => {
+  const mapping = {};
+  columns.forEach((column) => {
+    const normalized = normalizeHeader(column);
+    const field = BANK_STATEMENT_FIELDS.find((item) =>
+      FIELD_ALIASES[item.key]?.includes(normalized),
+    );
+    if (field && !mapping[field.key]) mapping[field.key] = column;
+  });
+  return mapping;
+};
+
+const parseAmount = (value) => {
+  if (value == null || value === "") return 0;
+  const cleaned = String(value)
+    .replace(/,/g, "")
+    .replace(/[₹\s]/g, "")
+    .replace(/[()]/g, "")
+    .trim();
+  if (!cleaned) return 0;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) ? Math.abs(parsed) : Number.NaN;
+};
+
+const parseStatementRows = (rows = [], mapping = {}, selectedLedgerId = "", fileName = "") => {
+  const referenceCounts = new Map();
+  rows.forEach((row) => {
+    const reference = String(row[mapping.referenceNumber] || "").trim().toUpperCase();
+    if (reference) referenceCounts.set(reference, (referenceCounts.get(reference) || 0) + 1);
+  });
+
+  return rows.map((row, index) => {
+    const transactionDate = parseUploadedDate(row[mapping.transactionDate]);
+    const debitAmount = parseAmount(row[mapping.debitAmount]);
+    const creditAmount = parseAmount(row[mapping.creditAmount]);
+    const closingBalance = parseAmount(row[mapping.closingBalance]);
+    const referenceNumber = String(row[mapping.referenceNumber] || "").trim();
+    const description = String(row[mapping.description] || "").trim();
+    const errors = [];
+    const warnings = [];
+
+    if (!transactionDate) errors.push("Invalid or missing date");
+    if (Number.isNaN(debitAmount) || Number.isNaN(creditAmount)) errors.push("Invalid amount");
+    if (!debitAmount && !creditAmount) errors.push("Withdrawal or deposit is required");
+    if (debitAmount > 0 && creditAmount > 0) errors.push("Both withdrawal and deposit cannot be filled");
+    if (!referenceNumber) warnings.push("Missing instrument/reference number");
+    if (referenceNumber && referenceCounts.get(referenceNumber.toUpperCase()) > 1) {
+      warnings.push("Duplicate reference in uploaded file");
+    }
+
+    const direction = creditAmount > 0 ? "CREDIT" : debitAmount > 0 ? "DEBIT" : "";
+    const amount = direction === "CREDIT" ? creditAmount : direction === "DEBIT" ? debitAmount : 0;
+
+    return {
+      rowNumber: index + 2,
+      originalRowData: row,
+      transactionDate,
+      valueDate: transactionDate,
+      description,
+      referenceNumber,
+      debitAmount: debitAmount || 0,
+      creditAmount: creditAmount || 0,
+      amount,
+      direction,
+      closingBalance: Number.isNaN(closingBalance) ? null : closingBalance,
+      bankLedgerId: selectedLedgerId,
+      fileName,
+      errors,
+      warnings,
+      validationStatus: errors.length ? "ERROR" : warnings.length ? "WARNING" : "VALID",
+    };
+  });
+};
+
 const getAvailablePaymentAmount = (payment) => {
   return Math.max(
     0,
@@ -271,6 +370,14 @@ export default function BankReconciliationPage() {
     title: "",
     message: "",
     details: "",
+  });
+  const [uploadPreview, setUploadPreview] = useState({
+    open: false,
+    fileName: "",
+    rows: [],
+    columns: [],
+    mapping: {},
+    parsedRows: [],
   });
 
   const queryKey = [
@@ -558,6 +665,22 @@ export default function BankReconciliationPage() {
   const availableSelectedBankAmount = selectedBank
     ? getAvailableBankAmount(selectedBank)
     : 0;
+  const previewSummary = useMemo(() => {
+    const rows = uploadPreview.parsedRows || [];
+    const refs = new Map();
+    rows.forEach((row) => {
+      const ref = String(row.referenceNumber || "").trim().toUpperCase();
+      if (ref) refs.set(ref, (refs.get(ref) || 0) + 1);
+    });
+    return {
+      totalRows: rows.length,
+      totalDebit: rows.reduce((sum, row) => sum + Number(row.debitAmount || 0), 0),
+      totalCredit: rows.reduce((sum, row) => sum + Number(row.creditAmount || 0), 0),
+      invalidRows: rows.filter((row) => row.errors.length).length,
+      warningRows: rows.filter((row) => !row.errors.length && row.warnings.length).length,
+      duplicateReferences: [...refs.values()].filter((count) => count > 1).length,
+    };
+  }, [uploadPreview.parsedRows]);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0];
@@ -575,34 +698,16 @@ export default function BankReconciliationPage() {
         );
       }
 
-      const transactions = rows.map((row, index) => {
-        const transactionDate = parseUploadedDate(
-          row.transactionDate ||
-            row.date ||
-            row.Date ||
-            row["Transaction Date"],
-        );
-        const valueDate = parseUploadedDate(row.valueDate || row["Value Date"]);
-
-        if (!transactionDate) {
-          throw new Error(
-            `Invalid transaction date in uploaded file at row ${index + 2}`,
-          );
-        }
-
-        return {
-          transactionDate,
-          valueDate,
-          amount: Number(row.amount || row.Amount || 0),
-          type: row.type || row.direction || row.Direction,
-          reference: row.reference || row.Reference || row.UTR || row.utr,
-          description: row.description || row.Description || row.Remarks,
-          balance: row.balance || row.Balance,
-          fileName: file.name,
-          bankLedgerId: selectedLedgerId, // Added this
-        };
+      const columns = Object.keys(rows[0] || {});
+      const mapping = detectColumnMapping(columns);
+      setUploadPreview({
+        open: true,
+        fileName: file.name,
+        rows,
+        columns,
+        mapping,
+        parsedRows: parseStatementRows(rows, mapping, selectedLedgerId, file.name),
       });
-      await uploadMutation.mutateAsync({ companyId, transactions });
     } catch (error) {
       setOperationStatus({
         open: true,
@@ -619,6 +724,99 @@ export default function BankReconciliationPage() {
     } finally {
       event.target.value = "";
     }
+  };
+
+  const updatePreviewMapping = (fieldKey, columnName) => {
+    setUploadPreview((current) => {
+      const mapping = { ...current.mapping, [fieldKey]: columnName };
+      return {
+        ...current,
+        mapping,
+        parsedRows: parseStatementRows(current.rows, mapping, selectedLedgerId, current.fileName),
+      };
+    });
+  };
+
+  const closeUploadPreview = () => {
+    setUploadPreview({
+      open: false,
+      fileName: "",
+      rows: [],
+      columns: [],
+      mapping: {},
+      parsedRows: [],
+    });
+  };
+
+  const confirmUploadImport = async () => {
+    const invalidCount = uploadPreview.parsedRows.filter((row) => row.errors.length).length;
+    if (invalidCount > 0) {
+      toast.error("Fix invalid rows or column mapping before import");
+      return;
+    }
+
+    const transactions = uploadPreview.parsedRows.map((row) => ({
+      transactionDate: row.transactionDate,
+      valueDate: row.valueDate,
+      description: row.description,
+      referenceNumber: row.referenceNumber,
+      reference: row.referenceNumber,
+      debitAmount: row.debitAmount,
+      creditAmount: row.creditAmount,
+      amount: row.amount,
+      direction: row.direction,
+      type: row.direction,
+      closingBalance: row.closingBalance,
+      balance: row.closingBalance,
+      originalRowData: row.originalRowData,
+      fileName: row.fileName,
+      bankLedgerId: selectedLedgerId,
+    }));
+
+    await uploadMutation.mutateAsync({ companyId, transactions });
+    closeUploadPreview();
+  };
+
+  const handleDownloadTemplate = () => {
+    const rows = [
+      {
+        Date: "06-05-2026",
+        Particulars: "NEFT CR CYIENT LIMITED INV9297",
+        "Instrument No": "UTR123456789",
+        Withdrawals: "",
+        Deposits: 5900,
+        Balance: 125000.5,
+      },
+      {
+        Date: "07-05-2026",
+        Particulars: "BANK CHARGES",
+        "Instrument No": "CHG998877",
+        Withdrawals: 2500,
+        Deposits: "",
+        Balance: 122500.5,
+      },
+    ];
+    const worksheet = XLSX.utils.json_to_sheet(rows, {
+      header: [
+        "Date",
+        "Particulars",
+        "Instrument No",
+        "Withdrawals",
+        "Deposits",
+        "Balance",
+      ],
+    });
+    worksheet["!cols"] = [
+      { wch: 14 },
+      { wch: 36 },
+      { wch: 18 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 14 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Bank Statement");
+    XLSX.writeFile(workbook, "bank-reconciliation-upload-template.xlsx");
   };
 
   const toggleDraft = (payment, value) => {
@@ -785,6 +983,15 @@ export default function BankReconciliationPage() {
                 onChange={handleFileUpload}
               />
             </label>
+
+            <button
+              type="button"
+              onClick={handleDownloadTemplate}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+            >
+              <FileText size={14} />
+              Download Excel Format
+            </button>
 
             <button
               onClick={() => autoMutation.mutate()}
@@ -1469,6 +1676,141 @@ export default function BankReconciliationPage() {
           <span>4. Manually allocate, unlink, or create missing payment.</span>
         </div>
       </div>
+
+      {uploadPreview.open && (
+        <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-slate-950/50 px-4 py-6">
+          <div className="w-full max-w-6xl rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-6 py-5">
+              <div>
+                <h2 className="text-lg font-black text-slate-900">Preview Bank Statement Import</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Map columns, review validation, then confirm import for {uploadPreview.fileName}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeUploadPreview}
+                className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-6 lg:grid-cols-[0.85fr_1.15fr]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <h3 className="text-sm font-bold text-slate-800">Column Mapping</h3>
+                  <div className="mt-3 space-y-2">
+                    {BANK_STATEMENT_FIELDS.map((field) => (
+                      <label key={field.key} className="grid grid-cols-[130px_1fr] items-center gap-3 text-xs">
+                        <span className="font-semibold text-slate-600">{field.label}</span>
+                        <select
+                          value={uploadPreview.mapping[field.key] || ""}
+                          onChange={(event) => updatePreviewMapping(field.key, event.target.value)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-300"
+                        >
+                          <option value="">Not mapped</option>
+                          {uploadPreview.columns.map((column) => (
+                            <option key={column} value={column}>{column}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ["Rows", previewSummary.totalRows],
+                    ["Debit", fmtCurrency(previewSummary.totalDebit)],
+                    ["Credit", fmtCurrency(previewSummary.totalCredit)],
+                    ["Invalid", previewSummary.invalidRows],
+                    ["Warnings", previewSummary.warningRows],
+                    ["Duplicate Refs", previewSummary.duplicateReferences],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{label}</p>
+                      <p className="mt-1 text-sm font-black text-slate-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <div className="max-h-[520px] overflow-auto">
+                  <table className="min-w-[1050px] divide-y divide-slate-100 text-xs">
+                    <thead className="sticky top-0 bg-slate-50">
+                      <tr>
+                        {["Date", "Particulars", "Instrument No", "Withdrawals", "Deposits", "Balance", "Parsed Direction", "Parsed Amount", "Validation Status"].map((label) => (
+                          <th key={label} className="px-3 py-2 text-left text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            {label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {uploadPreview.parsedRows.map((row) => (
+                        <tr
+                          key={row.rowNumber}
+                          className={
+                            row.errors.length
+                              ? "bg-rose-50"
+                              : row.warnings.length
+                                ? "bg-amber-50"
+                                : "bg-white"
+                          }
+                        >
+                          <td className="px-3 py-2 whitespace-nowrap">{row.transactionDate ? fmtDate(row.transactionDate) : "—"}</td>
+                          <td className="px-3 py-2 max-w-[260px] truncate">{row.description || "—"}</td>
+                          <td className="px-3 py-2">{row.referenceNumber || "—"}</td>
+                          <td className="px-3 py-2 text-right">{row.debitAmount ? fmtCurrency(row.debitAmount) : "—"}</td>
+                          <td className="px-3 py-2 text-right">{row.creditAmount ? fmtCurrency(row.creditAmount) : "—"}</td>
+                          <td className="px-3 py-2 text-right">{row.closingBalance != null ? fmtCurrency(row.closingBalance) : "—"}</td>
+                          <td className="px-3 py-2 font-bold">{row.direction || "—"}</td>
+                          <td className="px-3 py-2 text-right font-bold">{row.amount ? fmtCurrency(row.amount) : "—"}</td>
+                          <td className="px-3 py-2">
+                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                              row.errors.length
+                                ? "border-rose-200 bg-rose-100 text-rose-700"
+                                : row.warnings.length
+                                  ? "border-amber-200 bg-amber-100 text-amber-700"
+                                  : "border-emerald-200 bg-emerald-100 text-emerald-700"
+                            }`}>
+                              {row.errors[0] || row.warnings[0] || "Valid"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 px-6 py-4">
+              <button
+                type="button"
+                onClick={closeUploadPreview}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <label className="cursor-pointer rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                Re-upload
+                <input type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleFileUpload} />
+              </label>
+              <button
+                type="button"
+                onClick={confirmUploadImport}
+                disabled={uploadMutation.isPending || previewSummary.invalidRows > 0}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Confirm Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
