@@ -40,7 +40,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { toast } from "react-toastify";
 import PurchaseOrderDetailModal from "./PurchaseOrderDetailModal";
 import JournalDetailsModal from "./JournalDetailsModal";
-import { getJournalByIdApi } from "../apis/journalApi";
+import { getJournalByIdApi, reverseJournalApi } from "../apis/journalApi";
 import PaymentReceiptModal from "./PaymentReceiptModal";
 import CreateLedgerFromInvoiceModal from "./CreateLedgerFromInvoiceModal";
 import {
@@ -66,6 +66,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
   const [reversingPaymentId, setReversingPaymentId] = useState(null);
   const [showReverseConfirm, setShowReverseConfirm] = useState(false);
   const [paymentToReverse, setPaymentToReverse] = useState(null);
+  const [showSalesJournalReverseConfirm, setShowSalesJournalReverseConfirm] = useState(false);
 
   // Fetch invoice details
   useEffect(() => {
@@ -162,6 +163,35 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
       toast.error(err?.response?.data?.message || "Failed to reverse payment");
     } finally {
       setReversingPaymentId(null);
+    }
+  };
+
+  const handleReverseSalesJournal = async () => {
+    if (!invoice || !invoice.salesJournalId || !user?.company?._id) return;
+
+    // Check for payments first (frontend check)
+    const activePayments = (invoice.payments || invoice.paymentIds || []).filter(p => !p.isReversed);
+    if (activePayments.length > 0) {
+      toast.error("Cannot reverse sales journal because the invoice has active payments. Please reverse payments first.");
+      return;
+    }
+
+    setShowSalesJournalReverseConfirm(true);
+  };
+
+  const handleConfirmSalesJournalReverse = async () => {
+    try {
+      setLoading(true);
+      const journalId = typeof invoice.salesJournalId === "object" ? invoice.salesJournalId._id : invoice.salesJournalId;
+      await reverseJournalApi(user.company._id, journalId);
+      toast.success("Sales journal reversed successfully.");
+      setShowSalesJournalReverseConfirm(false);
+      await fetchInvoiceDetails();
+    } catch (err) {
+      console.error("Error reversing sales journal:", err);
+      toast.error(err?.response?.data?.message || "Failed to reverse sales journal");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -418,7 +448,8 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
     }
   };
 
-  const getInvoiceStatusBadge = (status) => {
+  const getInvoiceStatusBadge = (invoice) => {
+    const status = invoice.status;
     const statusConfig = {
       PENDING_APPROVAL: { label: "Pending Approval", color: "bg-gray-100 text-gray-800", icon: FileText },
       POSTED: { label: "Posted", color: "bg-blue-100 text-blue-800", icon: FileText },
@@ -427,7 +458,13 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
       RECONCILED: { label: "Reconciled", color: "bg-green-100 text-green-800", icon: Shield },
     };
 
-    const config = statusConfig[status] || statusConfig.PENDING_APPROVAL;
+    let config = statusConfig[status] || statusConfig.PENDING_APPROVAL;
+
+    // Override if approved but not posted
+    if (invoice.approvalStatus === "Approved" && !invoice.salesJournalId) {
+      config = { label: "Posting Pending", color: "bg-amber-100 text-amber-800", icon: Clock };
+    }
+
     const Icon = config.icon;
 
     return (
@@ -557,7 +594,7 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
                     <h2 className="text-sm font-extrabold text-white tracking-tight">
                       {invoice?.invoiceNo ? `Invoice  ${invoice.invoiceNo}` : "Invoice Details"}
                     </h2>
-                    {invoice && getInvoiceStatusBadge(invoice.status)}
+                    {invoice && getInvoiceStatusBadge(invoice)}
                     {invoice && (
                       <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
                         paymentInfo.paymentStatus === "fully_paid" ? "bg-emerald-100 text-emerald-700 border-emerald-200"
@@ -985,13 +1022,22 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
                           <CheckCircle size={16} className="text-emerald-600 shrink-0" />
                           <div>
                             <p className="text-xs font-bold text-emerald-800">Sales Journal Posted</p>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenJournal(invoice.salesJournalId)}
-                              className="text-[10px] font-mono text-emerald-600 mt-0.5 hover:text-emerald-800 hover:underline text-left block"
-                            >
-                              {invoice.salesJournal?.number || invoice.salesJournalId?.number || invoice.salesJournalId?._id || invoice.salesJournalId}
-                            </button>
+                            <div className="flex items-center gap-2 mt-1">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenJournal(invoice.salesJournalId)}
+                                className="text-[10px] font-mono text-emerald-600 hover:text-emerald-800 hover:underline text-left block"
+                              >
+                                {invoice.salesJournal?.number || invoice.salesJournalId?.number || invoice.salesJournalId?._id || invoice.salesJournalId}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={handleReverseSalesJournal}
+                                className="flex items-center gap-1 px-2 py-0.5 text-[9px] font-bold text-red-600 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 transition-all"
+                              >
+                                <RotateCcw size={9} /> Reverse Posting
+                              </button>
+                            </div>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
@@ -1323,6 +1369,40 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
                 ) : (
                   "Yes, Reverse"
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sales Journal Reversal Confirmation Modal */}
+      {showSalesJournalReverseConfirm && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 border border-slate-100">
+            <div className="flex flex-col items-center text-center mb-6">
+              <div className="p-3 bg-red-100 rounded-2xl mb-4">
+                <RotateCcw className="h-6 w-6 text-red-600" />
+              </div>
+              <h3 className="text-xl font-black text-slate-900 mb-2">Reverse Posting?</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Are you sure you want to reverse the sales journal for invoice <strong>{invoice.invoiceNo}</strong>? This will unpost all accounting entries and revert the status to pending.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleConfirmSalesJournalReverse}
+                disabled={loading}
+                className="w-full py-3 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl shadow-lg shadow-red-200 transition-all disabled:opacity-50"
+              >
+                {loading ? "Reversing..." : "Yes, Reverse Posting"}
+              </button>
+              <button
+                onClick={() => setShowSalesJournalReverseConfirm(false)}
+                disabled={loading}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded-xl transition-all disabled:opacity-50"
+              >
+                Cancel
               </button>
             </div>
           </div>

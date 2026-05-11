@@ -444,7 +444,8 @@ const InvoiceData = () => {
     }
   };
 
-  const getInvoiceLifecycleBadge = (status) => {
+  const getInvoiceLifecycleBadge = (invoice) => {
+    const status = invoice.status;
     const config = {
       PARTIALLY_PAID: {
         text: "Partially Paid",
@@ -464,7 +465,16 @@ const InvoiceData = () => {
       },
     };
 
-    return config[status] || config.POSTED;
+    let res = config[status] || config.POSTED;
+
+    if (invoice.approvalStatus === "Approved" && !invoice.salesJournalId) {
+      res = {
+        text: "Posting Pending",
+        color: "bg-amber-100 text-amber-800 border-amber-200",
+      };
+    }
+
+    return res;
   };
 
   const handleDownloadWord = async (invoiceId, invoiceNo, e) => {
@@ -1075,7 +1085,7 @@ const InvoiceData = () => {
                 const PaymentIcon = paymentBadge.icon;
                 const journalPosted = isJournalPosted(invoice);
                 const isExpanded = !!expandedRows[invoice._id];
-                const lifecycleBadge = getInvoiceLifecycleBadge(invoice.status);
+                const lifecycleBadge = getInvoiceLifecycleBadge(invoice);
 
                 const accentColor =
                   invoice.status === "RECONCILED"
@@ -1130,11 +1140,13 @@ const InvoiceData = () => {
                               />
                               {paymentBadge.text}
                             </span>
-                            {/* <span
-                              className={`px-2 py-0.5 text-[10px] font-black rounded-full border uppercase tracking-wider ${lifecycleBadge.color}`}
-                            >
-                              {lifecycleBadge.text}
-                            </span> */}
+                            {invoice.approvalStatus === "Approved" && !invoice.salesJournalId && (
+                              <span
+                                className={`px-2 py-0.5 text-[10px] font-black rounded-full border uppercase tracking-wider ${lifecycleBadge.color}`}
+                              >
+                                {lifecycleBadge.text}
+                              </span>
+                            )}
                             {journalPosted && (
                               <span className="px-2 py-0.5 text-[10px] font-black rounded-full border border-emerald-200 text-emerald-700 bg-emerald-50 uppercase tracking-wider">
                                 ✓ Journal
