@@ -336,12 +336,23 @@ const ViewAllInvoices = () => {
       default: return { text: "Unpaid", pill: "bg-red-100 text-red-700 border-red-200", dot: "bg-red-500", icon: AlertTriangle };
     }
   };
-  const getInvoiceLifecycleBadge = (status) => ({
-    PARTIALLY_PAID: { text: "Partially Paid", pill: "bg-yellow-100 text-yellow-800 border-yellow-200" },
-    PAID: { text: "Paid", pill: "bg-blue-100 text-blue-800 border-blue-200" },
-    RECONCILED: { text: "Reconciled", pill: "bg-green-100 text-green-800 border-green-200" },
-    POSTED: { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" },
-  }[status] || { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" });
+  const getInvoiceLifecycleBadge = (invoice) => {
+    const status = invoice.status;
+    const config = {
+      PARTIALLY_PAID: { text: "Partially Paid", pill: "bg-yellow-100 text-yellow-800 border-yellow-200" },
+      PAID: { text: "Paid", pill: "bg-blue-100 text-blue-800 border-blue-200" },
+      RECONCILED: { text: "Reconciled", pill: "bg-green-100 text-green-800 border-green-200" },
+      POSTED: { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" },
+    };
+
+    let res = config[status] || { text: "Posted", pill: "bg-slate-100 text-slate-700 border-slate-200" };
+
+    if (invoice.approvalStatus === "Approved" && !invoice.salesJournalId) {
+      res = { text: "Posting Pending", pill: "bg-amber-100 text-amber-800 border-amber-200" };
+    }
+
+    return res;
+  };
   const handleDownloadWord = async (invoiceId, invoiceNo, e) => {
     e.stopPropagation();
     try {
@@ -580,7 +591,7 @@ const ViewAllInvoices = () => {
                 {invoices.map((invoice, i) => {
                   const paymentInfo = calculatePaymentInfo(invoice);
                   const badge = getPaymentStatusBadge(paymentInfo.paymentStatus, paymentInfo.pendingAmount);
-                  const lifecycleBadge = getInvoiceLifecycleBadge(invoice.status);
+                  const lifecycleBadge = getInvoiceLifecycleBadge(invoice);
                   const PayIcon = badge.icon;
                   const journalPosted = isJournalPosted(invoice);
                   const isExpanded = !!expandedRows[invoice._id];
@@ -607,19 +618,16 @@ const ViewAllInvoices = () => {
                                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${badge.pill}`}>
                                   <PayIcon size={9} /> {badge.text}
                                 </span>
-                                {/* <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${lifecycleBadge.pill}`}>
-                                  {lifecycleBadge.text}
-                                </span> */}
-                                {invoice.tdsAmount > 0 && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border bg-violet-100 text-violet-700 border-violet-200">
-                                    TDS: {formatAmount(invoice.tdsAmount)}
+                                {invoice.approvalStatus === "Approved" && !invoice.salesJournalId && (
+                                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border ${lifecycleBadge.pill}`}>
+                                    {lifecycleBadge.text}
                                   </span>
                                 )}
-                                {/* {journalPosted && (
+                                {journalPosted && (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black border bg-emerald-100 text-emerald-700 border-emerald-200">
                                     <CheckCircle size={9} /> Journal Posted
                                   </span>
-                                )} */}
+                                )}
                                 <button onClick={(e) => handleViewDetails(invoice, e)}
                                   className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-100 transition-all">
                                   <FileText size={9} /> View Details

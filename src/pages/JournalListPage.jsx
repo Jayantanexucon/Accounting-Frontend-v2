@@ -1254,7 +1254,7 @@ const [loadingStats, setLoadingStats] = useState(false);
                                 </button>
                               )}
 
-                                {isAdmin && !["INVOICE", "PAYMENT", "REVERSAL"].includes(journal.sourceType) && (
+                                {isAdmin && !["REVERSAL"].includes(journal.sourceType) && (
                                   <button
                                     onClick={(e) => handleReverseClick(journal, e)}
                                     disabled={journal.isReversed}

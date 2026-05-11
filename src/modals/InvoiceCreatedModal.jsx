@@ -83,11 +83,10 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
         {/* Modal Content */}
         <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-auto overflow-hidden">
           {/* Header - Different colors for create vs edit */}
-          <div className={`px-6 py-5 text-white ${
-            isEdit 
-              ? "bg-gradient-to-r from-blue-600 to-blue-800" 
-              : "bg-gradient-to-r from-green-600 to-green-800"
-          }`}>
+          <div className={`px-6 py-5 text-white ${isEdit
+            ? "bg-gradient-to-r from-blue-600 to-blue-800"
+            : "bg-gradient-to-r from-green-600 to-green-800"
+            }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-3">
                 <div className="bg-white/10 p-2 rounded-lg">
@@ -102,7 +101,7 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                     {isEdit ? "Invoice Updated Successfully" : "Invoice Created Successfully"}
                   </h2>
                   <p className="text-white/90 text-sm mt-1">
-                    {isEdit 
+                    {isEdit
                       ? `Invoice #${displayInvoice.invoiceNo || "N/A"} has been updated`
                       : `Invoice #${displayInvoice.invoiceNo || "N/A"} has been saved to the system`
                     }
@@ -125,29 +124,26 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 mb-6">
               <div className="flex flex-col md:flex-row items-start justify-between gap-4">
                 <div className="flex items-start space-x-3">
-                  <div className={`p-3 rounded-lg ${
-                    isEdit ? "bg-blue-100" : "bg-green-100"
-                  }`}>
-                    <Receipt className={`h-6 w-6 ${
-                      isEdit ? "text-blue-600" : "text-green-600"
-                    }`} />
+                  <div className={`p-3 rounded-lg ${isEdit ? "bg-blue-100" : "bg-green-100"
+                    }`}>
+                    <Receipt className={`h-6 w-6 ${isEdit ? "text-blue-600" : "text-green-600"
+                      }`} />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="text-lg font-bold text-gray-900">
                         {displayInvoice.invoiceNo || "N/A"}
                       </h3>
-                      <span className={`px-2 py-1 text-xs font-medium rounded ${
-                        displayInvoice.status === 'active' ? 'bg-green-100 text-green-800' :
-                        displayInvoice.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                        displayInvoice.status === 'PENDING_APPROVAL' ? 'bg-gray-100 text-gray-800' :
-                        displayInvoice.status === 'inprogress' ? 'bg-blue-100 text-blue-800' :
-                        displayInvoice.status === 'completed' ? 'bg-purple-100 text-purple-800' :
-                        displayInvoice.status === 'cancelled' ? 'bg-red-100 text-red-800' :
-                        'bg-green-100 text-green-800'
-                      }`}>
+                      {/* <span className={`px-2 py-1 text-xs font-medium rounded ${displayInvoice.status === 'active' ? 'bg-green-100 text-green-800' :
+                          displayInvoice.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                            displayInvoice.status === 'PENDING_APPROVAL' ? 'bg-gray-100 text-gray-800' :
+                              displayInvoice.status === 'inprogress' ? 'bg-blue-100 text-blue-800' :
+                                displayInvoice.status === 'completed' ? 'bg-purple-100 text-purple-800' :
+                                  displayInvoice.status === 'cancelled' ? 'bg-red-100 text-red-800' :
+                                    'bg-green-100 text-green-800'
+                        }`}>
                         {getStatusText(displayInvoice.status)}
-                      </span>
+                      </span> */}
                       {isEdit && (
                         <span className="px-2 py-1 text-xs font-medium rounded bg-blue-100 text-blue-800">
                           Pending Approval
@@ -162,15 +158,15 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                       <div className="flex items-center">
                         <User className="h-3.5 w-3.5 mr-1.5" />
                         <span className="max-w-[150px] truncate">
-                          {displayInvoice.billTo?.name || 
-                           displayInvoice.billTo || 
-                           "No client"}
+                          {displayInvoice.billTo?.name ||
+                            displayInvoice.billTo ||
+                            "No client"}
                         </span>
                       </div>
                     </div>
                   </div>
                 </div>
-                
+
                 <div className="text-right">
                   <p className="text-sm text-gray-500 mb-1">Total Amount</p>
                   <p className="text-2xl font-bold text-gray-900">
@@ -241,8 +237,8 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                   </div>
                   <p className="text-lg font-bold text-purple-700">
                     {displayInvoice.currency || "₹"} {(
-                      displayInvoice.tdsAmount || 
-                      displayInvoice.totalTDSAmount || 
+                      displayInvoice.tdsAmount ||
+                      displayInvoice.totalTDSAmount ||
                       0
                     ).toFixed(2)}
                   </p>
@@ -260,13 +256,13 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                     <h4 className="text-sm font-medium text-gray-700">Bill To</h4>
                   </div>
                   <p className="font-medium text-gray-900">
-                    {displayInvoice.billTo?.name || 
-                     (typeof displayInvoice.billTo === 'string' ? displayInvoice.billTo : "N/A")}
+                    {displayInvoice.billTo?.name ||
+                      (typeof displayInvoice.billTo === 'string' ? displayInvoice.billTo : "N/A")}
                   </p>
                   <p className="text-sm text-gray-600 mt-1">
-                    {displayInvoice.billTo?.address || 
-                     (typeof displayInvoice.billTo === 'object' && displayInvoice.billTo.address) || 
-                     "-"}
+                    {displayInvoice.billTo?.address ||
+                      (typeof displayInvoice.billTo === 'object' && displayInvoice.billTo.address) ||
+                      "-"}
                   </p>
                   {(displayInvoice.billTo?.taxIdentifierNumber || displayInvoice.billTo?.GSTIN || displayInvoice.billTo?.gstin) && (
                     <p className="text-xs text-gray-500 mt-2">
@@ -274,7 +270,7 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                     </p>
                   )}
                 </div>
-                
+
                 {(displayInvoice.shipTo?.name || displayInvoice.shipTo) && (
                   <div className="bg-gray-50 rounded-lg p-4">
                     <div className="flex items-center space-x-2 mb-2">
@@ -282,13 +278,13 @@ const InvoiceCreatedModal = ({ open, onClose, invoice, isEdit = false }) => {
                       <h4 className="text-sm font-medium text-gray-700">Ship To</h4>
                     </div>
                     <p className="font-medium text-gray-900">
-                      {displayInvoice.shipTo?.name || 
-                       (typeof displayInvoice.shipTo === 'string' ? displayInvoice.shipTo : "N/A")}
+                      {displayInvoice.shipTo?.name ||
+                        (typeof displayInvoice.shipTo === 'string' ? displayInvoice.shipTo : "N/A")}
                     </p>
                     <p className="text-sm text-gray-600 mt-1">
-                      {displayInvoice.shipTo?.address || 
-                       (typeof displayInvoice.shipTo === 'object' && displayInvoice.shipTo.address) || 
-                       "-"}
+                      {displayInvoice.shipTo?.address ||
+                        (typeof displayInvoice.shipTo === 'object' && displayInvoice.shipTo.address) ||
+                        "-"}
                     </p>
                     {(displayInvoice.shipTo?.taxIdentifierNumber || displayInvoice.shipTo?.GSTIN || displayInvoice.shipTo?.gstin) && (
                       <p className="text-xs text-gray-500 mt-2">
