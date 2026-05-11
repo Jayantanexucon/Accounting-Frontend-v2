@@ -144,7 +144,7 @@ const PurchaseOrderAdvancedSearch = ({
       const poRes = await API.get("/invoices/purchase-order/search/number", {
         params: poParams,
       });
-      const poNumbers = poRes.data?.map((item) => item.label) || [];
+      const poNumbers = (poRes.data?.data || poRes.data || []).map((item) => item.label).filter(Boolean);
 
       // --- Clients (using getClientsApi) ---
       // Fetch all clients (global master data) - no companyId filter
@@ -205,7 +205,7 @@ useEffect(() => {
       if (clientId) params.clientId = clientId;
       if (preselectedClientName) params.clientName = preselectedClientName;
       const res = await API.get("/invoices/purchase-order/search/number", { params });
-      const filtered = res.data?.map((item) => item.label) || [];
+      const filtered = (res.data?.data || res.data || []).map((item) => item.label).filter(Boolean);
       setFilteredPoNumbers(filtered);
     } catch (error) {
       console.error("Error searching PO numbers:", error);
@@ -313,6 +313,7 @@ useEffect(() => {
 
     const activeFilters = Object.entries(filters).reduce(
       (acc, [key, value]) => {
+        if (hidePaymentTerms && key === "paymentTerms") return acc;
         if (value && value.trim() !== "") acc[key] = value;
         return acc;
       },
