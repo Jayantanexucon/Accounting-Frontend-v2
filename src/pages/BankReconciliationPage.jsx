@@ -3,21 +3,23 @@ import * as XLSX from "xlsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  BarChart3,
   Check,
   CheckCircle2,
+  Download,
   FilePlus2,
   Filter,
   Landmark,
   Link2,
   RefreshCw,
   Search,
+  Sparkles,
   Unlink,
   Upload,
   X,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
-import { FileText } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import {
   autoMatchBankTransactionsApi,
@@ -665,6 +667,36 @@ export default function BankReconciliationPage() {
   const availableSelectedBankAmount = selectedBank
     ? getAvailableBankAmount(selectedBank)
     : 0;
+  const balanceSummary = useMemo(() => {
+    const bankMatchedBalance = bankTransactions.reduce((sum, transaction) => {
+      const amount = Number(transaction.amount || 0);
+      const allocatedAmount = Number(transaction.allocatedAmount || 0);
+      if (allocatedAmount > 0) return sum + Math.min(Math.abs(amount), Math.abs(allocatedAmount));
+      return transaction.reconciliationStatus === "MATCHED" ? sum + Math.abs(amount) : sum;
+    }, 0);
+
+    const unmatchedBankBalance = bankTransactions.reduce(
+      (sum, transaction) => sum + getAvailableBankAmount(transaction),
+      0,
+    );
+    const unmatchedBookBalance = payments.reduce(
+      (sum, payment) => sum + getAvailablePaymentAmount(payment),
+      0,
+    );
+
+    return {
+      matchedBalance: bankMatchedBalance,
+      unmatchedBalance: unmatchedBankBalance + unmatchedBookBalance,
+      unmatchedItems:
+        (rawData.paymentSummary?.unmatched || 0) +
+        (rawData.bankSummary?.unmatched || 0),
+    };
+  }, [
+    bankTransactions,
+    payments,
+    rawData.bankSummary?.unmatched,
+    rawData.paymentSummary?.unmatched,
+  ]);
   const previewSummary = useMemo(() => {
     const rows = uploadPreview.parsedRows || [];
     const refs = new Map();
@@ -958,7 +990,7 @@ export default function BankReconciliationPage() {
               payments without changing journals during reconciliation.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2 shadow-inner xl:w-auto xl:max-w-[620px] xl:justify-end">
             <button
               onClick={() =>
                 navigate("/accounting/bank-reconciliation/report", {
@@ -966,15 +998,21 @@ export default function BankReconciliationPage() {
                 })
               }
               disabled={!selectedLedgerId}
-              className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
               title="View monthly reconciliation analysis report"
             >
-              <FileText size={14} />
+              <BarChart3 size={15} />
               Monthly Report
             </button>
 
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800">
-              <Upload size={14} /> Import Bank Statement
+            <label
+              className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-xs font-bold text-white shadow-sm transition ${
+                selectedLedgerId
+                  ? "cursor-pointer bg-slate-900 hover:bg-slate-800"
+                  : "cursor-not-allowed bg-slate-400 opacity-70"
+              }`}
+            >
+              <Upload size={15} /> Import Bank Statement
               <input
                 type="file"
                 accept=".csv,.xlsx,.xls"
@@ -987,44 +1025,27 @@ export default function BankReconciliationPage() {
             <button
               type="button"
               onClick={handleDownloadTemplate}
-              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50 hover:text-emerald-700"
             >
-              <FileText size={14} />
+              <Download size={15} />
               Download Excel Format
             </button>
 
             <button
               onClick={() => autoMutation.mutate()}
               disabled={autoMutation.isPending || !selectedLedgerId}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300 disabled:opacity-70"
             >
-              <RefreshCw
-                size={14}
-                className={autoMutation.isPending ? "animate-spin" : ""}
-              />
-              Auto Reconcile
+              {autoMutation.isPending ? (
+                <RefreshCw size={15} className="animate-spin" />
+              ) : (
+                <Sparkles size={15} />
+              )}
+              <span>
+                {autoMutation.isPending ? "Reconciling..." : "Auto Reconcile"}
+              </span>
             </button>
           </div>
-          {/* <div className="flex flex-wrap gap-2">
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-semibold text-white transition hover:bg-slate-800">
-              <Upload size={14} /> Import Bank Statement
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                className="hidden"
-                disabled={!selectedLedgerId}
-                onChange={handleFileUpload}
-              />
-            </label>
-            <button
-              onClick={() => autoMutation.mutate()}
-              disabled={autoMutation.isPending || !selectedLedgerId}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-            >
-              <RefreshCw size={14} className={autoMutation.isPending ? "animate-spin" : ""} />
-              Auto Reconcile
-            </button>
-          </div> */}
         </div>
 
         {overviewQuery.isError && (
@@ -1073,7 +1094,7 @@ export default function BankReconciliationPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <p className="text-xs font-semibold text-slate-500">Bank Balance</p>
           <p className="mt-2 text-2xl font-black text-slate-900">
@@ -1092,13 +1113,23 @@ export default function BankReconciliationPage() {
             {fmtCurrency(Math.abs(brs.difference || 0))}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <p className="text-xs font-semibold text-slate-500">
-            Unmatched Items
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-6 shadow-sm">
+          <p className="text-xs font-semibold text-emerald-700">
+            Matched Balance
           </p>
-          <p className="mt-2 text-2xl font-black text-slate-900">
-            {(rawData.paymentSummary?.unmatched || 0) +
-              (rawData.bankSummary?.unmatched || 0)}
+          <p className="mt-2 text-2xl font-black text-emerald-900">
+            {fmtCurrency(balanceSummary.matchedBalance)}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 p-6 shadow-sm">
+          <p className="text-xs font-semibold text-rose-700">
+            Unmatched Balance
+          </p>
+          <p className="mt-2 text-2xl font-black text-rose-900">
+            {fmtCurrency(balanceSummary.unmatchedBalance)}
+          </p>
+          <p className="mt-1 text-[11px] font-semibold text-rose-600">
+            {balanceSummary.unmatchedItems} unmatched items
           </p>
         </div>
       </div>
@@ -1222,8 +1253,7 @@ export default function BankReconciliationPage() {
           <div className="border-b border-slate-100 px-4 py-3">
             <h2 className="text-base font-bold text-slate-800">Book Entries</h2>
             <p className="text-xs text-slate-400">
-              All journal debit and credit lines related to the selected bank
-              account
+              Selected bank ledger lines from posted journal entries
             </p>
           </div>
           <div className="max-h-[760px] overflow-x-auto overflow-y-auto max-w-full">
@@ -1233,7 +1263,7 @@ export default function BankReconciliationPage() {
                   {[
                     "Entry/Ref",
                     "Date",
-                    "Journal Lines",
+                    "Bank Ledger Line",
                     "Unreconciled",
                     "Total",
                     "Status",
@@ -1259,7 +1289,9 @@ export default function BankReconciliationPage() {
                   const bookEntryReference = getBookEntryReference(payment);
                   const bookEntryDescription = getBookEntryDescription(payment);
                   const bookEntryTotalAmount = getBookEntryTotalAmount(payment);
-                  const journalLines = getJournalLines(payment);
+                  const journalLines = getJournalLines(payment).filter(
+                    (line) => line.isBankLedgerLine,
+                  );
 
                   return (
                     <tr key={payment._id} className="hover:bg-slate-50">
@@ -1285,21 +1317,13 @@ export default function BankReconciliationPage() {
                             journalLines.map((line) => (
                               <div
                                 key={line._id}
-                                className={`rounded-lg border px-2.5 py-2 ${
-                                  line.isBankLedgerLine
-                                    ? "border-blue-400 bg-blue-100"
-                                    : "border-slate-200 bg-slate-50  "
-                                }`}
+                                className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2"
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
                                     <div className="text-[11px] font-semibold text-slate-800">
-                                      {line.accountName || "Unknown Account"}
+                                      {line.accountName || selectedLedger?.name || "Bank Ledger"}
                                     </div>
-                                    {/* <div className="text-xs text-slate-500">
-                                      {line.accountCode || "—"}
-                                      {line.isBankLedgerLine ? " • Selected bank ledger line" : ""}
-                                    </div> */}
                                     {line.description ? (
                                       <div className="mt-1 text-[10px] text-slate-500 line-clamp-2">
                                         {line.description}
@@ -1323,7 +1347,7 @@ export default function BankReconciliationPage() {
                             ))
                           ) : (
                             <span className="text-xs text-slate-400">
-                              No related journal lines found
+                              No bank ledger line found
                             </span>
                           )}
                         </div>
