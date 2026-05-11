@@ -13,7 +13,7 @@ export const createPurchaseOrderApi = async (poData) => {
 /**
  * Get all purchase orders with pagination and search
  * @param {string} companyId - Company ID
- * @param {Object} params - Query params (page, limit, search)
+ * @param {Object} params - Query params (page, limit, search, filters)
  */
 export const getPurchaseOrdersApi = async (companyId, params = {}) => {
   const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Changed from /invoices/purchase-order/company/{companyId}
@@ -96,7 +96,7 @@ export const updatePurchaseOrderStatusApi = async (id, status) => {
 // ==================== Search & Lookup ====================
 
 export const searchPoReferencesApi = async (query) => {
-  const { data } = await API.get("/invoices/purchase-order/search-numbers", {
+  const { data } = await API.get("/invoices/purchase-order/search/number", {
     params: { q: query },
   });
   return data;
@@ -105,7 +105,7 @@ export const searchPoReferencesApi = async (query) => {
 export const searchPoNumbersApi = async (query, companyId) => {
   const { data } = await API.get(`/invoices/purchase-order/search/number`, {
     params: {
-      q: query,
+      poNumber: query,  // ✅ Changed from 'q' to 'poNumber' to match backend
       companyId,
     },
   });
@@ -115,7 +115,7 @@ export const searchPoNumbersApi = async (query, companyId) => {
 // ==================== Advanced Search ====================
 
 export const advancedSearchPurchaseOrdersApi = async (filters) => {
-  const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Changed from /invoices/purchase-order/advanced/search
+  const { data } = await API.get(`/invoices/purchase-order`, {  // ✅ Using same endpoint as getAllPurchaseOrders
     params: filters,
   });
   return data;

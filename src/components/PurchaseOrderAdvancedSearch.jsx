@@ -12,6 +12,7 @@ const PurchaseOrderAdvancedSearch = ({
   isLoading = false,
   initialFilters = {},
   clientId = null,
+  hidePaymentTerms = false,
 }) => {
   const [filters, setFilters] = useState({
     poNumber: "",
@@ -137,10 +138,10 @@ const PurchaseOrderAdvancedSearch = ({
     setLoadingOptions(true);
     try {
       // --- PO Numbers ---
-      const poParams = { q: "", companyId };
+      const poParams = { poNumber: "", companyId };
       if (clientId) poParams.clientId = clientId; // 👈 add clientId when in client context
-if (preselectedClientName) poParams.clientName = preselectedClientName;
-      const poRes = await API.get("/purchase-orders/search/number", {
+      if (preselectedClientName) poParams.clientName = preselectedClientName;
+      const poRes = await API.get("/invoices/purchase-order/search/number", {
         params: poParams,
       });
       const poNumbers = poRes.data?.map((item) => item.label) || [];
@@ -157,22 +158,16 @@ if (preselectedClientName) poParams.clientName = preselectedClientName;
       // --- Static lists ---
       const statuses = [
         "",
-        "draft",
-        "issued",
-        "acknowledged",
-        "partially_received",
-        "fully_received",
-        "cancelled",
-        "closed",
+        "OPEN",
+        "PARTIALLY_INVOICED",
+        "FULLY_INVOICED",
+        "CLOSED",
       ];
       const paymentTermsList = [
         "",
-        "net-30",
-        "net-60",
-        "net-90",
-        "cod",
-        "advance",
-        "immediate",
+        "milestone",
+        "monthly",
+        "hourly",
       ];
 
       setSearchOptions({
@@ -206,10 +201,10 @@ useEffect(() => {
 
   const fetchPoNumbers = async () => {
     try {
-      const params = { q: poSearchQuery, companyId };
+      const params = { poNumber: poSearchQuery, companyId };
       if (clientId) params.clientId = clientId;
       if (preselectedClientName) params.clientName = preselectedClientName;
-      const res = await API.get("/purchase-orders/search/number", { params });
+      const res = await API.get("/invoices/purchase-order/search/number", { params });
       const filtered = res.data?.map((item) => item.label) || [];
       setFilteredPoNumbers(filtered);
     } catch (error) {
@@ -544,26 +539,28 @@ useEffect(() => {
               </div>
 
               {/* Payment Terms */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-gray-700">
-                  Payment Terms
-                </label>
-                <select
-                  name="paymentTerms"
-                  value={filters.paymentTerms}
-                  onChange={handleChange}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-500 focus:border-transparent outline-none transition-all"
-                >
-                  <option value="">All Terms</option>
-                  {searchOptions.paymentTermsList
-                    .filter((item) => item !== "")
-                    .map((term) => (
-                      <option key={term} value={term}>
-                        {formatPaymentTerms(term)}
-                      </option>
-                    ))}
-                </select>
-              </div>
+              {!hidePaymentTerms && (
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-medium text-gray-700">
+                    Payment Terms
+                  </label>
+                  <select
+                    name="paymentTerms"
+                    value={filters.paymentTerms}
+                    onChange={handleChange}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-neutral-500 focus:border-transparent outline-none transition-all"
+                  >
+                    <option value="">All Terms</option>
+                    {searchOptions.paymentTermsList
+                      .filter((item) => item !== "")
+                      .map((term) => (
+                        <option key={term} value={term}>
+                          {formatPaymentTerms(term)}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Date Type Selection */}

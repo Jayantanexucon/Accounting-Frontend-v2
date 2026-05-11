@@ -543,8 +543,22 @@ const PurchaseOrderData = () => {
   // Table rows based on viewMode
   const tableRows = useMemo(() => {
     let list = viewMode === "receivable" ? clients : vendors;
+    
     if (debouncedSearchQuery) {
       const q = debouncedSearchQuery.toLowerCase();
+      
+      // First, find all POs that match the search query
+      const matchingPoIds = new Set();
+      currentPOs.forEach(po => {
+        const poNumber = (po.poNumber || "").toLowerCase();
+        if (poNumber.includes(q)) {
+          matchingPoIds.add(po.vendor?._id || po.client?._id);
+        }
+      });
+      
+      // Then filter clients/vendors that either:
+      // 1. Match the search query directly (name/code/tax/country)
+      // 2. Have matching POs
       list = list.filter(item => {
         const name = (viewMode === "receivable" ? item.clientName : item.name)?.toLowerCase() || "";
         const code = (viewMode === "receivable" ? item.clientCode : item.vendorCode)?.toLowerCase() || "";
@@ -552,9 +566,12 @@ const PurchaseOrderData = () => {
           ? (getFirstTaxId(item).toLowerCase())
           : (item.GSTIN || item.taxNumber || "N/A").toLowerCase();
         const country = (viewMode === "receivable" ? item.clientCountry : item.country)?.toLowerCase() || "";
-        return name.includes(q) || code.includes(q) || tax.includes(q) || country.includes(q);
+        
+        // Check if matches name/code/tax/country OR has matching PO
+        return name.includes(q) || code.includes(q) || tax.includes(q) || country.includes(q) || matchingPoIds.has(item._id);
       });
     }
+    
     list = [...list].sort((a, b) => {
       let va, vb;
       const statsMap = viewMode === "receivable" ? clientStats : vendorStats;
@@ -580,7 +597,7 @@ const PurchaseOrderData = () => {
       return sort.dir === "asc" ? va - vb : vb - va;
     });
     return list;
-  }, [viewMode, clients, vendors, debouncedSearchQuery, clientStats, vendorStats, sort]);
+  }, [viewMode, clients, vendors, debouncedSearchQuery, clientStats, vendorStats, sort, currentPOs]);
 
   const totalPages = Math.max(1, Math.ceil(tableRows.length / rowsPerPage));
   const safeP = Math.min(page, totalPages);
@@ -615,7 +632,7 @@ const PurchaseOrderData = () => {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
               <input
                 type="text"
-                placeholder={viewMode === "receivable" ? "Search client, code, GST, country…" : "Search vendor, code, GST, country…"}
+                placeholder={viewMode === "receivable" ? "Search client, PO, code, GST…" : "Search vendor, PO, code, GST…"}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-9 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
@@ -672,7 +689,7 @@ const PurchaseOrderData = () => {
           <div className="pb-3 md:hidden">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              <input type="text" placeholder="Search client, PO, code..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
               />
             </div>

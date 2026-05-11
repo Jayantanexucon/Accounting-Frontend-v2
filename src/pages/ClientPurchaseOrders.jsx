@@ -468,6 +468,7 @@ const ClientPurchaseOrders = () => {
           isLoading={loadingAdvanced}
           initialFilters={{ ...activeFilters, clientId }}
           clientId={clientId}
+          hidePaymentTerms={true}
         />
 
         {/* Error display */}
