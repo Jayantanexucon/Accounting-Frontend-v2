@@ -106,15 +106,15 @@ const AdvancedSearchPanel = ({ isOpen, filters, onApply, onClear, isLoading, com
 
     const timer = window.setTimeout(async () => {
       try {
-        const res = await API.get("/purchase-orders/search/number", {
+        const res = await API.get("/invoices/purchase-order/search/number", {
           params: {
-            q: poSearchQuery,
+            poNumber: poSearchQuery,
             companyId,
             ...(local.clientName ? { clientName: local.clientName } : {}),
           },
         });
         setFilteredPoNumbers(
-          Array.isArray(res.data) ? res.data.map((item) => item.label).filter(Boolean) : [],
+          (res.data?.data || res.data || []).map((item) => item.label).filter(Boolean),
         );
       } catch (error) {
         console.error("Error searching PO numbers:", error);
@@ -634,7 +634,10 @@ const PurchaseOrderData = () => {
                 type="text"
                 placeholder={viewMode === "receivable" ? "Search client, PO, code, GST…" : "Search vendor, PO, code, GST…"}
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full pl-9 pr-9 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
               />
               {searchQuery && (
@@ -689,7 +692,10 @@ const PurchaseOrderData = () => {
           <div className="pb-3 md:hidden">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input type="text" placeholder="Search client, PO, code..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              <input type="text" placeholder="Search client, PO, code..." value={searchQuery} onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
                 className="w-full pl-9 pr-4 py-2 text-xs bg-slate-100 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 outline-none transition-all font-medium placeholder-slate-400"
               />
             </div>

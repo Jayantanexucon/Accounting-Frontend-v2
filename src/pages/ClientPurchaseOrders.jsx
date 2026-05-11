@@ -76,6 +76,8 @@ const ClientPurchaseOrders = () => {
   const [selectedPOForDetail, setSelectedPOForDetail] = useState(null);
   const [auditModalOpen, setAuditModalOpen] = useState(false);
   const [selectedPOForAudit, setSelectedPOForAudit] = useState(null);
+  const [page, setPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const handleViewAuditLog = (po, e) => {
     e.stopPropagation();
@@ -144,8 +146,10 @@ const ClientPurchaseOrders = () => {
         selectedCompany?._id;
       if (!companyId) throw new Error("Company ID missing");
 
+      const { paymentTerms, ...filtersWithoutPaymentTerms } = activeFilters;
+      void paymentTerms;
       const filters = {
-        ...activeFilters,
+        ...filtersWithoutPaymentTerms,
         clientId,           // may or may not be respected by backend
         companyId,
         limit: 1000,
@@ -155,9 +159,8 @@ const ClientPurchaseOrders = () => {
       const res = await advancedSearchPurchaseOrdersApi(filters);
       let allPOs = res.data || [];
 
-      // ✅ FILTER: keep only POs that belong to this client
+      // Keep a frontend guard for old backend deployments and legacy PO data.
       const clientPOs = allPOs.filter(po => {
-        // match by vendor._id or vendor.name
         return po.vendor?._id === clientId || po.client?._id === clientId ||
           po.vendor?.name === foundClient?.clientName ||
           po.client?.name === foundClient?.clientName;
@@ -196,14 +199,18 @@ const ClientPurchaseOrders = () => {
 
   // ---------- Handlers (unchanged) ----------
   const handleAdvancedSearch = (filters) => {
+    const { paymentTerms, ...filtersWithoutPaymentTerms } = filters || {};
+    void paymentTerms;
     setLoadingAdvanced(true);
-    setActiveFilters(filters);
+    setActiveFilters(filtersWithoutPaymentTerms);
     setSearchQuery("");
+    setPage(1);
   };
 
   const handleClearSearch = () => {
     setActiveFilters({});
     setSearchQuery("");
+    setPage(1);
   };
 
   const handleDelete = async (poId, e) => {
@@ -257,6 +264,16 @@ const ClientPurchaseOrders = () => {
   const toggleRowExpand = (poId) => {
     setExpandedRows((prev) => ({ ...prev, [poId]: !prev[poId] }));
   };
+
+  const activeFilterEntries = Object.entries(activeFilters).filter(
+    ([key, value]) => value && key !== "clientId" && key !== "paymentTerms",
+  );
+  const totalPages = Math.max(1, Math.ceil(purchaseOrders.length / rowsPerPage));
+  const safePage = Math.min(page, totalPages);
+  const pagedPurchaseOrders = useMemo(
+    () => purchaseOrders.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage),
+    [purchaseOrders, rowsPerPage, safePage],
+  );
 
   const getStatusColor = (status) => {
     const colors = {
@@ -380,7 +397,10 @@ const ClientPurchaseOrders = () => {
                 type="text"
                 placeholder="Search POs by number, description..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -395,9 +415,9 @@ const ClientPurchaseOrders = () => {
               >
                 <Filter className="h-4 w-4 mr-2" />
                 Advanced
-                {Object.keys(activeFilters).length > 0 && (
+                {activeFilterEntries.length > 0 && (
                   <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] rounded-full h-5 w-5 flex items-center justify-center">
-                    {Object.keys(activeFilters).length - 1}
+                    {activeFilterEntries.length}
                   </span>
                 )}
               </button>
@@ -414,7 +434,7 @@ const ClientPurchaseOrders = () => {
               </button>
 
               {/* Clear */}
-              {(searchQuery || Object.keys(activeFilters).length > 0) && (
+              {(searchQuery || activeFilterEntries.length > 0) && (
                 <button
                   onClick={handleClearSearch}
                   className="px-3 py-2 border border-gray-300 text-sm rounded-md hover:bg-gray-50 transition"
@@ -493,7 +513,7 @@ const ClientPurchaseOrders = () => {
               No purchase orders for this client
             </h3>
             <p className="text-gray-500 mb-4 text-xs">
-              {searchQuery || Object.keys(activeFilters).length > 0
+              {searchQuery || activeFilterEntries.length > 0
                 ? "No POs match your criteria."
                 : "Create the first purchase order for this client."}
             </p>
@@ -509,7 +529,7 @@ const ClientPurchaseOrders = () => {
           </div>
         ) : (
           <div className="space-y-3">
-            {purchaseOrders.map((po) => {
+            {pagedPurchaseOrders.map((po) => {
               const openAmount = getOpenAmount(po);
               const showClosedPaidAmount = shouldShowClosedPaidAmount(
                 po,
@@ -785,6 +805,49 @@ const ClientPurchaseOrders = () => {
                 </div>
               );
             })}
+            {purchaseOrders.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-4 py-3">
+                <p className="text-[11px] text-gray-500">
+                  Showing{" "}
+                  <span className="font-semibold text-gray-700">{(safePage - 1) * rowsPerPage + 1}</span>
+                  {" "}–{" "}
+                  <span className="font-semibold text-gray-700">{Math.min(safePage * rowsPerPage, purchaseOrders.length)}</span>
+                  {" "}of{" "}
+                  <span className="font-semibold text-gray-700">{purchaseOrders.length}</span> purchase orders
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                    disabled={safePage === 1}
+                    className="px-3 py-1.5 rounded-md border border-gray-300 text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Prev
+                  </button>
+                  <span className="text-xs text-gray-600">
+                    Page {safePage} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                    disabled={safePage === totalPages}
+                    className="px-3 py-1.5 rounded-md border border-gray-300 text-xs disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50"
+                  >
+                    Next
+                  </button>
+                  <select
+                    value={rowsPerPage}
+                    onChange={(e) => {
+                      setRowsPerPage(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="px-2 py-1.5 rounded-md border border-gray-300 text-xs"
+                  >
+                    {[10, 20, 50, 100].map((value) => (
+                      <option key={value} value={value}>{value}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
