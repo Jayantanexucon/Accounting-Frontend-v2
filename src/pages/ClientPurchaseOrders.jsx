@@ -154,8 +154,6 @@ const ClientPurchaseOrders = () => {
         companyId,
         limit: 1000,
       };
-      if (searchQuery) filters.poNumber = searchQuery;
-
       const res = await advancedSearchPurchaseOrdersApi(filters);
       let allPOs = res.data || [];
 
@@ -182,18 +180,42 @@ const ClientPurchaseOrders = () => {
     if (user?.company?._id && clientId) {
       fetchClientAndPOs();
     }
-  }, [user, clientId, activeFilters, searchQuery]);
+  }, [user, clientId, activeFilters]);
+
+  const filteredPurchaseOrders = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return purchaseOrders;
+
+    return purchaseOrders.filter((po) => {
+      const searchableText = [
+        po.poNumber,
+        po.poreferencevalue,
+        po.notes,
+        po.vendor?.name,
+        po.client?.name,
+        ...(po.items || []).flatMap((item) => [
+          item.description,
+          item.hsnSac,
+        ]),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      return searchableText.includes(query);
+    });
+  }, [purchaseOrders, searchQuery]);
 
   // ---------- Stats for this client ----------
-  const totalPOs = purchaseOrders.length;
-  const totalValue = purchaseOrders.reduce(
+  const totalPOs = filteredPurchaseOrders.length;
+  const totalValue = filteredPurchaseOrders.reduce(
     (sum, po) => sum + (po.totalAmount || 0),
     0,
   );
-  const pendingPOs = purchaseOrders.filter(
+  const pendingPOs = filteredPurchaseOrders.filter(
     (po) => !["CLOSED", "FULLY_INVOICED"].includes(po.status),
   ).length;
-  const completedPOs = purchaseOrders.filter(
+  const completedPOs = filteredPurchaseOrders.filter(
     (po) => po.status === "CLOSED",
   ).length;
 
@@ -268,11 +290,11 @@ const ClientPurchaseOrders = () => {
   const activeFilterEntries = Object.entries(activeFilters).filter(
     ([key, value]) => value && key !== "clientId" && key !== "paymentTerms",
   );
-  const totalPages = Math.max(1, Math.ceil(purchaseOrders.length / rowsPerPage));
+  const totalPages = Math.max(1, Math.ceil(filteredPurchaseOrders.length / rowsPerPage));
   const safePage = Math.min(page, totalPages);
   const pagedPurchaseOrders = useMemo(
-    () => purchaseOrders.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage),
-    [purchaseOrders, rowsPerPage, safePage],
+    () => filteredPurchaseOrders.slice((safePage - 1) * rowsPerPage, safePage * rowsPerPage),
+    [filteredPurchaseOrders, rowsPerPage, safePage],
   );
 
   const getStatusColor = (status) => {
@@ -506,7 +528,7 @@ const ClientPurchaseOrders = () => {
         )}
 
         {/* PO List – now only shows POs that truly belong to this client */}
-        {purchaseOrders.length === 0 ? (
+        {filteredPurchaseOrders.length === 0 ? (
           <div className="bg-white rounded-lg shadow-xs border border-gray-200 p-6 text-center">
             <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
             <h3 className="font-semibold text-gray-700 mb-1">
@@ -805,15 +827,15 @@ const ClientPurchaseOrders = () => {
                 </div>
               );
             })}
-            {purchaseOrders.length > 0 && (
+            {filteredPurchaseOrders.length > 0 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 rounded-md border border-gray-200 bg-white px-4 py-3">
                 <p className="text-[11px] text-gray-500">
                   Showing{" "}
                   <span className="font-semibold text-gray-700">{(safePage - 1) * rowsPerPage + 1}</span>
                   {" "}–{" "}
-                  <span className="font-semibold text-gray-700">{Math.min(safePage * rowsPerPage, purchaseOrders.length)}</span>
+                  <span className="font-semibold text-gray-700">{Math.min(safePage * rowsPerPage, filteredPurchaseOrders.length)}</span>
                   {" "}of{" "}
-                  <span className="font-semibold text-gray-700">{purchaseOrders.length}</span> purchase orders
+                  <span className="font-semibold text-gray-700">{filteredPurchaseOrders.length}</span> purchase orders
                 </p>
                 <div className="flex items-center gap-2">
                   <button
