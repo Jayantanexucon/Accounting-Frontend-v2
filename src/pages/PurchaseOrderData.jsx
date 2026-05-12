@@ -14,6 +14,7 @@ import AuditLogSidebar from "../components/AuditLogSidebar";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { motion, AnimatePresence } from "framer-motion";
 import { checkAuthorization } from "../utils/checkAuthorization";
+import { isAdmin } from "../utils/roleUtil";
 
 import {
   Search,
@@ -622,9 +623,11 @@ const PurchaseOrderData = () => {
           <div className="flex items-center justify-between py-4 gap-4">
             <div className="min-w-0">
               <h1 className="text-xl font-extrabold text-slate-900 tracking-tight truncate">Purchase Orders</h1>
-              <p className="text-[11px] text-slate-400 font-medium mt-0.5 hidden sm:block">
-                {viewMode === "receivable" ? `${clients.length} clients` : `${vendors.length} vendors`} · {totalPOs} POs
-              </p>
+              {isAdmin(user) && (
+                <p className="text-[11px] text-slate-400 font-medium mt-0.5 hidden sm:block">
+                  {viewMode === "receivable" ? `${clients.length} clients` : `${vendors.length} vendors`} · {totalPOs} POs
+                </p>
+              )}
             </div>
 
             {/* Search */}
@@ -740,65 +743,67 @@ const PurchaseOrderData = () => {
         </div>
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            {
-              label: "Total POs", value: totalPOs, icon: ShoppingCart,
-              bg: viewMode === "receivable" ? "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)",
-              blob1: viewMode === "receivable" ? "#93c5fd" : "#fde68a",
-              blob2: viewMode === "receivable" ? "#bfdbfe" : "#fef3c7",
-              shadow: viewMode === "receivable" ? "shadow-blue-500/25" : "shadow-amber-500/25",
-              streak: true,
-            },
-            {
-              label: "Pending", value: pendingPOs, icon: Clock,
-              bg: "linear-gradient(135deg,#92400e 0%,#d97706 55%,#fbbf24 100%)",
-              blob1: "#fde68a", blob2: "#fef3c7", shadow: "shadow-amber-500/25",
-              streak: false, ring: true,
-            },
-            {
-              label: "Total Value", value: "₹" + totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 }), icon: TrendingUp,
-              bg: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
-              blob1: "#6ee7b7", blob2: "#a7f3d0", shadow: "shadow-emerald-500/25",
-              streak: true,
-            },
-            {
-              label: "Completed", value: completedPOs, icon: CheckCircle,
-              bg: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)",
-              blob1: "#c4b5fd", blob2: "#ddd6fe", shadow: "shadow-violet-500/25",
-              streak: false, ring: true,
-            },
-          ].map((card, idx) => (
-            <motion.div
-              key={idx}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.07 }}
-              className={`relative overflow-hidden rounded-2xl p-5 shadow-xl ${card.shadow} group cursor-default`}
-              style={{ background: card.bg }}
-            >
-              <div className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
-                style={{ background: `radial-gradient(ellipse,${card.blob1},transparent)` }} />
-              <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-20 blur-xl"
-                style={{ background: `radial-gradient(ellipse,${card.blob2},transparent)` }} />
-              {card.streak && <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />}
-              {card.ring && <>
-                <div className="absolute top-2 right-2 w-14 h-14 rounded-full border-2 border-white/15" />
-                <div className="absolute top-5 right-5 w-7 h-7 rounded-full border border-white/10" />
-              </>}
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-white/60">{card.label}</p>
-                  <p className="text-3xl font-black text-white leading-none">{card.value}</p>
+        {isAdmin(user) && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              {
+                label: "Total POs", value: totalPOs, icon: ShoppingCart,
+                bg: viewMode === "receivable" ? "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)",
+                blob1: viewMode === "receivable" ? "#93c5fd" : "#fde68a",
+                blob2: viewMode === "receivable" ? "#bfdbfe" : "#fef3c7",
+                shadow: viewMode === "receivable" ? "shadow-blue-500/25" : "shadow-amber-500/25",
+                streak: true,
+              },
+              {
+                label: "Pending", value: pendingPOs, icon: Clock,
+                bg: "linear-gradient(135deg,#92400e 0%,#d97706 55%,#fbbf24 100%)",
+                blob1: "#fde68a", blob2: "#fef3c7", shadow: "shadow-amber-500/25",
+                streak: false, ring: true,
+              },
+              {
+                label: "Total Value", value: "₹" + totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 }), icon: TrendingUp,
+                bg: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
+                blob1: "#6ee7b7", blob2: "#a7f3d0", shadow: "shadow-emerald-500/25",
+                streak: true,
+              },
+              {
+                label: "Completed", value: completedPOs, icon: CheckCircle,
+                bg: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)",
+                blob1: "#c4b5fd", blob2: "#ddd6fe", shadow: "shadow-violet-500/25",
+                streak: false, ring: true,
+              },
+            ].map((card, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.07 }}
+                className={`relative overflow-hidden rounded-2xl p-5 shadow-xl ${card.shadow} group cursor-default`}
+                style={{ background: card.bg }}
+              >
+                <div className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
+                  style={{ background: `radial-gradient(ellipse,${card.blob1},transparent)` }} />
+                <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-20 blur-xl"
+                  style={{ background: `radial-gradient(ellipse,${card.blob2},transparent)` }} />
+                {card.streak && <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />}
+                {card.ring && <>
+                  <div className="absolute top-2 right-2 w-14 h-14 rounded-full border-2 border-white/15" />
+                  <div className="absolute top-5 right-5 w-7 h-7 rounded-full border border-white/10" />
+                </>}
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-widest mb-2 text-white/60">{card.label}</p>
+                    <p className="text-3xl font-black text-white leading-none">{card.value}</p>
+                  </div>
+                  <div className="p-2.5 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                    <card.icon size={20} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-2.5 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                  <card.icon size={20} className="text-white" />
-                </div>
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </motion.div>
-          ))}
-        </div>
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              </motion.div>
+            ))}
+          </div>
+        )}
 
         {/* Active Filter Pills */}
         {activeFilterCount > 0 && (
