@@ -286,6 +286,53 @@ const getPoItemBaseTaxableAmount = (item = {}) => {
     : roundMoney(totalAmount);
 };
 
+const getMilestoneEntryGrossAmount = (milestone = {}) => {
+  const taxableAmount = Number(milestone.invoicedAmount ?? milestone.amount ?? milestone.taxableValue ?? 0);
+  const taxAmount = Number(milestone.gstAmount ?? milestone.taxAmount ?? milestone.totalTaxAmount ?? 0);
+
+  return roundMoney(
+    Number(
+      milestone.total ??
+        milestone.totalAmount ??
+        milestone.invoiceAmount ??
+        (taxableAmount + taxAmount),
+    ),
+  );
+};
+
+const getInvoiceGrossAmountForMilestone = (invoice = {}, milestoneId, milestoneTitle) => {
+  const mIdStr = milestoneId?.toString();
+  const mTitleNormalized = milestoneTitle?.trim()?.toLowerCase();
+
+  if (Array.isArray(invoice.milestones)) {
+    const milestoneInInv = invoice.milestones.find(
+      (entry) =>
+        entry?.milestoneId?.toString() === mIdStr ||
+        (mTitleNormalized && entry?.title?.trim()?.toLowerCase() === mTitleNormalized),
+    );
+    if (milestoneInInv) return getMilestoneEntryGrossAmount(milestoneInInv);
+  }
+
+  if (Array.isArray(invoice.items)) {
+    return roundMoney(
+      invoice.items.reduce((sum, item) => {
+        const poItemId = item.poItemId?.toString();
+        const sourceId = item.sourceId?.toString();
+        const itemTitle = item.milestoneTitle?.trim()?.toLowerCase();
+        const itemDesc = item.description?.trim()?.toLowerCase();
+        const matches =
+          poItemId === mIdStr ||
+          sourceId === mIdStr ||
+          (mTitleNormalized && (itemTitle === mTitleNormalized || itemDesc === mTitleNormalized));
+
+        return matches ? sum + Number(item.totalAmount ?? item.total ?? 0) : sum;
+      }, 0),
+    );
+  }
+
+  return 0;
+};
+
 // ==================================================================================
 // GET MILESTONE ROWS FOR INVOICE CREATION
 // Returns: (1) all partially-invoiced milestones with remaining balance,
@@ -313,7 +360,7 @@ const getMilestoneInvoiceRows = (po) => {
             )
             : null;
 
-          return sum + Number(milestoneInInv?.invoicedAmount || milestoneInInv?.amount || 0);
+          return sum + getMilestoneEntryGrossAmount(milestoneInInv);
         }, 0),
       ),
     );
@@ -344,7 +391,7 @@ const getMilestoneInvoiceRows = (po) => {
             )
             : null;
 
-          return sum + Number(milestoneInInv?.invoicedAmount || milestoneInInv?.amount || 0);
+          return sum + getMilestoneEntryGrossAmount(milestoneInInv);
         }, 0),
       ),
     );
@@ -543,6 +590,168 @@ const calculateScheduledInvoiceParts = ({
   };
 };
 
+const buildMilestoneItemRowsFromPoItems = ({
+  po,
+  milestoneRows = [],
+  invoiceTaxType,
+  invoiceTaxLabel,
+}) => {
+  const selectedRows = milestoneRows.filter((row) => row.selected);
+  const targetTaxableAmount = roundMoney(
+    selectedRows.reduce((sum, row) => sum + Number(row.amount || 0), 0),
+  );
+  if (!po || targetTaxableAmount <= 0) return [];
+
+  const poItems = Array.isArray(po.items) ? po.items : [];
+  const linkedInvoices = getOrderedLinkedInvoices(po);
+  const milestoneTitle = selectedRows.map((row) => row.title).filter(Boolean).join(" + ");
+  const carryForwardTaxableAmount = roundMoney(
+    selectedRows
+      .filter((row) => row.isCarryForward)
+      .reduce((sum, row) => sum + Number(row.amount || 0), 0),
+  );
+
+  if (poItems.length === 0) {
+    const firstRow = selectedRows[0] || {};
+    const taxRate = Number(firstRow.gstRate || firstRow.taxRate || 0);
+    const taxAmount = roundMoney((targetTaxableAmount * taxRate) / 100);
+    return [{
+      itemId: firstRow._id || "milestone",
+      poItemId: firstRow._id || "",
+      description: milestoneTitle || "Milestone billing",
+      hsnSac: firstRow.hsnSac || "",
+      quantity: 1,
+      rate: targetTaxableAmount,
+      taxableValue: targetTaxableAmount,
+      taxType: firstRow.taxType || invoiceTaxType || po.taxType || "GST",
+      taxLabel: firstRow.taxLabel || invoiceTaxLabel || po.taxLabel || "GST",
+      taxRate,
+      taxAmount,
+      taxBreakdown: normalizeTaxBreakdown(firstRow, {
+        taxType: firstRow.taxType || invoiceTaxType || po.taxType || "GST",
+        label: firstRow.taxLabel || invoiceTaxLabel || po.taxLabel || "GST",
+        rate: taxRate,
+        amount: taxAmount,
+      }),
+      gstRate: taxRate,
+      gstAmount: taxAmount,
+      total: roundMoney(targetTaxableAmount + taxAmount),
+      combinedGstRate: taxRate,
+      totalManuallyEdited: false,
+      maxAllowedTaxableValue: targetTaxableAmount,
+      previousCarryForward: carryForwardTaxableAmount,
+      currentTermAmount: roundMoney(targetTaxableAmount - carryForwardTaxableAmount),
+      currentTermRemainingAmount: 0,
+      baseRemainingAfterInvoice: 0,
+      remainingAfterInvoice: 0,
+      sourceType: "milestone",
+      sourceId: firstRow._id,
+      milestoneTitle,
+      milestoneIndex: firstRow.milestoneIndex,
+    }];
+  }
+
+  const itemBases = poItems.map((item) => {
+    const baseTaxableAmount = getPoItemBaseTaxableAmount(item);
+    const alreadyInvoicedTaxable = getInvoicedTaxableAmountForPoItem(linkedInvoices, item);
+    return {
+      item,
+      baseTaxableAmount,
+      alreadyInvoicedTaxable,
+      availableTaxableAmount: roundMoney(Math.max(0, baseTaxableAmount - alreadyInvoicedTaxable)),
+    };
+  }).filter((entry) => entry.availableTaxableAmount > 0.01);
+
+  const totalBaseTaxable = itemBases.reduce((sum, entry) => sum + entry.baseTaxableAmount, 0);
+  if (totalBaseTaxable <= 0) return [];
+
+  const allocations = itemBases.map((entry) => {
+    const proportionalAmount = roundMoney(
+      targetTaxableAmount * (entry.baseTaxableAmount / totalBaseTaxable),
+    );
+    const taxableValue = Math.min(entry.availableTaxableAmount, proportionalAmount);
+    return {
+      ...entry,
+      taxableValue: roundMoney(taxableValue),
+    };
+  });
+
+  let leftover = roundMoney(
+    targetTaxableAmount - allocations.reduce((sum, entry) => sum + entry.taxableValue, 0),
+  );
+  for (const entry of allocations) {
+    if (leftover <= 0.01) break;
+    const spare = roundMoney(entry.availableTaxableAmount - entry.taxableValue);
+    if (spare <= 0) continue;
+    const extra = Math.min(spare, leftover);
+    entry.taxableValue = roundMoney(entry.taxableValue + extra);
+    leftover = roundMoney(leftover - extra);
+  }
+
+  const allocatedTotal = allocations.reduce((sum, entry) => sum + entry.taxableValue, 0);
+
+  return allocations
+    .filter((entry) => entry.taxableValue > 0.01)
+    .map((entry) => {
+      const { item, baseTaxableAmount, availableTaxableAmount, taxableValue } = entry;
+      const rate = Number(item.rate || 0);
+      const taxRate = getItemTaxRate(item);
+      const quantity = rate > 0
+        ? parseFloat((taxableValue / rate).toFixed(4))
+        : Number(item.quantity || 1);
+      const taxAmount = roundMoney((taxableValue * taxRate) / 100);
+      const carryShare = allocatedTotal > 0
+        ? roundMoney(carryForwardTaxableAmount * (taxableValue / allocatedTotal))
+        : 0;
+      const currentShare = roundMoney(Math.max(0, taxableValue - carryShare));
+      const remainingAfterInvoice = roundMoney(
+        Math.max(0, availableTaxableAmount - taxableValue),
+      );
+
+      return {
+        itemId: item.itemId || item._id,
+        poItemId: item.itemId || item._id,
+        description: `${item.description || ""}${milestoneTitle ? ` (${milestoneTitle})` : ""}`,
+        hsnSac: item.hsnSac || item.hsnCode || "",
+        quantity,
+        baseQuantity: Number(item.quantity || 0),
+        baseRate: rate,
+        poRemainingQuantity: getRemainingPOItemQuantity(item),
+        rate,
+        taxableValue,
+        taxType: item.taxType || invoiceTaxType || po.taxType || "GST",
+        taxLabel: item.taxLabel || invoiceTaxLabel || po.taxLabel || "GST",
+        taxRate: item.taxRate ?? taxRate,
+        taxAmount,
+        taxBreakdown: scaleTaxBreakdown(
+          item.taxBreakdown,
+          taxableValue / Math.max(baseTaxableAmount, 1),
+          {
+            taxType: item.taxType || invoiceTaxType || po.taxType || "GST",
+            label: item.taxLabel || invoiceTaxLabel || po.taxLabel || "GST",
+            rate: item.taxRate ?? taxRate,
+            amount: taxAmount,
+          },
+        ),
+        gstRate: taxRate,
+        gstAmount: taxAmount,
+        total: roundMoney(taxableValue + taxAmount),
+        combinedGstRate: item.combinedGstRate || taxRate,
+        totalManuallyEdited: false,
+        maxAllowedTaxableValue: taxableValue,
+        previousCarryForward: carryShare,
+        currentTermAmount: currentShare,
+        currentTermRemainingAmount: 0,
+        baseRemainingAfterInvoice: remainingAfterInvoice,
+        remainingAfterInvoice,
+        sourceType: "milestone",
+        sourceId: selectedRows[0]?._id,
+        milestoneTitle,
+        milestoneIndex: selectedRows[0]?.milestoneIndex,
+      };
+    });
+};
+
 const getDerivedInvoicePoType = ({ poType, poCategory, billingModel }) => {
   if (poType) return poType;
   if (billingModel === "milestone") return "milestone";
@@ -571,6 +780,10 @@ const normalizeInvoiceItemForPayload = (item = {}) => {
 
   return {
     ...rest,
+    sourceType,
+    sourceId,
+    milestoneTitle,
+    milestoneIndex: rest.milestoneIndex,
     itemId: rest.itemId || rest.poItemId,
     poItemId: rest.poItemId || rest.itemId,
     totalAmount:
@@ -590,10 +803,6 @@ const buildTypedInvoicePayload = ({
   valueInWords,
   convertToWords,
 }) => {
-  const poItems = selectedPOData?.items || [];
-  const getPoItemKey = (poItem = {}) => poItem.itemId || poItem._id?.toString() || "";
-  const findMatchingPoItem = (matcher) => poItems.find(matcher);
-
   const isMilestoneSection =
     selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0;
   const isResourceSection =
@@ -666,10 +875,12 @@ const buildTypedInvoicePayload = ({
         originalPercentage: Number(row.originalPercentage || 0),
         originalAmount: Number(row.originalAmount || 0),
         alreadyInvoicedAmount: Number(row.alreadyInvoicedAmount || 0),
-        remainingAmountBefore: Number(row.remainingAmountBefore || 0),
-        remainingAmountAfter: Number(row.remainingAmountAfter || 0),
-        amount: Number(row.amount || 0),
-        invoicedAmount: Number(row.amount || 0),
+        remainingAmountBefore: Number(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0),
+        remainingAmountAfter: Number(row.remainingAmountAfterGross ?? row.remainingAmountAfter ?? 0),
+        amount: Number(row.invoiceAmount ?? row.total ?? row.amount ?? 0),
+        invoiceAmount: Number(row.invoiceAmount ?? row.total ?? row.amount ?? 0),
+        invoicedAmount: Number(row.invoiceAmount ?? row.total ?? row.amount ?? 0),
+        taxableAmount: Number(row.amount || 0),
         hsnSac: row.hsnSac || "",
         gstRate: Number(row.gstRate || 0),
         gstAmount: Number(row.gstAmount || 0),
@@ -677,43 +888,6 @@ const buildTypedInvoicePayload = ({
       }));
 
     payload.milestones = selectedMilestones;
-    payload.items = selectedMilestones.map((row) => ({
-      itemId:
-        getPoItemKey(
-          findMatchingPoItem(
-            (poItem) =>
-              getPoItemKey(poItem) === row.milestoneId ||
-              poItem.description?.trim() === row.title?.trim() ||
-              roundMoney(poItem.totalAmount || poItem.total || 0) === roundMoney(row.total),
-          ),
-        ) || row.milestoneId,
-      poItemId:
-        getPoItemKey(
-          findMatchingPoItem(
-            (poItem) =>
-              getPoItemKey(poItem) === row.milestoneId ||
-              poItem.description?.trim() === row.title?.trim() ||
-              roundMoney(poItem.totalAmount || poItem.total || 0) === roundMoney(row.total),
-          ),
-        ) || row.milestoneId,
-      description: row.title,
-      hsnSac: row.hsnSac,
-      quantity: 1,
-      rate: row.amount,
-      taxableValue: row.amount,
-      gstRate: row.gstRate,
-      gstAmount: row.gstAmount,
-      total: row.total,
-      sourceType: "milestone",
-      sourceId: row.milestoneId,
-      milestoneTitle: row.title,
-      milestoneDescription: row.description,
-      milestoneDueDate: row.dueDate,
-      originalAmount: row.originalAmount,
-      remainingAmountBefore: row.remainingAmountBefore,
-      remainingAmountAfter: row.remainingAmountAfter,
-      milestoneIndex: row.milestoneIndex,
-    }));
   } else if (isResourceSection) {
     const resources = resourceRows.map((row) => ({
       resourceId: row._id,
@@ -1695,6 +1869,7 @@ const ManualInvoicePage = () => {
         ...prev,
         items: newItems,
       }));
+      syncMilestoneRowsFromItems(newItems);
 
       setManualAmountEdit(false);
       return;
@@ -1765,6 +1940,7 @@ const ManualInvoicePage = () => {
       ...prev,
       items: newItems,
     }));
+    syncMilestoneRowsFromItems(newItems);
 
     setManualAmountEdit(false);
   };
@@ -1944,53 +2120,29 @@ const ManualInvoicePage = () => {
       // Helper: compute how much of a milestone has already been invoiced
       const getInvoicedAmountForMilestone = (milestoneId, milestoneTitle) => {
         const linkedInvoices = selectedPO.linkedInvoices || [];
-        let totalInvoiced = 0;
-        const mIdStr = milestoneId?.toString();
-        const mTitleNormalized = milestoneTitle?.trim()?.toLowerCase();
-        
-        for (const inv of linkedInvoices) {
-          // 1. Check specialized milestones array
-          if (inv.milestones && Array.isArray(inv.milestones)) {
-            const milestoneInInv = inv.milestones.find(
-              (m) => 
-                m.milestoneId?.toString() === mIdStr ||
-                (mTitleNormalized && m.title?.trim()?.toLowerCase() === mTitleNormalized)
-            );
-            if (milestoneInInv) {
-              totalInvoiced += Number(milestoneInInv.invoicedAmount || milestoneInInv.invoiceAmount || milestoneInInv.amount || 0);
-              continue; // If found here, we assume it's the primary record for this invoice
-            }
-          }
-
-          // 2. Fallback: Check standard items array (milestones are often saved as line items)
-          if (inv.items && Array.isArray(inv.items)) {
-            const matchedItems = inv.items.filter((item) => {
-              const poItemId = item.poItemId?.toString();
-              const sourceId = item.sourceId?.toString();
-              const itemDesc = item.description?.trim()?.toLowerCase();
-              
-              return (
-                poItemId === mIdStr ||
-                sourceId === mIdStr ||
-                (mTitleNormalized && itemDesc === mTitleNormalized)
-              );
-            });
-
-            matchedItems.forEach(item => {
-              totalInvoiced += Number(item.taxableValue || item.amount || 0);
-            });
-          }
-        }
-        return roundMoney(totalInvoiced);
+        return roundMoney(
+          linkedInvoices.reduce(
+            (sum, inv) => sum + getInvoiceGrossAmountForMilestone(inv, milestoneId, milestoneTitle),
+            0,
+          ),
+        );
       };
 
       const milestones = selectedPO.milestones;
+      const totalMilestoneSum = milestones.reduce((s, m) => s + Number(m.amount || 0), 0);
+      const isMilestoneInclusive = Math.abs(totalMilestoneSum - Number(selectedPO.totalAmount || 0)) < 1;
+      const getMilestoneGrossAmount = (milestone = {}) => {
+        const amount = Number(milestone.amount || 0);
+        return isMilestoneInclusive || defaultTaxRate <= 0
+          ? roundMoney(amount)
+          : roundMoney(amount + (amount * defaultTaxRate) / 100);
+      };
       const rows = [];
 
       // 1. Filter out milestones that have a remaining balance
       let freshAdded = false;
       milestones.forEach((m, idx) => {
-        const originalAmount = Number(m.amount || 0);
+        const originalAmount = getMilestoneGrossAmount(m);
         const alreadyInvoiced = getInvoicedAmountForMilestone(m._id, m.title);
         const remaining = roundMoney(Math.max(0, originalAmount - alreadyInvoiced));
         
@@ -2026,21 +2178,21 @@ const ManualInvoicePage = () => {
         return;
       }
 
-      // Determine if milestones are tax-inclusive (sum of milestones matches PO total amount)
-      const totalMilestoneSum = milestones.reduce((s, m) => s + Number(m.amount || 0), 0);
-      const isMilestoneInclusive = Math.abs(totalMilestoneSum - Number(selectedPO.totalAmount || 0)) < 1;
-
       // Convert rows to UI‑friendly format
       const milestoneRowsUI = rows.map((m) => {
-        const amount = m._remaining;
+        const grossAmount = m._remaining;
         const taxRate = defaultTaxRate;
         
-        // If milestones are inclusive, back-calculate taxable value. 
-        // Otherwise treat milestone amount as the taxable base.
-        const taxableValue = isMilestoneInclusive && taxRate > 0
-          ? roundMoney(amount / (1 + taxRate / 100))
-          : amount;
-        const taxAmount = roundMoney(amount - taxableValue);
+        const taxableValue = taxRate > 0
+          ? roundMoney(grossAmount / (1 + taxRate / 100))
+          : grossAmount;
+        const taxAmount = taxRate > 0
+          ? roundMoney(grossAmount - taxableValue)
+          : 0;
+        const invoiceGrossAmount = roundMoney(taxableValue + taxAmount);
+        const originalGrossAmount = Number(m._originalAmount || 0);
+        const alreadyInvoicedGrossAmount = Number(m._alreadyInvoiced || 0);
+        const remainingGrossAmountAfter = roundMoney(Math.max(0, grossAmount - invoiceGrossAmount));
 
         return {
           _id: m._id?.toString() || String(Math.random()),
@@ -2050,14 +2202,20 @@ const ManualInvoicePage = () => {
           dueDate: m.dueDate ? new Date(m.dueDate).toISOString().split("T")[0] : "",
           percentage: Number(
             selectedPO.totalAmount > 0
-              ? ((amount / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2)
+              ? ((invoiceGrossAmount / Number(selectedPO.totalAmount || 1)) * 100).toFixed(2)
               : 0,
           ),
           originalPercentage: Number(m.percentage || 0),
-          originalAmount: m._originalAmount,
-          alreadyInvoicedAmount: m._alreadyInvoiced,
-          remainingAmountBefore: m._remaining,
-          remainingAmountAfter: 0,
+          originalAmount: originalGrossAmount,
+          originalTaxableAmount: taxRate > 0
+            ? roundMoney(originalGrossAmount / (1 + taxRate / 100))
+            : Number(m.amount || 0),
+          alreadyInvoicedAmount: alreadyInvoicedGrossAmount,
+          remainingAmountBeforeGross: grossAmount,
+          remainingAmountBefore: taxableValue,
+          remainingAmountAfterGross: remainingGrossAmountAfter,
+          remainingAmountAfter: remainingGrossAmountAfter,
+          invoiceAmount: invoiceGrossAmount,
           amount: taxableValue, // UI expects taxable amount here for most inputs
           hsnSac: defaultHsn,
           taxType: defaultTaxType,
@@ -2072,31 +2230,19 @@ const ManualInvoicePage = () => {
             rate: taxRate,
             amount: taxAmount,
           }),
-          total: amount, // The total is the milestone amount (inclusive or exclusive)
+          total: invoiceGrossAmount,
           selected: true,
           isCarryForward: m._isCarryForward,
         };
       });
 
       setMilestoneRows(milestoneRowsUI);
-      derivedItems = milestoneRowsUI.map((r) => ({
-        itemId: r._id,
-        poItemId: r._id,
-        description: r.title,
-        hsnSac: r.hsnSac,
-        quantity: 1,
-        rate: r.amount,
-        taxableValue: r.amount,
-        gstRate: r.gstRate,
-        gstAmount: r.gstAmount,
-        total: r.total,
-        combinedGstRate: r.gstRate,
-        totalManuallyEdited: false,
-        sourceType: "milestone",
-        milestoneIndex: r.milestoneIndex,
-        previousCarryForward: r.isCarryForward ? r.amount : 0,
-        currentTermAmount: r.isCarryForward ? 0 : r.amount,
-      }));
+      derivedItems = buildMilestoneItemRowsFromPoItems({
+        po: selectedPO,
+        milestoneRows: milestoneRowsUI,
+        invoiceTaxType: defaultTaxType,
+        invoiceTaxLabel: defaultTaxLabel,
+      });
 
       paymentTermSchedule = {
         ...paymentTermSchedule,
@@ -2437,7 +2583,6 @@ const ManualInvoicePage = () => {
       ...prev,
       linkedPO: selectedPO._id,
       linkedPORef: selectedPO.poNumber || "",
-      poreferencevalue: selectedPO.poreferencevalue || "",
       poType: getDerivedInvoicePoType({
         poType: selectedPO.poType,
         poCategory,
@@ -2515,33 +2660,53 @@ const ManualInvoicePage = () => {
     invoice.contractPeriodWorkingDays,
   ]);
 
+  const syncMilestoneRowsFromItems = (items) => {
+    if (selectedPOInfo?.billingModel !== "milestone" || milestoneRows.length === 0) return;
+
+    const invoiceTaxableAmount = roundMoney(
+      (items || []).reduce((sum, item) => sum + Number(item.taxableValue || 0), 0),
+    );
+    const poGrossAmount = Number(selectedPOData?.totalAmount || selectedPOData?.totalTaxableValue || 0);
+
+    setMilestoneRows((prev) => {
+      let remainingToAllocate = invoiceTaxableAmount;
+      return prev.map((row) => {
+        if (!row.selected) return row;
+
+        const remainingBefore = Number(row.remainingAmountBefore || 0);
+        const amount = roundMoney(Math.min(remainingBefore, remainingToAllocate));
+        remainingToAllocate = roundMoney(Math.max(0, remainingToAllocate - amount));
+        const taxRate = Number(row.gstRate || row.taxRate || 0);
+        const taxAmount = roundMoney((amount * taxRate) / 100);
+        const invoiceGrossAmount = roundMoney(amount + taxAmount);
+        const remainingBeforeGross = Number(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0);
+        const remainingAfterGross = roundMoney(Math.max(0, remainingBeforeGross - invoiceGrossAmount));
+
+        return {
+          ...row,
+          amount,
+          percentage: poGrossAmount > 0
+            ? Number(((invoiceGrossAmount / poGrossAmount) * 100).toFixed(2))
+            : 0,
+          gstAmount: taxAmount,
+          taxAmount,
+          total: invoiceGrossAmount,
+          invoiceAmount: invoiceGrossAmount,
+          remainingAmountAfterGross: remainingAfterGross,
+          remainingAmountAfter: remainingAfterGross,
+        };
+      });
+    });
+  };
+
   // ── Sync milestoneRows → invoice.items ───────────────────────
   const syncMilestoneRowsToItems = (rows) => {
-    const selectedRows = rows.filter((r) => r.selected);
-    const items = selectedRows.map((r) => ({
-      itemId: r._id,
-      poItemId: r._id,
-      description: r.title,
-      hsnSac: r.hsnSac || "",
-      quantity: 1,
-      rate: r.amount,
-      taxableValue: r.amount,
-      taxType: invoice.taxType || selectedPOData?.taxType || "GST",
-      taxLabel: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
-      taxRate: r.gstRate || 0,
-      taxAmount: r.gstAmount || 0,
-      taxBreakdown: normalizeTaxBreakdown(r, {
-        taxType: invoice.taxType || selectedPOData?.taxType || "GST",
-        label: invoice.taxLabel || selectedPOData?.taxLabel || "GST",
-        rate: r.gstRate || 0,
-        amount: r.gstAmount || 0,
-      }),
-      gstRate: r.gstRate || 0,
-      gstAmount: r.gstAmount || 0,
-      total: r.total,
-      combinedGstRate: r.gstRate || 0,
-      totalManuallyEdited: false,
-    }));
+    const items = buildMilestoneItemRowsFromPoItems({
+      po: selectedPOData,
+      milestoneRows: rows,
+      invoiceTaxType: invoice.taxType,
+      invoiceTaxLabel: invoice.taxLabel,
+    });
     setInvoice((prev) => ({ ...prev, items }));
   };
 
@@ -2556,18 +2721,23 @@ const ManualInvoicePage = () => {
             Math.min(Number(value || 0), Number(row.remainingAmountBefore || 0)),
           );
           row.amount = normalizedAmount;
+          const taxRate = Number(row.gstRate || row.taxRate || 0);
+          const taxAmount = roundMoney((normalizedAmount * taxRate) / 100);
+          const invoiceGrossAmount = roundMoney(normalizedAmount + taxAmount);
+          const remainingBeforeGross = Number(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0);
 
           // IMPORTANT: Calculate remaining amount after this invoice
-          row.remainingAmountAfter = Math.max(
-            0,
-            Number(row.remainingAmountBefore || 0) - normalizedAmount,
-          );
+          row.remainingAmountAfterGross = roundMoney(Math.max(0, remainingBeforeGross - invoiceGrossAmount));
+          row.remainingAmountAfter = row.remainingAmountAfterGross;
 
-          row.total = normalizedAmount;
+          row.gstAmount = taxAmount;
+          row.taxAmount = taxAmount;
+          row.total = invoiceGrossAmount;
+          row.invoiceAmount = invoiceGrossAmount;
 
           row.percentage = Number(
             selectedPOData?.totalAmount > 0
-              ? (((normalizedAmount / Number(selectedPOData.totalAmount || 1)) * 100).toFixed(2))
+              ? (((invoiceGrossAmount / Number(selectedPOData.totalAmount || 1)) * 100).toFixed(2))
               : 0,
           );
         }
@@ -2577,7 +2747,13 @@ const ManualInvoicePage = () => {
           row.gstRate = newRate;
           const gstAmount = roundMoney((row.amount * newRate) / 100);
           row.gstAmount = gstAmount;
+          row.taxAmount = gstAmount;
           row.total = roundMoney(row.amount + gstAmount);
+          row.invoiceAmount = row.total;
+          row.remainingAmountAfterGross = roundMoney(
+            Math.max(0, Number(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0) - row.total),
+          );
+          row.remainingAmountAfter = row.remainingAmountAfterGross;
         }
 
         // Recompute GST and total whenever amount or hsnSac changes
@@ -2590,7 +2766,13 @@ const ManualInvoicePage = () => {
           const amt = Number(row.amount || 0);
           const gstRate = Number(row.gstRate) || 0;
           row.gstAmount = roundMoney((amt * gstRate) / 100);
+          row.taxAmount = row.gstAmount;
           row.total = roundMoney(amt + row.gstAmount);
+          row.invoiceAmount = row.total;
+          row.remainingAmountAfterGross = roundMoney(
+            Math.max(0, Number(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0) - row.total),
+          );
+          row.remainingAmountAfter = row.remainingAmountAfterGross;
         }
         return row;
       });
@@ -2770,6 +2952,11 @@ const ManualInvoicePage = () => {
       const badMilestone = selectedMilestones.find((r) => !r.title || Number(r.amount || 0) <= 0);
       if (badMilestone) {
         setError("Each selected milestone must have a title and amount greater than 0.");
+        return;
+      }
+      const invalidItems = invoice.items.filter((item) => !item.description || Number(item.quantity || 0) <= 0 || Number(item.rate || 0) <= 0 || Number(item.taxableValue || 0) <= 0);
+      if (invalidItems.length > 0) {
+        setError("Please ensure milestone invoice line items have a description, quantity, rate, and taxable value greater than 0.");
         return;
       }
     } else if (isRetainerSection) {
@@ -3772,7 +3959,55 @@ const ManualInvoicePage = () => {
           </div>
 
           {/* ══ PO TYPE SPECIFIC BILLING SECTION ══════════════════════════ */}
-          {selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0 ? (
+          {selectedPOInfo?.billingModel === "milestone" && milestoneRows.length > 0 && (
+            <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
+              <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-6 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Package size={24} />
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">Milestone Billing Summary</h2>
+                    <p className="text-indigo-200 text-xs mt-0.5">
+                      {selectedPOInfo?.label || "Milestone purchase order"}
+                    </p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 bg-white/20 rounded-full text-xs font-bold border border-white/30">
+                  {milestoneRows.filter(r => r.selected).length} active
+                </span>
+              </div>
+              <div className="p-6 overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-100">
+                  <thead className="bg-slate-50/50">
+                    <tr>
+                      <th className="px-3 py-3 text-left text-[11px] font-black text-slate-500 uppercase tracking-widest">Milestone</th>
+                      <th className="px-3 py-3 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Original %</th>
+                      <th className="px-3 py-3 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Open Amount</th>
+                      <th className="px-3 py-3 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice %</th>
+                      <th className="px-3 py-3 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Invoice Amount</th>
+                      <th className="px-3 py-3 text-right text-[11px] font-black text-slate-500 uppercase tracking-widest">Remaining After</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {milestoneRows.map((row) => (
+                      <tr key={row._id} className={row.selected ? "bg-indigo-50/30" : "bg-slate-50/50 opacity-60"}>
+                        <td className="px-3 py-3 text-sm font-semibold text-slate-800">
+                          {row.title}
+                          {row.description && <p className="text-[10px] text-slate-400 mt-0.5">{row.description}</p>}
+                        </td>
+                        <td className="px-3 py-3 text-right text-sm text-slate-700">{row.originalPercentage > 0 ? `${row.originalPercentage}%` : "—"}</td>
+                        <td className="px-3 py-3 text-right text-sm font-bold text-amber-700">{(row.remainingAmountBeforeGross ?? row.remainingAmountBefore ?? 0).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right text-sm text-slate-700">{row.percentage > 0 ? `${row.percentage}%` : "—"}</td>
+                        <td className="px-3 py-3 text-right text-sm font-bold text-indigo-700">{(row.invoiceAmount ?? row.total ?? row.amount ?? 0).toFixed(2)}</td>
+                        <td className="px-3 py-3 text-right text-sm font-bold text-emerald-700">{(row.remainingAmountAfterGross ?? row.remainingAmountAfter ?? 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {selectedPOInfo?.billingModel === "__legacy_milestone" && milestoneRows.length > 0 ? (
             /* ── MILESTONE SECTION ── */
             <div className="glass-card rounded-[2.5rem] shadow-premium mb-8 border border-white/20 overflow-hidden">
               <div className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white p-6 flex items-center justify-between">
