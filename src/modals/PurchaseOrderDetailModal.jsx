@@ -98,6 +98,7 @@ const calculatePaymentDistributions = (po) => {
       percentage: Number(m.percentage || 0),
       dueDate: m.dueDate,
       type: "milestone",
+      index: idx,
     }));
   }
 
@@ -215,6 +216,88 @@ const getMilestoneOpenAmountBeforeInvoice = (milestone = {}) => {
   const raisedNow = Number(milestone.invoicedAmount || milestone.amount || 0);
   const remainingAfter = Number(milestone.remainingAmountAfter || 0);
   return roundMoney(Math.max(0, raisedNow + remainingAfter));
+};
+
+const getMilestoneIdentity = (milestone = {}) => ({
+  id: String(milestone?.milestoneId || milestone?._id || "").trim(),
+  title: String(milestone?.title || milestone?.description || "").trim().toLowerCase(),
+  index:
+    milestone?.milestoneIndex !== undefined && milestone?.milestoneIndex !== null
+      ? Number(milestone.milestoneIndex)
+      : null,
+});
+
+const getMatchedInvoiceMilestones = (invoice = {}, distribution = {}) => {
+  const milestones = Array.isArray(invoice?.milestones) ? invoice.milestones : [];
+  const distributionId = String(distribution?._id || "");
+  const distributionTitle = String(distribution?.title || "").trim().toLowerCase();
+  const distributionIndex = Number(distribution?.index);
+
+  const byIdOrTitle = milestones.filter((milestone) => {
+    const identity = getMilestoneIdentity(milestone);
+    return (
+      (distributionId && identity.id && distributionId === identity.id) ||
+      (distributionTitle && identity.title && distributionTitle === identity.title)
+    );
+  });
+
+  if (byIdOrTitle.length > 0) return byIdOrTitle;
+
+  if (Number.isFinite(distributionIndex)) {
+    const byIndex = milestones.filter((milestone) => {
+      const identity = getMilestoneIdentity(milestone);
+      return Number.isFinite(identity.index) && identity.index === distributionIndex;
+    });
+    if (byIndex.length > 0) return byIndex;
+  }
+
+  return [];
+};
+
+const getMilestoneEntryGrossAmount = (milestone = {}) => {
+  const taxableAmount = Number(milestone?.invoicedAmount ?? milestone?.amount ?? milestone?.taxableValue ?? 0);
+  const taxAmount = Number(milestone?.gstAmount ?? milestone?.taxAmount ?? milestone?.totalTaxAmount ?? 0);
+
+  return roundMoney(
+    Number(
+      milestone?.total ??
+        milestone?.totalAmount ??
+        milestone?.invoiceAmount ??
+        (taxableAmount + taxAmount),
+    ),
+  );
+};
+
+const getMilestoneInvoiceGrossAmount = (invoice = {}, distribution = {}) => {
+  const matchedMilestones = getMatchedInvoiceMilestones(invoice, distribution);
+  const grossFromMilestones = matchedMilestones.reduce(
+    (sum, milestone) => sum + getMilestoneEntryGrossAmount(milestone),
+    0,
+  );
+
+  if (grossFromMilestones > 0) return roundMoney(grossFromMilestones);
+
+  const grossFromItems = (invoice?.items || []).reduce(
+    (sum, item) => sum + Number(item?.totalAmount ?? item?.total ?? 0),
+    0,
+  );
+
+  return roundMoney(grossFromItems || Number(invoice?.invoiceAmount || 0));
+};
+
+const getPOMilestoneInvoicedAmount = (milestone = {}, index = 0, invoices = []) => {
+  const distribution = {
+    _id: milestone?._id,
+    title: milestone?.title,
+    index,
+  };
+
+  return roundMoney(
+    invoices.reduce((sum, invoice) => {
+      if (getMatchedInvoiceMilestones(invoice, distribution).length === 0) return sum;
+      return sum + getMilestoneInvoiceGrossAmount(invoice, distribution);
+    }, 0),
+  );
 };
 
 const getMilestoneTimelineSummary = ({ po, invoice, invoiceIndex, orderedInvoices }) => {
@@ -492,9 +575,15 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   const status = po ? STATUS_CFG[po.status] || STATUS_CFG.draft : null;
   const delSt = po?.deliveryDate ? deliveryStatus(po.deliveryDate) : null;
   const currency = po?.currency || "INR";
+  const activeOrderedInvoices = orderedInvoices.filter(
+    (invoice) => !["CANCELLED", "CANCELED", "VOID", "REVERSED"].includes(String(invoice?.status || "").toUpperCase()),
+  );
+  const derivedTotalInvoicedAmount = activeOrderedInvoices.length > 0
+    ? roundMoney(activeOrderedInvoices.reduce((sum, invoice) => sum + Number(invoice?.invoiceAmount || 0), 0))
+    : Number(po?.totalInvoicedAmount || 0);
   const openAmount = Math.max(
     0,
-    (po?.totalAmount || 0) - (po?.totalInvoicedAmount || 0),
+    (po?.totalAmount || 0) - derivedTotalInvoicedAmount,
   );
 
   // ── Precompute what this PO actually has ──────────────────────
@@ -548,12 +637,26 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
       let matchedIdx = -1;
       
       if (po.paymentTerms === "milestone") {
-        matchedIdx = distributionsWithInvoices.findIndex(dist => 
-          dist._id === inv.milestoneId ||
-          (inv.items || []).some(item => item.itemId === dist._id || item.poItemId === dist._id) ||
-          inv.description?.trim() === dist.title?.trim() ||
-          (inv.milestones || []).some(m => m.milestoneId === dist._id)
-        );
+        matchedIdx = distributionsWithInvoices.findIndex((dist) => {
+          const distId = String(dist?._id || "").trim();
+          const distTitle = String(dist?.title || "").trim().toLowerCase();
+          const invoiceMilestoneId = String(inv?.milestoneId || "").trim();
+          const invoiceDescription = String(inv?.description || "").trim().toLowerCase();
+
+          return (
+            (distId && invoiceMilestoneId && distId === invoiceMilestoneId) ||
+            (distTitle && invoiceDescription && invoiceDescription === distTitle) ||
+            getMatchedInvoiceMilestones(inv, dist).length > 0 ||
+            (inv.items || []).some((item) => {
+              const itemMilestoneId = String(item?.milestoneId || item?.sourceId || "").trim();
+              const itemMilestoneTitle = String(item?.milestoneTitle || item?.description || "").trim().toLowerCase();
+              return (
+                (distId && itemMilestoneId && distId === itemMilestoneId) ||
+                (distTitle && itemMilestoneTitle && itemMilestoneTitle === distTitle)
+              );
+            })
+          );
+        });
       } else {
         matchedIdx = distributionsWithInvoices.findIndex(dist => 
           inv.periodLabel === dist.title || 
@@ -591,24 +694,34 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   // Final data calculation
   const paymentDistributions = distributionsWithInvoices.map(dist => {
     const termInvoices = dist.invoices;
-    const totalInvoiced = termInvoices.reduce((sum, inv) => sum + Number(inv.invoiceAmount || 0), 0);
-    // Only count payments from approved invoices (TDS is NOT a payment)
-    const approvedInvoices = termInvoices.filter(inv => inv.approvalStatus === "Approved");
-    const totalPaid = approvedInvoices.reduce((sum, inv) => sum + Number(inv.paidAmount || 0), 0);
-    const totalTds = approvedInvoices.reduce((sum, inv) => sum + Number(inv.tdsAmount || 0), 0);
-    const netPayable = Math.max(0, totalInvoiced - totalTds);
+    const isMilestoneTerm = dist.type === "milestone";
+    const totalInvoiced = termInvoices.reduce(
+      (sum, inv) =>
+        sum + (isMilestoneTerm ? getMilestoneInvoiceGrossAmount(inv, dist) : Number(inv.invoiceAmount || 0)),
+      0,
+    );
+    const totalInvoiceGross = termInvoices.reduce((sum, inv) => sum + Number(inv.invoiceAmount || 0), 0);
+    const totalPaid = termInvoices.reduce((sum, inv) => sum + Number(inv.paidAmount || 0), 0);
+    const totalTds = termInvoices.reduce((sum, inv) => sum + Number(inv.tdsAmount || 0), 0);
+    const netPayable = Math.max(0, totalInvoiceGross - totalTds);
     
     // Status & progress based on net payable (invoice amount minus TDS)
     let status = "unpaid";
-    const baseAmount = netPayable > 0 ? netPayable : (dist.amount || 0);
+    const baseAmount = isMilestoneTerm ? Number(dist.amount || 0) : (netPayable > 0 ? netPayable : (dist.amount || 0));
     
     if (termInvoices.length > 0) {
-      if (totalPaid >= (baseAmount - 0.01) && baseAmount > 0) status = "paid";
-      else if (totalPaid > 0) status = "partial";
+      const allPaid = termInvoices.every((inv) =>
+        ["PAID", "RECONCILED"].includes(String(inv.status || "").toUpperCase()) ||
+        inv.isFullyPaid ||
+        Number(inv.remainingAmount || 0) <= 0.01,
+      );
+      if (allPaid) status = "paid";
+      else if (totalPaid > 0 || totalTds > 0) status = "partial";
       else status = "invoiced";
     }
 
-    const paidPercentage = baseAmount > 0 ? Math.min(100, (totalPaid / baseAmount) * 100) : 0;
+    const progressAmount = status === "paid" && isMilestoneTerm ? baseAmount : totalPaid;
+    const paidPercentage = baseAmount > 0 ? Math.min(100, (progressAmount / baseAmount) * 100) : 0;
 
     return {
       ...dist,
@@ -617,6 +730,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
       totalPaid,
       totalTds,
       netPayable,
+      displayBaseAmount: baseAmount,
       status,
       paidPercentage
     };
@@ -770,7 +884,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                       },
                       {
                         label: "Invoiced %",
-                        value: `${((po.totalInvoicedAmount || 0) / Math.max(po.totalAmount || 1, 1) * 100).toFixed(1)}%`,
+                        value: `${(derivedTotalInvoicedAmount / Math.max(po.totalAmount || 1, 1) * 100).toFixed(1)}%`,
                         g: "linear-gradient(135deg,#064e3b,#059669)",
                         blob: "#6ee7b7",
                       },
@@ -962,12 +1076,12 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         </div>
 
                         {/* Invoiced / paid breakdown — only when values exist */}
-                        {((po.totalInvoicedAmount || 0) > 0 || (po.totalPaidAmount || 0) > 0) && (
+                        {(derivedTotalInvoicedAmount > 0 || (po.totalPaidAmount || 0) > 0) && (
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
-                            {(po.totalInvoicedAmount || 0) > 0 && (
+                            {derivedTotalInvoicedAmount > 0 && (
                               <div className="flex flex-col items-center px-3 py-2.5 rounded-xl border border-amber-100 bg-amber-50/80">
                                 <span className="text-[9px] font-black uppercase tracking-widest opacity-60 mb-0.5 text-amber-700">Invoiced</span>
-                                <span className="text-sm font-black text-amber-700">{fmtC(po.totalInvoicedAmount, currency)}</span>
+                                <span className="text-sm font-black text-amber-700">{fmtC(derivedTotalInvoicedAmount, currency)}</span>
                               </div>
                             )}
                             {(po.totalPaidAmount || 0) > 0 && (
@@ -1274,7 +1388,11 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         </span>
                       </div>
                       <div className="p-4 space-y-3">
-                        {po.milestones.map((m, i) => (
+                        {po.milestones.map((m, i) => {
+                          const milestoneInvoicedAmount = getPOMilestoneInvoicedAmount(m, i, activeOrderedInvoices) || Number(m.invoicedAmount || 0);
+                          const milestoneRemainingAmount = Math.max(0, Number(m.amount || 0) - milestoneInvoicedAmount);
+
+                          return (
                           <div key={i} className="border border-slate-200 rounded-xl overflow-hidden hover:border-indigo-200 transition-colors">
                             <div className="flex items-center justify-between px-4 py-3 bg-slate-50/70">
                               <div className="flex items-center gap-3">
@@ -1301,20 +1419,24 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                             </div>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 px-4 py-3">
                               <F label="Amount" value={fmtC(m.amount, currency)} />
-                              <F label="Invoiced" value={fmtC(m.invoicedAmount || 0, currency)} />
-                              <F label="Remaining" value={fmtC(Math.max(0, (m.amount || 0) - (m.invoicedAmount || 0)), currency)} />
+                              <F label="Invoiced" value={fmtC(milestoneInvoicedAmount, currency)} />
+                              <F label="Remaining" value={fmtC(milestoneRemainingAmount, currency)} />
                               {m.dueDate && <F label="Due Date" value={fmt(m.dueDate)} />}
                               {m.completedDate && <F label="Completed" value={fmt(m.completedDate)} />}
                               {m.notes && <F label="Notes" value={m.notes} />}
                             </div>
                           </div>
-                        ))}
+                        );
+                        })}
                       </div>
                       <div className="border-t border-slate-100 px-5 py-3 bg-slate-50/60 flex items-center justify-between">
                         <div className="flex gap-4 text-[10px] text-slate-500">
-                          <span>Fully Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) >= (m.amount || 0) && (m.amount || 0) > 0).length}</strong></span>
-                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m) => (m.invoicedAmount || 0) > 0 && (m.invoicedAmount || 0) < (m.amount || 0)).length}</strong></span>
-                          <span>Pending: <strong className="text-amber-700">{po.milestones.filter((m) => !(m.invoicedAmount > 0)).length}</strong></span>
+                          <span>Fully Invoiced: <strong className="text-emerald-700">{po.milestones.filter((m, i) => (getPOMilestoneInvoicedAmount(m, i, activeOrderedInvoices) || Number(m.invoicedAmount || 0)) >= (m.amount || 0) && (m.amount || 0) > 0).length}</strong></span>
+                          <span>Partially Invoiced: <strong className="text-indigo-700">{po.milestones.filter((m, i) => {
+                            const invoicedAmount = getPOMilestoneInvoicedAmount(m, i, activeOrderedInvoices) || Number(m.invoicedAmount || 0);
+                            return invoicedAmount > 0 && invoicedAmount < (m.amount || 0);
+                          }).length}</strong></span>
+                          <span>Pending: <strong className="text-amber-700">{po.milestones.filter((m, i) => !((getPOMilestoneInvoicedAmount(m, i, activeOrderedInvoices) || Number(m.invoicedAmount || 0)) > 0)).length}</strong></span>
                         </div>
                         <div className="text-right">
                           <p className="text-[10px] text-slate-400 uppercase font-black tracking-widest">Total Milestone Value</p>
@@ -1340,8 +1462,8 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                         {po.paymentSchedule && <F label="Payment Schedule" value={po.paymentSchedule.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
                         {po.paymentTerms && <F label="Payment Terms" value={po.paymentTerms.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())} />}
                         <F label="Total PO Value" value={fmtC(po.totalAmount, currency)} />
-                        {(po.totalInvoicedAmount || 0) > 0 && <F label="Invoiced to Date" value={fmtC(po.totalInvoicedAmount, currency)} />}
-                        <F label="Remaining" value={fmtC(Math.max(0, (po.totalAmount || 0) - (po.totalInvoicedAmount || 0)), currency)} />
+                        {derivedTotalInvoicedAmount > 0 && <F label="Invoiced to Date" value={fmtC(derivedTotalInvoicedAmount, currency)} />}
+                        <F label="Remaining" value={fmtC(Math.max(0, (po.totalAmount || 0) - derivedTotalInvoicedAmount), currency)} />
                         {po.poDate && <F label="Start Date" value={fmt(po.poDate)} />}
                         {po.deliveryDate && <F label="End / Delivery" value={fmt(po.deliveryDate)} />}
                       </div>
@@ -1468,7 +1590,14 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                               </div>
                               <div className="flex justify-between text-[8px] font-bold text-slate-400">
                                 <span>{fmtC(dist.totalPaid, currency)} Paid</span>
-                                <span>{fmtC(Math.max(0, (dist.netPayable > 0 ? dist.netPayable : dist.amount) - dist.totalPaid), currency)} Remaining</span>
+                                <span>
+                                  {fmtC(
+                                    dist.type === "milestone"
+                                      ? Math.max(0, (dist.displayBaseAmount || dist.amount || 0) - dist.totalInvoiced)
+                                      : Math.max(0, (dist.displayBaseAmount || dist.amount || 0) - dist.totalPaid),
+                                    currency,
+                                  )} Remaining
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -1482,6 +1611,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                     const s = getStatusColor(inv.status);
                                     const invTds = Number(inv.tdsAmount || 0);
                                     const invNetPayable = Number(inv.invoiceAmount || 0) - invTds;
+                                    const milestoneInvoiceAmount = dist.type === "milestone"
+                                      ? getMilestoneInvoiceGrossAmount(inv, dist)
+                                      : 0;
                                     return (
                                       <div key={inv._id} className="relative">
                                         <div className={`absolute -left-[20px] top-1 w-2 h-2 rounded-full border-2 border-white ring-1 ring-slate-100 ${s.bg} ${s.text.replace("text-", "bg-")}`} />
@@ -1496,8 +1628,12 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
                                             </span>
                                           </div>
                                           <div className="flex justify-between items-center text-[9px]">
-                                            <span className="text-slate-400">Total Invoice</span>
-                                            <span className="font-black text-slate-700">{fmtC(inv.invoiceAmount, currency)}</span>
+                                            <span className="text-slate-400">
+                                              {dist.type === "milestone" ? "Milestone Invoice" : "Total Invoice"}
+                                            </span>
+                                            <span className="font-black text-slate-700">
+                                              {fmtC(dist.type === "milestone" ? milestoneInvoiceAmount : inv.invoiceAmount, currency)}
+                                            </span>
                                           </div>
                                           {invTds > 0 && (
                                             <div className="flex justify-between items-center text-[9px]">
