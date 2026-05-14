@@ -293,9 +293,9 @@ const getMilestoneEntryGrossAmount = (milestone = {}) => {
   return roundMoney(
     Number(
       milestone.total ??
-        milestone.totalAmount ??
-        milestone.invoiceAmount ??
-        (taxableAmount + taxAmount),
+      milestone.totalAmount ??
+      milestone.invoiceAmount ??
+      (taxableAmount + taxAmount),
     ),
   );
 };
@@ -690,7 +690,7 @@ const buildMilestoneItemRowsFromPoItems = ({
 
   const allocatedTotal = allocations.reduce((sum, entry) => sum + entry.taxableValue, 0);
 
-  return allocations
+  const items = allocations
     .filter((entry) => entry.taxableValue > 0.01)
     .map((entry) => {
       const { item, baseTaxableAmount, availableTaxableAmount, taxableValue } = entry;
@@ -750,6 +750,27 @@ const buildMilestoneItemRowsFromPoItems = ({
         milestoneIndex: selectedRows[0]?.milestoneIndex,
       };
     });
+
+  // Reconcile rounding: when items have different tax rates, the sum of per-item
+  // totals may not exactly match the milestone's gross total due to rounding.
+  // Adjust the last item to absorb any rounding difference (typically < 1 rupee).
+  if (items.length > 1) {
+    const expectedGrossTotal = roundMoney(
+      selectedRows.reduce((sum, row) => sum + Number(row.total || row.invoiceAmount || 0), 0),
+    );
+    const actualGrossTotal = roundMoney(
+      items.reduce((sum, item) => sum + Number(item.total || 0), 0),
+    );
+    const roundingDiff = roundMoney(expectedGrossTotal - actualGrossTotal);
+    if (Math.abs(roundingDiff) > 0 && Math.abs(roundingDiff) <= 1) {
+      const lastItem = items[items.length - 1];
+      lastItem.taxAmount = roundMoney(lastItem.taxAmount + roundingDiff);
+      lastItem.gstAmount = lastItem.taxAmount;
+      lastItem.total = roundMoney(lastItem.taxableValue + lastItem.taxAmount);
+    }
+  }
+
+  return items;
 };
 
 const getDerivedInvoicePoType = ({ poType, poCategory, billingModel }) => {
@@ -1213,7 +1234,7 @@ const ManualInvoicePage = () => {
 
         const response = await getCompanyByIdApi(companyId);
         console.log(response.data);
-        
+
         const companyData = response.data || {};
 
         // Format address from registeredAddress object
@@ -2117,6 +2138,21 @@ const ManualInvoicePage = () => {
       const defaultTaxType = firstItem.taxType || selectedPO.taxType || "GST";
       const defaultTaxLabel = firstItem.taxLabel || selectedPO.taxLabel || defaultTaxType;
 
+      // Compute effective weighted tax rate from PO totals.
+      // When items have different HSN codes (different tax rates), using only the first
+      // item's rate to convert between gross and taxable amounts produces wrong results.
+      // The effective rate derived from PO-level totals correctly represents the weighted
+      // average across all items and ensures milestone total = sum of item totals.
+      const _poTaxableValue = Number(selectedPO.totalTaxableValue || 0);
+      const _poTotalAmount = Number(selectedPO.totalAmount || 0);
+      const effectiveTaxRate = (_poTaxableValue > 0 && _poTotalAmount > _poTaxableValue)
+        ? roundMoney(((_poTotalAmount - _poTaxableValue) / _poTaxableValue) * 100)
+        : defaultTaxRate;
+      // Ratio to directly convert gross → taxable without rate-based rounding errors
+      const grossToTaxableRatio = (_poTaxableValue > 0 && _poTotalAmount > 0)
+        ? _poTaxableValue / _poTotalAmount
+        : (defaultTaxRate > 0 ? 1 / (1 + defaultTaxRate / 100) : 1);
+
       // Helper: compute how much of a milestone has already been invoiced
       const getInvoicedAmountForMilestone = (milestoneId, milestoneTitle) => {
         const linkedInvoices = selectedPO.linkedInvoices || [];
@@ -2130,12 +2166,26 @@ const ManualInvoicePage = () => {
 
       const milestones = selectedPO.milestones;
       const totalMilestoneSum = milestones.reduce((s, m) => s + Number(m.amount || 0), 0);
-      const isMilestoneInclusive = Math.abs(totalMilestoneSum - Number(selectedPO.totalAmount || 0)) < 1;
+      // Robustly determine if milestone amounts are gross (tax-inclusive) or taxable (tax-exclusive).
+      // Compare against both totalAmount (gross) and totalTaxableValue (taxable) to find the closer match.
+      // Use a percentage-based tolerance (0.5% of the value) to handle rounding differences that can
+      // arise when the backend's recalculateItemTotals re-normalizes tax fields and recalculates totals.
+      const poGrossTotal = Number(selectedPO.totalAmount || 0);
+      const poTaxableTotal = Number(selectedPO.totalTaxableValue || 0);
+      const diffFromGross = Math.abs(totalMilestoneSum - poGrossTotal);
+      const diffFromTaxable = poTaxableTotal > 0 ? Math.abs(totalMilestoneSum - poTaxableTotal) : Infinity;
+      const grossTolerance = Math.max(1, poGrossTotal * 0.005);
+      const taxableTolerance = Math.max(1, poTaxableTotal * 0.005);
+      // Milestone amounts are gross if they match totalAmount better (or within tolerance),
+      // OR if there's no meaningful tax difference (taxRate <= 0).
+      const matchesGross = diffFromGross <= grossTolerance;
+      const matchesTaxable = diffFromTaxable <= taxableTolerance;
+      const isMilestoneInclusive = matchesGross || (!matchesTaxable && diffFromGross <= diffFromTaxable);
       const getMilestoneGrossAmount = (milestone = {}) => {
         const amount = Number(milestone.amount || 0);
-        return isMilestoneInclusive || defaultTaxRate <= 0
+        return isMilestoneInclusive || effectiveTaxRate <= 0
           ? roundMoney(amount)
-          : roundMoney(amount + (amount * defaultTaxRate) / 100);
+          : roundMoney(amount + (amount * effectiveTaxRate) / 100);
       };
       const rows = [];
 
@@ -2145,11 +2195,11 @@ const ManualInvoicePage = () => {
         const originalAmount = getMilestoneGrossAmount(m);
         const alreadyInvoiced = getInvoicedAmountForMilestone(m._id, m.title);
         const remaining = roundMoney(Math.max(0, originalAmount - alreadyInvoiced));
-        
+
         // If there's a significant remaining balance (> 0.01)
         if (remaining > 0.01) {
           const isPartial = alreadyInvoiced > 0.01;
-          
+
           // Selection Strategy:
           // - ALWAYS add ALL partially invoiced milestones (to ensure they get completed).
           // - ADD THE VERY FIRST fresh milestone found in the sequence.
@@ -2163,7 +2213,7 @@ const ManualInvoicePage = () => {
               _remaining: remaining,
               _isCarryForward: isPartial,
             });
-            
+
             // Mark that we've now added the "next" fresh term
             if (!isPartial) {
               freshAdded = true;
@@ -2179,14 +2229,15 @@ const ManualInvoicePage = () => {
       }
 
       // Convert rows to UI‑friendly format
+      // Use PO-level grossToTaxableRatio for accurate gross↔taxable conversion
+      // when items have different HSN codes (different tax rates).
       const milestoneRowsUI = rows.map((m) => {
         const grossAmount = m._remaining;
-        const taxRate = defaultTaxRate;
-        
-        const taxableValue = taxRate > 0
-          ? roundMoney(grossAmount / (1 + taxRate / 100))
+        // Use the weighted ratio to convert gross → taxable accurately
+        const taxableValue = effectiveTaxRate > 0
+          ? roundMoney(grossAmount * grossToTaxableRatio)
           : grossAmount;
-        const taxAmount = taxRate > 0
+        const taxAmount = effectiveTaxRate > 0
           ? roundMoney(grossAmount - taxableValue)
           : 0;
         const invoiceGrossAmount = roundMoney(taxableValue + taxAmount);
@@ -2207,8 +2258,8 @@ const ManualInvoicePage = () => {
           ),
           originalPercentage: Number(m.percentage || 0),
           originalAmount: originalGrossAmount,
-          originalTaxableAmount: taxRate > 0
-            ? roundMoney(originalGrossAmount / (1 + taxRate / 100))
+          originalTaxableAmount: effectiveTaxRate > 0
+            ? roundMoney(originalGrossAmount * grossToTaxableRatio)
             : Number(m.amount || 0),
           alreadyInvoicedAmount: alreadyInvoicedGrossAmount,
           remainingAmountBeforeGross: grossAmount,
@@ -2220,14 +2271,14 @@ const ManualInvoicePage = () => {
           hsnSac: defaultHsn,
           taxType: defaultTaxType,
           taxLabel: defaultTaxLabel,
-          taxRate: taxRate,
-          gstRate: taxRate,
+          taxRate: effectiveTaxRate,
+          gstRate: effectiveTaxRate,
           gstAmount: taxAmount,
           taxAmount: taxAmount,
           taxBreakdown: scaleTaxBreakdown(firstItem.taxBreakdown, taxableValue / Math.max(Number(firstItem.taxableValue || taxableValue), 1), {
             taxType: defaultTaxType,
             label: defaultTaxLabel,
-            rate: taxRate,
+            rate: effectiveTaxRate,
             amount: taxAmount,
           }),
           total: invoiceGrossAmount,
@@ -2309,28 +2360,28 @@ const ManualInvoicePage = () => {
             poItemId: item.itemId || item._id,
             description: `${item.description || ""} (${selectedPO.paymentTerms === "monthly" ? "Month" : "Week"} ${schedule.currentInstallment}/${schedule.totalInstallments})`,
             hsnSac: item.hsnSac || item.hsnCode || "",
-        quantity,
-        baseQuantity: Number(item.quantity || 0),
-        baseRate: rate,
-        poRemainingQuantity: getRemainingPOItemQuantity(item),
-        rate,
-        taxableValue: termTaxable,
-        taxType: item.taxType || selectedPO.taxType || "GST",
-        taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-        taxRate: item.taxRate ?? taxRate,
-        taxAmount: termTaxAmount,
-        taxBreakdown: scaleTaxBreakdown(
-          item.taxBreakdown,
-          termTaxable / Math.max(baseTaxableAmount, 1),
-          {
+            quantity,
+            baseQuantity: Number(item.quantity || 0),
+            baseRate: rate,
+            poRemainingQuantity: getRemainingPOItemQuantity(item),
+            rate,
+            taxableValue: termTaxable,
             taxType: item.taxType || selectedPO.taxType || "GST",
-            label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-            rate: item.taxRate ?? taxRate,
-            amount: termTaxAmount,
-          },
-        ),
-        gstRate: taxRate,
-        gstAmount: termTaxAmount,
+            taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+            taxRate: item.taxRate ?? taxRate,
+            taxAmount: termTaxAmount,
+            taxBreakdown: scaleTaxBreakdown(
+              item.taxBreakdown,
+              termTaxable / Math.max(baseTaxableAmount, 1),
+              {
+                taxType: item.taxType || selectedPO.taxType || "GST",
+                label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+                rate: item.taxRate ?? taxRate,
+                amount: termTaxAmount,
+              },
+            ),
+            gstRate: taxRate,
+            gstAmount: termTaxAmount,
             total: roundMoney(termTaxable + termTaxAmount),
             combinedGstRate: item.combinedGstRate || taxRate,
             totalManuallyEdited: false,
@@ -2527,28 +2578,28 @@ const ManualInvoicePage = () => {
             poItemId: item.itemId || item._id,
             description: item.description || "",
             hsnSac: item.hsnSac || item.hsnCode || "",
-          quantity,
-          baseQuantity: remainingQuantity,
-          baseRate: rate,
-          poRemainingQuantity: remainingQuantity,
-          rate,
-          taxableValue,
-          taxType: item.taxType || selectedPO.taxType || "GST",
-          taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-          taxRate: item.taxRate ?? taxRate,
-          taxAmount: taxAmount,
-          taxBreakdown: scaleTaxBreakdown(
-            item.taxBreakdown,
-            taxableValue / Math.max(Number(item.taxableValue || taxableValue), 1),
-            {
-              taxType: item.taxType || selectedPO.taxType || "GST",
-              label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
-              rate: item.taxRate ?? taxRate,
-              amount: taxAmount,
-            },
-          ),
-          gstRate: taxRate,
-          gstAmount: taxAmount,
+            quantity,
+            baseQuantity: remainingQuantity,
+            baseRate: rate,
+            poRemainingQuantity: remainingQuantity,
+            rate,
+            taxableValue,
+            taxType: item.taxType || selectedPO.taxType || "GST",
+            taxLabel: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+            taxRate: item.taxRate ?? taxRate,
+            taxAmount: taxAmount,
+            taxBreakdown: scaleTaxBreakdown(
+              item.taxBreakdown,
+              taxableValue / Math.max(Number(item.taxableValue || taxableValue), 1),
+              {
+                taxType: item.taxType || selectedPO.taxType || "GST",
+                label: item.taxLabel || selectedPO.taxLabel || item.taxType || "GST",
+                rate: item.taxRate ?? taxRate,
+                amount: taxAmount,
+              },
+            ),
+            gstRate: taxRate,
+            gstAmount: taxAmount,
             total: scheduledTotal,
             maxAllowedInvoiceAmount: scheduledTotal,
             installmentAmount: scheduledParts.installmentAmount,
@@ -3073,7 +3124,7 @@ const ManualInvoicePage = () => {
 
         const generatedInvoiceNo = response?.data?.invoiceNo;
         const generatedId = response?.data?._id;
-        
+
         setCreatedInvoiceId(generatedId);
 
         // ✅ Construct full display object for success modal
