@@ -101,6 +101,7 @@ const fmtShort = (n) => {
 ══════════════════════════════════════════════════════════ */
 export default function HomePage() {
   const { user } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const { selectedFinancialYearEnding, selectedFinancialYearLabel } = useFinancialYear();
 
   const [journalDialogOpen, setJournalDialogOpen]   = useState(false);
@@ -239,46 +240,48 @@ export default function HomePage() {
             </div>
 
             {/* ── STAT CARDS ────────────────────────────── */}
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {STATS.map((s, idx) => (
-                <motion.div
-                  key={s.label}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.08 }}
-                  className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-                  style={{ background: s.gradient }}
-                >
-                  {/* Glow blob */}
-                  <div
-                    className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-30 blur-2xl group-hover:scale-125 transition-transform duration-700"
-                    style={{ background: `radial-gradient(ellipse,${s.glow},transparent)` }}
-                  />
-                  <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
-                  <div className="absolute top-3 right-3 w-14 h-14 rounded-full border-2 border-white/15" />
+            {isAdminOrSuperAdmin && (
+              <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {STATS.map((s, idx) => (
+                  <motion.div
+                    key={s.label}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: idx * 0.08 }}
+                    className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+                    style={{ background: s.gradient }}
+                  >
+                    {/* Glow blob */}
+                    <div
+                      className="absolute -top-8 -right-8 w-44 h-32 rounded-full opacity-30 blur-2xl group-hover:scale-125 transition-transform duration-700"
+                      style={{ background: `radial-gradient(ellipse,${s.glow},transparent)` }}
+                    />
+                    <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
+                    <div className="absolute top-3 right-3 w-14 h-14 rounded-full border-2 border-white/15" />
 
-                  <div className="relative z-10 flex items-start justify-between">
-                    <div>
-                      <p className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-2">
-                        {s.label}
-                      </p>
-                      {s.loading ? (
-                        <div className="w-20 h-7 rounded-lg bg-white/20 animate-pulse" />
-                      ) : (
-                        <p className="text-3xl font-black text-white leading-none" title={s.fullValue}>
-                          {s.value}
+                    <div className="relative z-10 flex items-start justify-between">
+                      <div>
+                        <p className="text-white/70 text-[10px] font-black uppercase tracking-widest mb-2">
+                          {s.label}
                         </p>
-                      )}
-                      <p className="text-white/50 text-[11px] font-medium mt-2">{s.sub}</p>
+                        {s.loading ? (
+                          <div className="w-20 h-7 rounded-lg bg-white/20 animate-pulse" />
+                        ) : (
+                          <p className="text-3xl font-black text-white leading-none" title={s.fullValue}>
+                            {s.value}
+                          </p>
+                        )}
+                        <p className="text-white/50 text-[11px] font-medium mt-2">{s.sub}</p>
+                      </div>
+                      <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                        {s.icon}
+                      </div>
                     </div>
-                    <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                      {s.icon}
-                    </div>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                </motion.div>
-              ))}
-            </div>
+                    <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                  </motion.div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

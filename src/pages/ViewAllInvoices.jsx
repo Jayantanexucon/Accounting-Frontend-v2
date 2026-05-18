@@ -74,6 +74,7 @@ const InfoCell = ({ label, value, mono = false, className = "" }) => (
 ══════════════════════════════════════════════════════════ */
 const ViewAllInvoices = () => {
   const { user } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
 
   /* ── state (unchanged from original) ───────────────── */
   const [invoices, setInvoices] = useState([]);
@@ -485,35 +486,37 @@ const ViewAllInvoices = () => {
           </div>
 
           {/* ── STAT CARDS ─────────────────────────────── */}
-          <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            {STAT_CFG.map((s, idx) => {
-              const Icon = s.icon;
-              return (
-                <motion.div key={s.key}
-                  initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.07 }}
-                  className={`relative overflow-hidden rounded-2xl p-4 shadow-lg group ${s.label === "Total TDS" ? "cursor-pointer" : "cursor-default"}`}
-                  onClick={s.label === "Total TDS" ? () => setTdsDetailsModalOpen(true) : undefined}
-                  style={{ background: s.gradient }}
-                >
-                  <div className="absolute -top-6 -right-6 w-28 h-20 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
-                    style={{ background: `radial-gradient(ellipse,${s.glow},transparent)` }} />
-                  <div className="absolute top-0 right-8 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
-                  <div className="relative z-10 flex items-start justify-between">
-                    <div>
-                      <p className="text-white/70 text-[9px] font-black uppercase tracking-widest mb-1.5">{s.label}</p>
-                      <p className="text-xl font-black text-white leading-none tabular-nums">
-                        {s.fmt(summary[s.key] || 0)}
-                      </p>
+          {isAdminOrSuperAdmin && (
+            <div className="mt-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+              {STAT_CFG.map((s, idx) => {
+                const Icon = s.icon;
+                return (
+                  <motion.div key={s.key}
+                    initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.07 }}
+                    className={`relative overflow-hidden rounded-2xl p-4 shadow-lg group ${s.label === "Total TDS" ? "cursor-pointer" : "cursor-default"}`}
+                    onClick={s.label === "Total TDS" ? () => setTdsDetailsModalOpen(true) : undefined}
+                    style={{ background: s.gradient }}
+                  >
+                    <div className="absolute -top-6 -right-6 w-28 h-20 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
+                      style={{ background: `radial-gradient(ellipse,${s.glow},transparent)` }} />
+                    <div className="absolute top-0 right-8 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
+                    <div className="relative z-10 flex items-start justify-between">
+                      <div>
+                        <p className="text-white/70 text-[9px] font-black uppercase tracking-widest mb-1.5">{s.label}</p>
+                        <p className="text-xl font-black text-white leading-none tabular-nums">
+                          {s.fmt(summary[s.key] || 0)}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-white/20 rounded-xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                        <Icon size={16} className="text-white" />
+                      </div>
                     </div>
-                    <div className="p-2 bg-white/20 rounded-xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                      <Icon size={16} className="text-white" />
-                    </div>
-                  </div>
-                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-                </motion.div>
-              );
-            })}
-          </div>
+                    <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
 

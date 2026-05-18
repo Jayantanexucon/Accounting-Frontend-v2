@@ -33,6 +33,7 @@ const hasMeaningfulReportData = (report) => true; // Always show full format as 
 
 export default function ProfitLossStatement() {
   const { user, hasPermission } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const currentFYEnding = getCurrentFinancialYearEnding();
   const years = getFinancialYearOptions();
 
@@ -243,46 +244,48 @@ export default function ProfitLossStatement() {
         </div>
       </div>
 
-      <div className="px-6 py-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-emerald-200">Revenue</p>
-            <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalRevenue || 0)}</p>
-            <p className="mt-2 text-[11px] font-medium text-emerald-200/70">Schedule III income heads</p>
-          </div>
-          <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)" }}>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-red-200">Expenses</p>
-            <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalExpenses || 0)}</p>
-            <p className="mt-2 text-[11px] font-medium text-red-200/70">Mapped to statutory cost heads</p>
-          </div>
-          <div
-            className="rounded-2xl p-5 shadow-xl"
-            style={{
-              background:
-                (reportData?.summary?.profitForPeriod || 0) >= 0
-                  ? "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)"
-                  : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)",
-            }}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-white/75">
-                  {(reportData?.summary?.profitForPeriod || 0) >= 0 ? "Profit For Period" : "Loss For Period"}
-                </p>
-                <p className="text-2xl font-black text-white">
-                  {formatStatementAmount(reportData?.summary?.profitForPeriod || 0)}
-                </p>
-                <p className="mt-2 text-[11px] font-medium text-white/70">Transferred to reserves in Balance Sheet reporting</p>
+      {isAdminOrSuperAdmin && (
+        <div className="px-6 py-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-emerald-200">Revenue</p>
+              <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalRevenue || 0)}</p>
+              <p className="mt-2 text-[11px] font-medium text-emerald-200/70">Schedule III income heads</p>
+            </div>
+            <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)" }}>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-red-200">Expenses</p>
+              <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalExpenses || 0)}</p>
+              <p className="mt-2 text-[11px] font-medium text-red-200/70">Mapped to statutory cost heads</p>
+            </div>
+            <div
+              className="rounded-2xl p-5 shadow-xl"
+              style={{
+                background:
+                  (reportData?.summary?.profitForPeriod || 0) >= 0
+                    ? "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)"
+                    : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)",
+              }}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-white/75">
+                    {(reportData?.summary?.profitForPeriod || 0) >= 0 ? "Profit For Period" : "Loss For Period"}
+                  </p>
+                  <p className="text-2xl font-black text-white">
+                    {formatStatementAmount(reportData?.summary?.profitForPeriod || 0)}
+                  </p>
+                  <p className="mt-2 text-[11px] font-medium text-white/70">Transferred to reserves in Balance Sheet reporting</p>
+                </div>
+                {(reportData?.summary?.profitForPeriod || 0) >= 0 ? (
+                  <TrendingUp size={20} className="text-white" />
+                ) : (
+                  <TrendingDown size={20} className="text-white" />
+                )}
               </div>
-              {(reportData?.summary?.profitForPeriod || 0) >= 0 ? (
-                <TrendingUp size={20} className="text-white" />
-              ) : (
-                <TrendingDown size={20} className="text-white" />
-              )}
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="mb-4 px-6">
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">
