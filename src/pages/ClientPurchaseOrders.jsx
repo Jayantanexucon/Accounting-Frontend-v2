@@ -576,11 +576,17 @@ const ClientPurchaseOrders = () => {
                           <span className="text-sm font-semibold text-gray-900">
                             {po.poNumber}
                           </span>
-                          <span
-                            className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(getDerivedStatus(po))}`}
-                          >
-                            {getDerivedStatus(po)}
-                          </span>
+                          {po.approvalStatus === "Pending" ? (
+                            <span className="px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-orange-100 text-orange-800 border border-orange-200 uppercase tracking-wider">
+                              Pending Approval
+                            </span>
+                          ) : (
+                            <span
+                              className={`px-1.5 py-0.5 text-[10px] font-medium rounded-full ${getStatusColor(getDerivedStatus(po))}`}
+                            >
+                              {getDerivedStatus(po)}
+                            </span>
+                          )}
                           <Eye
                             className="h-3 w-3 text-blue-500 inline mr-1 cursor-pointer"
                             onClick={(e) => {
@@ -781,46 +787,54 @@ const ClientPurchaseOrders = () => {
 
                       {/* Action Buttons */}
                       <div className="flex flex-wrap gap-1 mt-4 pt-4 border-t border-gray-200">
-                        {canEditPO && (
-                          <Link
-                            to={`/purchase-order?edit=${po._id}`}
-                            className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"
-                          >
-                            <Edit className="h-3 w-3 mr-1.5" />
-                            Edit
-                          </Link>
+                        {po.approvalStatus === "Pending" ? (
+                          <span className="text-[10px] text-gray-400 font-medium italic">
+                            No actions allowed while pending approval
+                          </span>
+                        ) : (
+                          <>
+                            {canEditPO && (
+                              <Link
+                                to={`/purchase-order?edit=${po._id}`}
+                                className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"
+                              >
+                                <Edit className="h-3 w-3 mr-1.5" />
+                                Edit
+                              </Link>
+                            )}
+                            <button
+                              onClick={(e) =>
+                                handleDownloadPdf(po._id, po.poNumber, e)
+                              }
+                              className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
+                            >
+                              <Download className="h-3 w-3 mr-1.5" />
+                              PDF
+                            </button>
+                            <button
+                              onClick={(e) =>
+                                handleDownloadWord(po._id, po.poNumber, e)
+                              }
+                              className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
+                            >
+                              <Download className="h-3 w-3 mr-1.5" />
+                              Word
+                            </button>
+                            {canDeletePO && (
+                              <button
+                                onClick={(e) => handleDelete(po._id, e)}
+                                className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"
+                              >
+                                <Trash2 className="h-3 w-3 mr-1.5" />
+                                Delete
+                              </button>
+                            )}
+                            <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs">
+                              <Mail className="h-3 w-3 mr-1.5" />
+                              Email
+                            </button>
+                          </>
                         )}
-                        <button
-                          onClick={(e) =>
-                            handleDownloadPdf(po._id, po.poNumber, e)
-                          }
-                          className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
-                        >
-                          <Download className="h-3 w-3 mr-1.5" />
-                          PDF
-                        </button>
-                        <button
-                          onClick={(e) =>
-                            handleDownloadWord(po._id, po.poNumber, e)
-                          }
-                          className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"
-                        >
-                          <Download className="h-3 w-3 mr-1.5" />
-                          Word
-                        </button>
-                        {canDeletePO && (
-                          <button
-                            onClick={(e) => handleDelete(po._id, e)}
-                            className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"
-                          >
-                            <Trash2 className="h-3 w-3 mr-1.5" />
-                            Delete
-                          </button>
-                        )}
-                        <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs">
-                          <Mail className="h-3 w-3 mr-1.5" />
-                          Email
-                        </button>
                       </div>
                     </div>
                   )}

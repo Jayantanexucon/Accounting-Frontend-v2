@@ -14,6 +14,7 @@ import AuditLogSidebar from "../components/AuditLogSidebar";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { motion, AnimatePresence } from "framer-motion";
 import { checkAuthorization } from "../utils/checkAuthorization";
+import PurchaseOrderApproval from "../components/PurchaseOrderApproval";
 
 import {
   Search,
@@ -363,6 +364,7 @@ const PurchaseOrderData = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState("receivable"); // "receivable" or "payable"
+  const [approvalModalOpen, setApprovalModalOpen] = useState(false);
 
   const openClientDetails = (clientId) => { setSelectedClientId(clientId); setModalOpen(true); };
 
@@ -454,8 +456,8 @@ const PurchaseOrderData = () => {
   };
 
   // Filter POs by direction with useMemo for performance
-  const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable"), [purchaseOrders]);
-  const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable"), [purchaseOrders]);
+  const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
+  const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
   const currentPOs = useMemo(() => viewMode === "receivable" ? receivablePOs : payablePOs, [viewMode, receivablePOs, payablePOs]);
 
   // Stats derived from currentPOs
@@ -676,6 +678,15 @@ const PurchaseOrderData = () => {
                   <Upload size={13} className="text-emerald-500" />
                   Bulk
                 </Link>
+              )}
+              {isAdminOrSuperAdmin && (
+                <button
+                  onClick={() => setApprovalModalOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
+                >
+                  <CheckCircle size={13} className="text-emerald-500" />
+                  Approvals
+                </button>
               )}
               {canCreatePO && (
                 <Link
@@ -1054,6 +1065,10 @@ const PurchaseOrderData = () => {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         clientId={selectedClientId}
+      />
+      <PurchaseOrderApproval
+        open={approvalModalOpen}
+        onClose={() => { setApprovalModalOpen(false); fetchAllData(); }}
       />
 
     </div>

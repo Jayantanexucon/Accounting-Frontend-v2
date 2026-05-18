@@ -481,8 +481,10 @@ const getAvailableTabs = (po) => {
     tabs.push("paymentTerms");
   }
 
-  // Documents always makes sense
-  tabs.push("documents");
+  // Documents always makes sense (unless pending approval)
+  if (po.approvalStatus !== "Pending") {
+    tabs.push("documents");
+  }
 
   return tabs;
 };
@@ -803,7 +805,7 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              {po?._id && canCreateInvoice(po.status) && (
+              {po?._id && po.approvalStatus !== "Pending" && canCreateInvoice(po.status) && (
                 <button
                   onClick={() => { window.location.href = `/master-data/manual-invoice?poId=${po._id}`; }}
                   className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all text-xs font-bold flex items-center gap-1.5"
