@@ -1471,6 +1471,8 @@ const ManualInvoicePage = () => {
 
         const activePOs = poList.filter(
           (po) =>
+            po.approvalStatus !== "Pending" &&
+            po.approvalStatus !== "Rejected" &&
             !["CLOSED", "FULLY_INVOICED"].includes(po.status?.toUpperCase()) &&
             (po.remainingInvoicableAmount === undefined || Number(po.remainingInvoicableAmount) > 0 || Number(po.totalAmount) > Number(po.totalInvoicedAmount))
         );

@@ -182,9 +182,20 @@ export const completeMilestoneApi = async (poId, milestoneId, completionData) =>
   return data;
 };
 
-// ==================== Invoice Preview ====================
+// ==================== PO Approvals ====================
 
-export const getInvoicePreviewApi = async (poId, previewParams) => {
-  const { data } = await API.post(`/invoices/purchase-order/${poId}/invoice-preview`, previewParams);
+export const pendingApprovalPurchaseOrdersApi = async (companyId) => {
+  const { data } = await API.get("/invoices/purchase-order/approvals/pending", {
+    params: { companyId },
+  });
   return data;
 };
+
+export const updatePurchaseOrderApprovalApi = async (id, approvalStatus, approvalComments = "") => {
+  const { data } = await API.put(`/invoices/purchase-order/approvals/update/${id}`, {
+    approvalStatus,
+    approvalComments,
+  });
+  return data;
+};
+

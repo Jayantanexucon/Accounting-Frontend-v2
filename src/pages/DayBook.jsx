@@ -59,6 +59,7 @@ const SortIcon = ({ field, sort }) =>
 
 const DayBooks = () => {
   const { user } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const companyId = user?.company?._id;
 
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
@@ -746,66 +747,68 @@ const DayBooks = () => {
           </div>
 
           {/* Stat card */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" }}>
-              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse,#93c5fd,transparent)" }} />
-              <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
-                style={{ background: "radial-gradient(ellipse,#bfdbfe,transparent)" }} />
-              <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
-              <div className="absolute top-3 right-3 w-12 h-12 rounded-full border-2 border-white/15" />
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Entries</p>
-                  <p className="text-4xl font-black text-white leading-none">{filteredJournals.length}</p>
-                  <p className="text-blue-200/60 text-[11px] font-medium mt-2">Matching current filters</p>
+          {isAdminOrSuperAdmin && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" }}>
+                <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse,#93c5fd,transparent)" }} />
+                <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
+                  style={{ background: "radial-gradient(ellipse,#bfdbfe,transparent)" }} />
+                <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
+                <div className="absolute top-3 right-3 w-12 h-12 rounded-full border-2 border-white/15" />
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Entries</p>
+                    <p className="text-4xl font-black text-white leading-none">{filteredJournals.length}</p>
+                    <p className="text-blue-200/60 text-[11px] font-medium mt-2">Matching current filters</p>
+                  </div>
+                  <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                    <FileText size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                  <FileText size={22} className="text-white" />
-                </div>
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               </div>
-              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </div>
 
-            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
-              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse,#6ee7b7,transparent)" }} />
-              <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full border-4 border-white/10" />
-              <div className="absolute top-0 left-16 w-0.5 h-full bg-white/15 -rotate-12 scale-y-150" />
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Journals</p>
-                  <p className="text-4xl font-black text-white leading-none">{journals.length}</p>
-                  <p className="text-emerald-200/60 text-[11px] font-medium mt-2">All loaded records</p>
+              <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
+                <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse,#6ee7b7,transparent)" }} />
+                <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full border-4 border-white/10" />
+                <div className="absolute top-0 left-16 w-0.5 h-full bg-white/15 -rotate-12 scale-y-150" />
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Journals</p>
+                    <p className="text-4xl font-black text-white leading-none">{journals.length}</p>
+                    <p className="text-emerald-200/60 text-[11px] font-medium mt-2">All loaded records</p>
+                  </div>
+                  <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                    <BookOpen size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                  <BookOpen size={22} className="text-white" />
-                </div>
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               </div>
-              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </div>
 
-            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
-              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse,#fde68a,transparent)" }} />
-              <div className="absolute top-3 right-3 w-14 h-14 rounded-full border-2 border-white/15" />
-              <div className="absolute top-6 right-6 w-7 h-7 rounded-full border border-white/10" />
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-amber-200 text-[10px] font-black uppercase tracking-widest mb-2">Voucher Types</p>
-                  <p className="text-4xl font-black text-white leading-none">{voucherTypeOptions.length}</p>
-                  <p className="text-amber-200/60 text-[11px] font-medium mt-2">Distinct categories</p>
+              <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
+                <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse,#fde68a,transparent)" }} />
+                <div className="absolute top-3 right-3 w-14 h-14 rounded-full border-2 border-white/15" />
+                <div className="absolute top-6 right-6 w-7 h-7 rounded-full border border-white/10" />
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-amber-200 text-[10px] font-black uppercase tracking-widest mb-2">Voucher Types</p>
+                    <p className="text-4xl font-black text-white leading-none">{voucherTypeOptions.length}</p>
+                    <p className="text-amber-200/60 text-[11px] font-medium mt-2">Distinct categories</p>
+                  </div>
+                  <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
+                    <Tag size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm group-hover:scale-110 transition-transform shadow-lg">
-                  <Tag size={22} className="text-white" />
-                </div>
+                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
               </div>
-              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
             </div>
-          </div>
+          )}
 
           {/* Active Filter Badges */}
           {(searchQuery || Object.values(filters).some((val, index) => {

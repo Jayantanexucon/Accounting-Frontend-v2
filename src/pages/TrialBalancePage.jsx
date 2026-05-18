@@ -24,6 +24,7 @@ export default function TrialBalancePage() {
   // const [accountData, setAccountData] = useState([]);
   // const [loading, setLoading] = useState(false);
   const { user, hasPermission } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -426,10 +427,12 @@ export default function TrialBalancePage() {
                 <p className="text-[11px] text-slate-400 font-medium">{getPeriodLabel()} · {trialBalance.length} accounts</p>
               </div>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-600">
-              <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
-              {formatCurrency(totals.debit)} Dr / {formatCurrency(totals.credit)} Cr
-            </div>
+            {isAdminOrSuperAdmin && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-600">
+                <TrendingUp className="h-3.5 w-3.5 text-blue-500" />
+                {formatCurrency(totals.debit)} Dr / {formatCurrency(totals.credit)} Cr
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -494,67 +497,69 @@ export default function TrialBalancePage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="px-6 py-5">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {isAdminOrSuperAdmin && (
+        <div className="px-6 py-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-          {/* Total Debit */}
-          <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-            style={{ background: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)" }}>
-            <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-              style={{ background: "radial-gradient(ellipse,#fca5a5,transparent)" }} />
-            <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
-              style={{ background: "radial-gradient(ellipse,#fecaca,transparent)" }} />
-            <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
-            <div className="relative z-10 flex items-start justify-between">
-              <div>
-                <p className="text-red-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Debit</p>
-                <p className="text-2xl font-black text-white leading-none">{formatCurrency(totals.debit)}</p>
-                <p className="text-red-200/60 text-[11px] font-medium mt-2">{trialBalance.filter(a => a.debit > 0).length} accounts</p>
+            {/* Total Debit */}
+            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+              style={{ background: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)" }}>
+              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                style={{ background: "radial-gradient(ellipse,#fca5a5,transparent)" }} />
+              <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
+                style={{ background: "radial-gradient(ellipse,#fecaca,transparent)" }} />
+              <div className="absolute top-0 right-14 w-0.5 h-full bg-white/20 rotate-12 scale-y-150" />
+              <div className="relative z-10 flex items-start justify-between">
+                <div>
+                  <p className="text-red-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Debit</p>
+                  <p className="text-2xl font-black text-white leading-none">{formatCurrency(totals.debit)}</p>
+                  <p className="text-red-200/60 text-[11px] font-medium mt-2">{trialBalance.filter(a => a.debit > 0).length} accounts</p>
+                </div>
+                <div className="px-3 py-1.5 bg-white/20 rounded-xl border border-white/25 text-white font-black text-sm backdrop-blur-sm">Dr</div>
               </div>
-              <div className="px-3 py-1.5 bg-white/20 rounded-xl border border-white/25 text-white font-black text-sm backdrop-blur-sm">Dr</div>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
             </div>
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          </div>
 
-          {/* Total Credit */}
-          <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-            style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
-            <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-              style={{ background: "radial-gradient(ellipse,#6ee7b7,transparent)" }} />
-            <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
-              style={{ background: "radial-gradient(ellipse,#a7f3d0,transparent)" }} />
-            <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full border-4 border-white/10" />
-            <div className="relative z-10 flex items-start justify-between">
-              <div>
-                <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Credit</p>
-                <p className="text-2xl font-black text-white leading-none">{formatCurrency(totals.credit)}</p>
-                <p className="text-emerald-200/60 text-[11px] font-medium mt-2">{trialBalance.filter(a => a.credit > 0).length} accounts</p>
+            {/* Total Credit */}
+            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+              style={{ background: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)" }}>
+              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                style={{ background: "radial-gradient(ellipse,#6ee7b7,transparent)" }} />
+              <div className="absolute -bottom-5 -left-5 w-28 h-20 rounded-full opacity-20 blur-xl"
+                style={{ background: "radial-gradient(ellipse,#a7f3d0,transparent)" }} />
+              <div className="absolute -bottom-4 -right-4 w-20 h-20 rounded-full border-4 border-white/10" />
+              <div className="relative z-10 flex items-start justify-between">
+                <div>
+                  <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Credit</p>
+                  <p className="text-2xl font-black text-white leading-none">{formatCurrency(totals.credit)}</p>
+                  <p className="text-emerald-200/60 text-[11px] font-medium mt-2">{trialBalance.filter(a => a.credit > 0).length} accounts</p>
+                </div>
+                <div className="px-3 py-1.5 bg-white/20 rounded-xl border border-white/25 text-white font-black text-sm backdrop-blur-sm">Cr</div>
               </div>
-              <div className="px-3 py-1.5 bg-white/20 rounded-xl border border-white/25 text-white font-black text-sm backdrop-blur-sm">Cr</div>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
             </div>
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-          </div>
 
-          {/* Balance Status */}
-          <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
-            style={{ background: isBalanced ? "linear-gradient(135deg,#064e3b 0%,#16a34a 55%,#4ade80 100%)" : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
-            <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-              style={{ background: `radial-gradient(ellipse,${isBalanced ? "#86efac" : "#fde68a"},transparent)` }} />
-            <div className="absolute top-3 right-3 w-12 h-12 rounded-full border-2 border-white/15" />
-            <div className="relative z-10 flex items-start justify-between">
-              <div>
-                <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${isBalanced ? "text-green-200" : "text-amber-200"}`}>Balance Status</p>
-                <p className="text-xl font-black text-white leading-none">{isBalanced ? "Balanced ✓" : `Diff: ${formatCurrency(Math.abs(totals.debit - totals.credit))}`}</p>
-                <p className={`text-[11px] font-medium mt-2 ${isBalanced ? "text-green-200/60" : "text-amber-200/60"}`}>{trialBalance.length} total accounts</p>
+            {/* Balance Status */}
+            <div className="relative overflow-hidden rounded-2xl p-5 shadow-xl group cursor-default"
+              style={{ background: isBalanced ? "linear-gradient(135deg,#064e3b 0%,#16a34a 55%,#4ade80 100%)" : "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
+              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                style={{ background: `radial-gradient(ellipse,${isBalanced ? "#86efac" : "#fde68a"},transparent)` }} />
+              <div className="absolute top-3 right-3 w-12 h-12 rounded-full border-2 border-white/15" />
+              <div className="relative z-10 flex items-start justify-between">
+                <div>
+                  <p className={`text-[10px] font-black uppercase tracking-widest mb-2 ${isBalanced ? "text-green-200" : "text-amber-200"}`}>Balance Status</p>
+                  <p className="text-xl font-black text-white leading-none">{isBalanced ? "Balanced ✓" : `Diff: ${formatCurrency(Math.abs(totals.debit - totals.credit))}`}</p>
+                  <p className={`text-[11px] font-medium mt-2 ${isBalanced ? "text-green-200/60" : "text-amber-200/60"}`}>{trialBalance.length} total accounts</p>
+                </div>
+                <div className={`p-2.5 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm`}>
+                  {isBalanced ? <CheckCircle size={20} className="text-white" /> : <AlertCircle size={20} className="text-white" />}
+                </div>
               </div>
-              <div className={`p-2.5 bg-white/20 rounded-2xl border border-white/25 backdrop-blur-sm`}>
-                {isBalanced ? <CheckCircle size={20} className="text-white" /> : <AlertCircle size={20} className="text-white" />}
-              </div>
+              <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
             </div>
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           </div>
         </div>
-      </div>
+      )}
 
       {/* Period Info */}
       <div className="px-6 mb-4">

@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 export default function ClientPage() {
   const { user } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const company = localStorage.getItem("selectedCompany")
     ? JSON.parse(localStorage.getItem("selectedCompany"))
     : null;
@@ -97,7 +98,7 @@ const activeCount = clientData.filter((c) => c.isActive).length;
                 className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 shadow-sm transition-all">
                 <RefreshCw size={13} className="text-slate-400" /> Audit Trail
               </button>
-              {canEditClient && (
+              {isAdminOrSuperAdmin && canEditClient && (
                 <button onClick={() => toggleModal("approvals")}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl hover:bg-amber-100 transition-all">
                   <CircleCheckBig size={13} /> Approvals

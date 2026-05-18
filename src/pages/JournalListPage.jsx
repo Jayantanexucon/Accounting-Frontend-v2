@@ -81,6 +81,7 @@ const [loadingStats, setLoadingStats] = useState(false);
 
   const { user } = useAuth();
   const isAdmin = user?.role === "admin"  || user?.role === "superAdmin" || user?.privilege?.masterUpdate === true;
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const canCreateJournal = checkAuthorization(user, "JOURNAL", "CREATE");
   const canEditJournal = checkAuthorization(user, "JOURNAL", "EDIT");
   const canDeleteJournal = checkAuthorization(user, "JOURNAL", "DELETE");
@@ -941,110 +942,112 @@ const [loadingStats, setLoadingStats] = useState(false);
             </div>
           </div>
 
-          <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-5">
-            {/* ── Card 1: Total Journals ── */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.05 }}
-              className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #60a5fa 100%)" }}
-            >
-              {/* large oval blob — top right */}
-              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-20 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse, #93c5fd, transparent)" }} />
-              {/* small oval — bottom left */}
-              <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-25 blur-xl"
-                style={{ background: "radial-gradient(ellipse, #bfdbfe, transparent)" }} />
-              {/* diagonal streak */}
-              <div className="absolute top-0 right-12 w-1 h-full bg-white/10 rotate-12 scale-y-150" />
+          {isAdminOrSuperAdmin && (
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-5">
+              {/* ── Card 1: Total Journals ── */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.05 }}
+                className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg, #1e3a8a 0%, #2563eb 55%, #60a5fa 100%)" }}
+              >
+                {/* large oval blob — top right */}
+                <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-20 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse, #93c5fd, transparent)" }} />
+                {/* small oval — bottom left */}
+                <div className="absolute -bottom-6 -left-6 w-28 h-20 rounded-full opacity-25 blur-xl"
+                  style={{ background: "radial-gradient(ellipse, #bfdbfe, transparent)" }} />
+                {/* diagonal streak */}
+                <div className="absolute top-0 right-12 w-1 h-full bg-white/10 rotate-12 scale-y-150" />
 
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Journals</p>
-                  <p className="text-3xl font-black text-white leading-none">
-                    {loadingStats ? <span className="opacity-40 animate-pulse text-xl">···</span> : stats.journalCount || 0}
-                  </p>
-                  <p className="text-blue-200/70 text-[11px] font-medium mt-2">All recorded entries</p>
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-blue-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Journals</p>
+                    <p className="text-3xl font-black text-white leading-none">
+                      {loadingStats ? <span className="opacity-40 animate-pulse text-xl">···</span> : stats.journalCount || 0}
+                    </p>
+                    <p className="text-blue-200/70 text-[11px] font-medium mt-2">All recorded entries</p>
+                  </div>
+                  <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                    <TbFileInvoice size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                  <TbFileInvoice size={22} className="text-white" />
-                </div>
-              </div>
 
-              {/* bottom accent line */}
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </motion.div>
+                {/* bottom accent line */}
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              </motion.div>
 
-            {/* ── Card 2: Total Volume ── */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.12 }}
-              className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg, #064e3b 0%, #059669 55%, #34d399 100%)" }}
-            >
-              {/* large oval — top right */}
-              <div className="absolute -top-10 -right-10 w-44 h-32 rounded-full opacity-20 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse, #6ee7b7, transparent)" }} />
-              {/* oval — bottom left */}
-              <div className="absolute -bottom-8 -left-4 w-32 h-24 rounded-full opacity-20 blur-xl"
-                style={{ background: "radial-gradient(ellipse, #a7f3d0, transparent)" }} />
-              {/* ring shape */}
-              <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full border-4 border-white/10 opacity-40" />
-              {/* diagonal streak */}
-              <div className="absolute top-0 left-16 w-0.5 h-full bg-white/10 -rotate-12 scale-y-150" />
+              {/* ── Card 2: Total Volume ── */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.12 }}
+                className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg, #064e3b 0%, #059669 55%, #34d399 100%)" }}
+              >
+                {/* large oval — top right */}
+                <div className="absolute -top-10 -right-10 w-44 h-32 rounded-full opacity-20 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse, #6ee7b7, transparent)" }} />
+                {/* oval — bottom left */}
+                <div className="absolute -bottom-8 -left-4 w-32 h-24 rounded-full opacity-20 blur-xl"
+                  style={{ background: "radial-gradient(ellipse, #a7f3d0, transparent)" }} />
+                {/* ring shape */}
+                <div className="absolute -bottom-4 -right-4 w-24 h-24 rounded-full border-4 border-white/10 opacity-40" />
+                {/* diagonal streak */}
+                <div className="absolute top-0 left-16 w-0.5 h-full bg-white/10 -rotate-12 scale-y-150" />
 
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Volume</p>
-                  <p className="text-3xl font-black text-white leading-none">
-                    {loadingStats
-                      ? <span className="opacity-40 animate-pulse text-xl">···</span>
-                      : `₹${formatAmount(stats.totalAmount || 0)}`}
-                  </p>
-                  <p className="text-emerald-200/70 text-[11px] font-medium mt-2">Cumulative transaction value</p>
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-emerald-200 text-[10px] font-black uppercase tracking-widest mb-2">Total Volume</p>
+                    <p className="text-3xl font-black text-white leading-none">
+                      {loadingStats
+                        ? <span className="opacity-40 animate-pulse text-xl">···</span>
+                        : `₹${formatAmount(stats.totalAmount || 0)}`}
+                    </p>
+                    <p className="text-emerald-200/70 text-[11px] font-medium mt-2">Cumulative transaction value</p>
+                  </div>
+                  <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                    <FiDollarSign size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                  <FiDollarSign size={22} className="text-white" />
-                </div>
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </motion.div>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              </motion.div>
 
-            {/* ── Card 3: Pending Approvals ── */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.19 }}
-              className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
-              style={{ background: "linear-gradient(135deg, #92400e 0%, #d97706 55%, #fbbf24 100%)" }}
-            >
-              {/* large oval — top right */}
-              <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
-                style={{ background: "radial-gradient(ellipse, #fde68a, transparent)" }} />
-              {/* oval — bottom left */}
-              <div className="absolute -bottom-6 -left-6 w-32 h-20 rounded-full opacity-20 blur-xl"
-                style={{ background: "radial-gradient(ellipse, #fef3c7, transparent)" }} />
-              {/* ring */}
-              <div className="absolute top-2 right-2 w-16 h-16 rounded-full border-2 border-white/15" />
-              <div className="absolute top-5 right-5 w-8 h-8 rounded-full border border-white/10" />
+              {/* ── Card 3: Pending Approvals ── */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.19 }}
+                className="relative overflow-hidden rounded-2xl p-6 shadow-xl group cursor-default"
+                style={{ background: "linear-gradient(135deg, #92400e 0%, #d97706 55%, #fbbf24 100%)" }}
+              >
+                {/* large oval — top right */}
+                <div className="absolute -top-8 -right-8 w-40 h-28 rounded-full opacity-25 blur-2xl group-hover:scale-110 transition-transform duration-700"
+                  style={{ background: "radial-gradient(ellipse, #fde68a, transparent)" }} />
+                {/* oval — bottom left */}
+                <div className="absolute -bottom-6 -left-6 w-32 h-20 rounded-full opacity-20 blur-xl"
+                  style={{ background: "radial-gradient(ellipse, #fef3c7, transparent)" }} />
+                {/* ring */}
+                <div className="absolute top-2 right-2 w-16 h-16 rounded-full border-2 border-white/15" />
+                <div className="absolute top-5 right-5 w-8 h-8 rounded-full border border-white/10" />
 
-              <div className="relative z-10 flex items-start justify-between">
-                <div>
-                  <p className="text-amber-200 text-[10px] font-black uppercase tracking-widest mb-2">Pending Approvals</p>
-                  <p className="text-3xl font-black text-white leading-none">
-                    {pendingApprovalsCount}
-                  </p>
-                  <p className="text-amber-200/70 text-[11px] font-medium mt-2">Awaiting admin action</p>
+                <div className="relative z-10 flex items-start justify-between">
+                  <div>
+                    <p className="text-amber-200 text-[10px] font-black uppercase tracking-widest mb-2">Pending Approvals</p>
+                    <p className="text-3xl font-black text-white leading-none">
+                      {pendingApprovalsCount}
+                    </p>
+                    <p className="text-amber-200/70 text-[11px] font-medium mt-2">Awaiting admin action</p>
+                  </div>
+                  <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                    <FiClock size={22} className="text-white" />
+                  </div>
                 </div>
-                <div className="p-3 bg-white/15 rounded-2xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                  <FiClock size={22} className="text-white" />
-                </div>
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-            </motion.div>
-          </div>
+                <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
+              </motion.div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -34,6 +34,7 @@ const hasMeaningfulBalanceSheetData = (report) => true; // Always show full form
 
 export default function BalanceSheetPage() {
   const { user, hasPermission } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const currentFYEnding = getCurrentFinancialYearEnding();
   const years = getFinancialYearOptions();
 
@@ -243,45 +244,47 @@ export default function BalanceSheetPage() {
         </div>
       </div>
 
-      <div className="px-6 py-5">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-          <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" }}>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-blue-200">Assets</p>
-            <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalAssets || 0)}</p>
-            <p className="mt-2 text-[11px] font-medium text-blue-200/70">Schedule III asset heads</p>
-          </div>
-          <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-amber-200">Equity & Liabilities</p>
-            <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalEquityLiabilities || 0)}</p>
-            <p className="mt-2 text-[11px] font-medium text-amber-200/70">Includes P&amp;L transfer to reserves</p>
-          </div>
-          <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)" }}>
-            <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-violet-200">P&amp;L to Reserves</p>
-            <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.profitTransferredToReserves || 0)}</p>
-            <p className="mt-2 text-[11px] font-medium text-violet-200/70">Reporting-level statutory adjustment</p>
-          </div>
-          <div
-            className="rounded-2xl p-5 shadow-xl"
-            style={{
-              background:
-                reportData?.summary?.isBalanced
-                  ? "linear-gradient(135deg,#065f46 0%,#059669 55%,#34d399 100%)"
-                  : "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)",
-            }}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-white/75">Balance Check</p>
-                <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.difference || 0)}</p>
-                <p className="mt-2 text-[11px] font-medium text-white/70">
-                  {reportData?.summary?.isBalanced ? "Assets equal Equity and Liabilities" : "Difference after aggregation"}
-                </p>
+      {isAdminOrSuperAdmin && (
+        <div className="px-6 py-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)" }}>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-blue-200">Assets</p>
+              <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalAssets || 0)}</p>
+              <p className="mt-2 text-[11px] font-medium text-blue-200/70">Schedule III asset heads</p>
+            </div>
+            <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#78350f 0%,#d97706 55%,#fbbf24 100%)" }}>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-amber-200">Equity & Liabilities</p>
+              <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.totalEquityLiabilities || 0)}</p>
+              <p className="mt-2 text-[11px] font-medium text-amber-200/70">Includes P&amp;L transfer to reserves</p>
+            </div>
+            <div className="rounded-2xl p-5 shadow-xl" style={{ background: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)" }}>
+              <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-violet-200">P&amp;L to Reserves</p>
+              <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.profitTransferredToReserves || 0)}</p>
+              <p className="mt-2 text-[11px] font-medium text-violet-200/70">Reporting-level statutory adjustment</p>
+            </div>
+            <div
+              className="rounded-2xl p-5 shadow-xl"
+              style={{
+                background:
+                  reportData?.summary?.isBalanced
+                    ? "linear-gradient(135deg,#065f46 0%,#059669 55%,#34d399 100%)"
+                    : "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)",
+              }}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-white/75">Balance Check</p>
+                  <p className="text-2xl font-black text-white">{formatStatementAmount(reportData?.summary?.difference || 0)}</p>
+                  <p className="mt-2 text-[11px] font-medium text-white/70">
+                    {reportData?.summary?.isBalanced ? "Assets equal Equity and Liabilities" : "Difference after aggregation"}
+                  </p>
+                </div>
+                <Scale size={20} className="text-white" />
               </div>
-              <Scale size={20} className="text-white" />
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="mb-4 px-6">
         <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-3 shadow-sm">

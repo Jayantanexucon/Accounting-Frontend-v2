@@ -61,6 +61,7 @@ import InvoiceDetailModal from "../modals/InvoiceDetailsModal";
 
 const InvoiceData = () => {
   const { user, hasPermission } = useAuth();
+  const isAdminOrSuperAdmin = user?.role === "admin" || user?.role === "superAdmin";
   const canViewInvoice = hasPermission("INVOICE", "VIEW");
   const canCreateInvoice = hasPermission("INVOICE", "CREATE");
   const canEditInvoice = hasPermission("INVOICE", "EDIT");
@@ -818,7 +819,7 @@ const InvoiceData = () => {
                   Pending Invoices
                 </button>
               )}
-              {canEditInvoice && (
+              {isAdminOrSuperAdmin && canEditInvoice && (
                   <button
                     onClick={() => setApprovalModalOpen(true)}
                     className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
@@ -946,89 +947,91 @@ const InvoiceData = () => {
         </div>
 
         {/* ── STAT CARDS inside header ── */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-5">
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            {[
-              {
-                label: "Total Invoices",
-                value: String(summary.totalInvoices || 0),
-                g: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)",
-                blob: "#93c5fd",
-                icon: FileText,
-              },
-              {
-                label: "Total Received",
-                value: `₹${formatAmount(summary.totalReceivedAmount)}`,
-                g: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
-                blob: "#6ee7b7",
-                icon: CheckCircle2,
-              },
-              {
-                label: "Pending Payment",
-                value: `₹${formatAmount(summary.totalPendingAmount)}`,
-                g: "linear-gradient(135deg,#92400e 0%,#d97706 55%,#fbbf24 100%)",
-                blob: "#fde68a",
-                icon: Clock,
-              },
-              {
-                label: "Total Revenue",
-                value: `₹${formatAmount(summary.totalAmount)}`,
-                g: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)",
-                blob: "#c4b5fd",
-                icon: TrendingUp,
-              },
-              {
-                label: "Total TDS",
-                value: `₹${formatAmount(summary.totalTDS)}`,
-                g: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)",
-                blob: "#fca5a5",
-                icon: Percent,
-              },
-            ].map((s, i) => (
-              <motion.div
-                key={i}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.06 }}
-                className={`relative overflow-hidden rounded-2xl p-4 shadow-lg group ${s.label === "Total TDS" ? "cursor-pointer" : "cursor-default"}`}
-                style={{ background: s.g }}
-                onClick={
-                  s.label === "Total TDS"
-                    ? () => setTdsDetailsModalOpen(true)
-                    : undefined
-                }
-              >
-                <div
-                  className="absolute -top-6 -right-6 w-20 h-16 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
-                  style={{
-                    background: `radial-gradient(ellipse,${s.blob},transparent)`,
-                  }}
-                />
-                <div
-                  className="absolute -bottom-4 -left-4 w-14 h-10 rounded-full opacity-15 blur-xl"
-                  style={{
-                    background: `radial-gradient(ellipse,${s.blob},transparent)`,
-                  }}
-                />
-                <div className="absolute top-0 right-10 w-px h-full bg-white/15 rotate-12 scale-y-150" />
-                <div className="relative z-10 flex items-start justify-between">
-                  <div>
-                    <p className="text-[9px] font-black text-white/60 uppercase tracking-widest mb-1">
-                      {s.label}
-                    </p>
-                    <p className="text-sm font-black text-white leading-tight">
-                      {s.value}
-                    </p>
+        {isAdminOrSuperAdmin && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-5">
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              {[
+                {
+                  label: "Total Invoices",
+                  value: String(summary.totalInvoices || 0),
+                  g: "linear-gradient(135deg,#1e3a8a 0%,#2563eb 55%,#60a5fa 100%)",
+                  blob: "#93c5fd",
+                  icon: FileText,
+                },
+                {
+                  label: "Total Received",
+                  value: `₹${formatAmount(summary.totalReceivedAmount)}`,
+                  g: "linear-gradient(135deg,#064e3b 0%,#059669 55%,#34d399 100%)",
+                  blob: "#6ee7b7",
+                  icon: CheckCircle2,
+                },
+                {
+                  label: "Pending Payment",
+                  value: `₹${formatAmount(summary.totalPendingAmount)}`,
+                  g: "linear-gradient(135deg,#92400e 0%,#d97706 55%,#fbbf24 100%)",
+                  blob: "#fde68a",
+                  icon: Clock,
+                },
+                {
+                  label: "Total Revenue",
+                  value: `₹${formatAmount(summary.totalAmount)}`,
+                  g: "linear-gradient(135deg,#312e81 0%,#7c3aed 55%,#a78bfa 100%)",
+                  blob: "#c4b5fd",
+                  icon: TrendingUp,
+                },
+                {
+                  label: "Total TDS",
+                  value: `₹${formatAmount(summary.totalTDS)}`,
+                  g: "linear-gradient(135deg,#7f1d1d 0%,#dc2626 55%,#fca5a5 100%)",
+                  blob: "#fca5a5",
+                  icon: Percent,
+                },
+              ].map((s, i) => (
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: i * 0.06 }}
+                  className={`relative overflow-hidden rounded-2xl p-4 shadow-lg group ${s.label === "Total TDS" ? "cursor-pointer" : "cursor-default"}`}
+                  style={{ background: s.g }}
+                  onClick={
+                    s.label === "Total TDS"
+                      ? () => setTdsDetailsModalOpen(true)
+                      : undefined
+                  }
+                >
+                  <div
+                    className="absolute -top-6 -right-6 w-20 h-16 rounded-full opacity-25 blur-2xl group-hover:scale-125 transition-transform duration-700"
+                    style={{
+                      background: `radial-gradient(ellipse,${s.blob},transparent)`,
+                    }}
+                  />
+                  <div
+                    className="absolute -bottom-4 -left-4 w-14 h-10 rounded-full opacity-15 blur-xl"
+                    style={{
+                      background: `radial-gradient(ellipse,${s.blob},transparent)`,
+                    }}
+                  />
+                  <div className="absolute top-0 right-10 w-px h-full bg-white/15 rotate-12 scale-y-150" />
+                  <div className="relative z-10 flex items-start justify-between">
+                    <div>
+                      <p className="text-[9px] font-black text-white/60 uppercase tracking-widest mb-1">
+                        {s.label}
+                      </p>
+                      <p className="text-sm font-black text-white leading-tight">
+                        {s.value}
+                      </p>
+                    </div>
+                    <div className="p-2 bg-white/20 rounded-xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
+                      <s.icon size={14} className="text-white" />
+                    </div>
                   </div>
-                  <div className="p-2 bg-white/20 rounded-xl border border-white/20 backdrop-blur-sm group-hover:scale-110 transition-transform">
-                    <s.icon size={14} className="text-white" />
-                  </div>
-                </div>
-                <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
-              </motion.div>
-            ))}
+                  <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
+                </motion.div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* ── MAIN CONTENT ───────────────────────────────────── */}
