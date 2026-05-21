@@ -1,4 +1,4 @@
-// import { API } from "../../apis/api";
+import { API } from "../../apis/api";
 
 // export const getNotificationsApi = async ({ params = {}, companyId } = {}) => {
 //   const { data } = await API.get("/notifications", {
@@ -23,7 +23,7 @@
 //   const { data } = await API.get("/notifications/socket-token");
 //   return data;
 // };
-const ENABLE_NOTIFICATIONS_API = false;
+const ENABLE_NOTIFICATIONS_API = true;
 export const getNotificationsApi = async ({ params = {}, companyId } = {}) => {
   if (!ENABLE_NOTIFICATIONS_API) {
     return { data: [] }; // mock response

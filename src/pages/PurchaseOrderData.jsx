@@ -459,6 +459,7 @@ const PurchaseOrderData = () => {
   const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
   const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
   const currentPOs = useMemo(() => viewMode === "receivable" ? receivablePOs : payablePOs, [viewMode, receivablePOs, payablePOs]);
+  const pendingApprovalsCount = useMemo(() => purchaseOrders.filter(po => po.approvalStatus === "Pending").length, [purchaseOrders]);
 
   // Stats derived from currentPOs
   const totalPOs = currentPOs.length;
@@ -682,10 +683,15 @@ const PurchaseOrderData = () => {
               {isAdminOrSuperAdmin && (
                 <button
                   onClick={() => setApprovalModalOpen(true)}
-                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
+                  className="relative flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
                 >
                   <CheckCircle size={13} className="text-emerald-500" />
                   Approvals
+                  {pendingApprovalsCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white shadow-sm ring-2 ring-white">
+                      {pendingApprovalsCount > 9 ? "9+" : pendingApprovalsCount}
+                    </span>
+                  )}
                 </button>
               )}
               {canCreatePO && (

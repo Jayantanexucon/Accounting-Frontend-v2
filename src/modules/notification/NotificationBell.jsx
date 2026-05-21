@@ -81,9 +81,9 @@ export default function NotificationBell({
         }`}
       >
         <div className="relative">
-          <Bell className={`h-5 w-5 transition-transform duration-300 ${open ? "scale-110 text-blue-600" : ""}`} />
+          <Bell className={`h-5 w-5 transition-all duration-300 ${open ? "scale-110 text-blue-600 drop-shadow-md" : ""}`} />
           {unreadCount > 0 && (
-            <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white shadow-[0_0_8px_rgba(239,68,68,0.5)] ring-2 ring-white">
+            <span className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-[9px] font-black text-white shadow-[0_0_10px_rgba(244,63,94,0.6)] ring-2 ring-white animate-pulse">
               {unreadCount > 9 ? "9+" : unreadCount}
             </span>
           )}
@@ -93,7 +93,7 @@ export default function NotificationBell({
 
       {open && (
         <div
-          className={`absolute z-50 mt-3 w-[380px] origin-top rounded-3xl border border-slate-100 bg-white p-5 shadow-[0_20px_50px_rgba(0,0,0,0.15)] animate-in fade-in zoom-in-95 duration-300 ${
+          className={`absolute z-50 mt-3 w-[380px] origin-top rounded-3xl border border-white/50 bg-white/80 p-5 shadow-[0_20px_50px_rgba(0,0,0,0.15)] backdrop-blur-xl animate-in fade-in zoom-in-95 duration-300 ${
             collapsed
               ? "left-14 bottom-0"
               : align === "left"
@@ -120,8 +120,8 @@ export default function NotificationBell({
 
           <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1 custom-scrollbar">
             {visibleNotifications.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center">
-                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-50 text-slate-300">
+              <div className="rounded-2xl border border-dashed border-slate-200/60 bg-white/50 px-4 py-10 text-center backdrop-blur-sm">
+                <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100 shadow-inner text-slate-400">
                   <Bell className="h-6 w-6" />
                 </div>
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Quiet for now</p>

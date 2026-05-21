@@ -71,13 +71,13 @@ export default function NotificationPage() {
 
       <div className="mx-auto max-w-5xl px-6 py-8">
         {loading ? (
-          <div className="flex flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 py-20 text-center shadow-sm">
+          <div className="flex flex-col items-center justify-center rounded-3xl border border-white/50 bg-white/60 px-6 py-20 text-center shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-md">
             <div className="h-12 w-12 border-4 border-blue-600/20 border-t-blue-600 rounded-full animate-spin mb-4" />
             <p className="text-sm font-bold text-slate-500 uppercase tracking-widest">Refreshing Feed...</p>
           </div>
         ) : notifications.length === 0 ? (
-          <div className="rounded-3xl border-2 border-dashed border-slate-200 bg-white px-6 py-20 text-center shadow-sm">
-             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-50 text-slate-300">
+          <div className="rounded-3xl border border-white/50 bg-white/60 px-6 py-20 text-center shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-md transition-all">
+             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[20px] bg-gradient-to-br from-blue-50 to-indigo-50 text-blue-400 shadow-inner">
                 <BellRing className="h-8 w-8" />
              </div>
             <p className="text-xl font-black text-slate-900 tracking-tight">Everything caught up</p>

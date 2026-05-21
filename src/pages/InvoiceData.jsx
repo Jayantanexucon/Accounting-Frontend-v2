@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Outlet, useNavigate } from "react-router-dom";
@@ -144,10 +144,12 @@ const InvoiceData = () => {
   };
 
   // Fetch all invoices for dropdown options
+  const [pendingApprovalsCount, setPendingApprovalsCount] = useState(0);
+
   useEffect(() => {
     const fetchAllInvoices = async () => {
-      try {
-        const response = await getInvoicesApi(user.company._id, {
+      if (!user?.company?._id) return;
+      try { const response = await getInvoicesApi(user.company._id, {
           page: 1,
           limit: 10000,
           approvalStatus: "Approved",
@@ -222,6 +224,20 @@ const InvoiceData = () => {
   useEffect(() => {
     fetchInvoices();
   }, [pagination.page, pagination.limit, advancedFilters]);
+
+  const syncPendingApprovals = useCallback(async () => {
+    if (!user?.company?._id || !isAdminOrSuperAdmin) return;
+    try {
+      const res = await getInvoicesApi(user.company._id, { approvalStatus: "Pending", limit: 1 });
+      setPendingApprovalsCount(res.pagination?.total || res.data?.length || 0);
+    } catch (err) {
+      console.error("Error fetching pending approvals:", err);
+    }
+  }, [user?.company?._id, isAdminOrSuperAdmin]);
+
+  useEffect(() => {
+    syncPendingApprovals();
+  }, [syncPendingApprovals]);
 
   // Add this function to fetch users
   const fetchUsers = async () => {
@@ -821,11 +837,19 @@ const InvoiceData = () => {
               )}
               {isAdminOrSuperAdmin && canEditInvoice && (
                   <button
-                    onClick={() => setApprovalModalOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
+                    onClick={() => {
+                      setApprovalModalOpen(true);
+                      syncPendingApprovals();
+                    }}
+                    className="relative flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 transition-all shadow-sm"
                   >
                     <CircleCheckBig size={13} className="text-emerald-500" />{" "}
                     Approvals
+                    {pendingApprovalsCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white shadow-sm ring-2 ring-white">
+                        {pendingApprovalsCount > 9 ? "9+" : pendingApprovalsCount}
+                      </span>
+                    )}
                   </button>
                 )}
               <button
