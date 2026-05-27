@@ -325,9 +325,16 @@ const ViewAllInvoices = () => {
     const completionPercentage = invoiceAmount > 0 ? (totalReceived / invoiceAmount) * 100 : 0;
     let paymentStatus = invoice.paymentStatus;
     if (!paymentStatus) {
-      if (pendingAmount <= 0) paymentStatus = "fully_paid";
-      else if (totalReceived > 0) paymentStatus = "partially_paid";
-      else paymentStatus = "unpaid";
+      // Check if invoice is rejected first
+      if (invoice.approvalStatus === "Rejected") {
+        paymentStatus = "rejected";
+      } else if (pendingAmount <= 0) {
+        paymentStatus = "fully_paid";
+      } else if (totalReceived > 0) {
+        paymentStatus = "partially_paid";
+      } else {
+        paymentStatus = "unpaid";
+      }
     }
     return { invoiceAmount, totalInvoiceAmount, tdsAmount, netPayable, totalReceived, pendingAmount, totalTDSAdjusted, completionPercentage, paymentStatus, paymentCount: payments.length, lastPaymentDate: payments.length > 0 ? payments[payments.length - 1].paymentDate : null };
   };
@@ -335,6 +342,7 @@ const ViewAllInvoices = () => {
     switch (paymentStatus) {
       case "fully_paid": return { text: "Paid", pill: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: CheckCircle2 };
       case "partially_paid": return { text: `₹${formatAmount(pendingAmount)} Pending`, pill: "bg-amber-100 text-amber-700 border-amber-200", dot: "bg-amber-400", icon: Clock };
+      case "rejected": return { text: "Rejected", pill: "bg-red-100 text-red-700 border-red-300", dot: "bg-red-600", icon: AlertTriangle };
       default: return { text: "Unpaid", pill: "bg-red-100 text-red-700 border-red-200", dot: "bg-red-500", icon: AlertTriangle };
     }
   };

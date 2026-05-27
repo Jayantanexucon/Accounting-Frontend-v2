@@ -328,6 +328,13 @@ export default function PreviousInvoicesComponent({ open, onClose }) {
           icon: Clock,
           iconColor: "text-amber-600"
         };
+      case "rejected":
+        return {
+          text: "Rejected",
+          color: "bg-red-100 text-red-800 border-red-300",
+          icon: AlertTriangle,
+          iconColor: "text-red-600"
+        };
       case "unpaid":
       default:
         return {

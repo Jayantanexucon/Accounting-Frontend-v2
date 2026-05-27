@@ -275,7 +275,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
     const completionPercentage = invoiceAmount > 0 ? (totalSettled / invoiceAmount) * 100 : 0;
 
     let paymentStatus = "unpaid";
-    if (invoice.isFullyPaid || invoice.status === "PAID" || invoice.status === "RECONCILED" || pendingAmount <= 0.01) {
+    if (invoice.approvalStatus === "Rejected") {
+      paymentStatus = "rejected";
+    } else if (invoice.isFullyPaid || invoice.status === "PAID" || invoice.status === "RECONCILED" || pendingAmount <= 0.01) {
       paymentStatus = "fully_paid";
     } else if (totalSettled > 0) {
       paymentStatus = "partially_paid";
@@ -313,6 +315,13 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
           color: "bg-amber-100 text-amber-800",
           icon: Clock,
           iconColor: "text-amber-600",
+        };
+      case "rejected":
+        return {
+          label: "Rejected",
+          color: "bg-red-100 text-red-800",
+          icon: AlertTriangle,
+          iconColor: "text-red-600",
         };
       case "unpaid":
       default:
