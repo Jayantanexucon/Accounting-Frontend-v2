@@ -139,8 +139,16 @@ export default function InvoiceApproval({
 
   const handleSubmit = async (id, versionNo, approvalStatus) => {
     try {
+      let approvalComments = "";
+      if (approvalStatus === "Rejected") {
+        approvalComments = window.prompt("Enter rejection reason");
+        if (!approvalComments?.trim()) {
+          toast.error("Rejection reason is required");
+          return;
+        }
+      }
       setLoading(true);
-      await updateInvoiceApprovalApi(id, versionNo, approvalStatus);
+      await updateInvoiceApprovalApi(id, versionNo, approvalStatus, approvalComments.trim());
       toast.success(`Invoice ${approvalStatus.toLowerCase()} successfully`);
       
       // Remove the approved/rejected invoice from the list

@@ -398,6 +398,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
   const hasInvoiceTds = getInvoiceTdsAmount(invoice) > 0;
 
   const handlePrint = () => {
+    if (invoice?.approvalStatus !== "Approved") {
+      toast.error("Only approved invoices can be printed");
+      return;
+    }
     window.print();
   };
 
@@ -410,6 +414,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
 
   const handleDownloadPDF = async () => {
     if (!invoice) return;
+    if (invoice.approvalStatus !== "Approved") {
+      toast.error("Only approved invoices can be downloaded");
+      return;
+    }
 
     try {
       const response = await downloadInvoicePdfApi(invoice._id);
@@ -430,6 +438,10 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
 
   const handleDownloadWord = async () => {
     if (!invoice) return;
+    if (invoice.approvalStatus !== "Approved") {
+      toast.error("Only approved invoices can be downloaded");
+      return;
+    }
 
     try {
       const response = await downloadInvoiceWordApi(invoice._id);
@@ -551,7 +563,11 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
   const itemTaxLabel = ["CGST", "SGST", "IGST"].includes(String(taxLabel).toUpperCase()) ? "GST" : taxLabel;
   const taxBreakdownRows = getTaxBreakdownRows(invoice, taxLabel);
   const isApprovedInvoice = invoice?.approvalStatus === "Approved";
-  const TABS = ["overview","items","payments","accounting","documents"];
+  const isRejectedInvoice = invoice?.approvalStatus === "Rejected";
+  const rejectionReason = invoice?.rejectionReason || invoice?.approvalComments || invoice?.rejectionHistory?.[invoice.rejectionHistory.length - 1]?.reason;
+  const TABS = isApprovedInvoice
+    ? ["overview","items","payments","accounting","documents"]
+    : ["overview","items","payments","accounting"];
 
   /* ── small helpers ── */
   const F = ({ label, value, mono }) => (
@@ -614,11 +630,22 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
               </div>
               <div className="flex items-center gap-1.5">
                 <button onClick={handleCopyInvoiceNo} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Copy Invoice No"><Copy size={14} /></button>
-                <button onClick={handlePrint}         className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Print"><Printer size={14} /></button>
-                <button onClick={handleDownloadPDF}   className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Download PDF"><Download size={14} /></button>
+                {isApprovedInvoice && (
+                  <>
+                    <button onClick={handlePrint}         className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Print"><Printer size={14} /></button>
+                    <button onClick={handleDownloadPDF}   className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Download PDF"><Download size={14} /></button>
+                  </>
+                )}
                 <button onClick={onClose}             className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Close"><X size={14} /></button>
               </div>
             </div>
+
+            {isRejectedInvoice && (
+              <div className="px-6 py-3 bg-red-50 border-b border-red-100 text-red-700 text-xs">
+                <span className="font-black">Rejected</span>
+                {rejectionReason ? <span className="ml-2">Reason: {rejectionReason}</span> : null}
+              </div>
+            )}
 
             {/* Tab bar */}
             <div className="flex bg-white border-b border-slate-200 px-2">
@@ -1190,6 +1217,9 @@ const InvoiceDetailModal = ({ isOpen, onClose, invoiceId, defaultTab = "overview
                           </span>
                           {invoice.approvalStatus==="Approved" && invoice.approvedBy && (
                             <p className="text-[10px] text-slate-400 mt-1.5">Approved by: {invoice.approvedBy.name||"System"}</p>
+                          )}
+                          {invoice.approvalStatus==="Rejected" && rejectionReason && (
+                            <p className="text-[10px] text-red-600 mt-1.5">Reason: {rejectionReason}</p>
                           )}
                         </div>
                       </div>

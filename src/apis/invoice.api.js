@@ -132,10 +132,10 @@ export const pendingApprovalInvoiceApi = (companyId, signal) =>
   });
 
 // approve / reject invoice
-export const updateInvoiceApprovalApi = (id, versionNo, approvalStatus) =>
+export const updateInvoiceApprovalApi = (id, versionNo, approvalStatus, approvalComments = "") =>
   API.post(
     `${INVOICE_BASE}/${id}/${approvalStatus === "Approved" ? "approve" : "reject"}`,
-    { versionNo, approvalStatus }
+    { versionNo, approvalStatus, approvalComments, rejectionReason: approvalComments }
   );
 
 export const validateInvoiceAccountsApi = async (companyId) => {
@@ -260,4 +260,3 @@ export const reverseInvoicePaymentApi = async ({ companyId, paymentId, invoiceId
   });
   return data;
 };
-

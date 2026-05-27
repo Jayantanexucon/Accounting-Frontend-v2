@@ -139,8 +139,16 @@ export default function PurchaseOrderApproval({
 
   const handleSubmit = async (id, approvalStatus) => {
     try {
+      let approvalComments = "";
+      if (approvalStatus === "Rejected") {
+        approvalComments = window.prompt("Enter rejection reason");
+        if (!approvalComments?.trim()) {
+          toast.error("Rejection reason is required");
+          return;
+        }
+      }
       setLoading(true);
-      await updatePurchaseOrderApprovalApi(id, approvalStatus);
+      await updatePurchaseOrderApprovalApi(id, approvalStatus, approvalComments.trim());
       toast.success(`Purchase Order ${approvalStatus.toLowerCase()} successfully`);
       
       // Remove the approved/rejected PO from the list

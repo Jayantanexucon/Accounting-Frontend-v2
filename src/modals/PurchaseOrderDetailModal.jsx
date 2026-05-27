@@ -481,8 +481,8 @@ const getAvailableTabs = (po) => {
     tabs.push("paymentTerms");
   }
 
-  // Documents always makes sense (unless pending approval)
-  if (po.approvalStatus !== "Pending") {
+  // Documents are available only after approval.
+  if (po.approvalStatus === "Approved") {
     tabs.push("documents");
   }
 
@@ -533,6 +533,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
 
   const handleDownloadPDF = async () => {
     if (!po) return;
+    if (po.approvalStatus !== "Approved") {
+      alert("Only approved purchase orders can be downloaded");
+      return;
+    }
     try {
       const res = await downloadPdfPurchaseOrderApi(po._id);
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -547,6 +551,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
     }
   };
     const handleDownloadWord = async (poId, poNumber, e) => {
+    if (po?.approvalStatus !== "Approved") {
+      setError("Only approved purchase orders can be downloaded");
+      return;
+    }
 
     try {
       const response = await downloadWordPurchaseOrderApi(poId);
@@ -562,6 +570,10 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   };
 
   const handleCreateInvoice = () => {
+    if (po?.approvalStatus !== "Approved") {
+      setError("Invoice can be created only for approved purchase orders");
+      return;
+    }
     if (po?._id) {
       navigate(`/master-data/manual-invoice?poId=${po._id}`);
       onClose();
@@ -575,6 +587,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
   if (!isOpen) return null;
 
   const status = po ? STATUS_CFG[po.status] || STATUS_CFG.draft : null;
+  const isApprovedPO = po?.approvalStatus === "Approved";
+  const isRejectedPO = po?.approvalStatus === "Rejected";
+  const rejectionReason = po?.rejectionReason || po?.approvalComments || po?.rejectionHistory?.[po.rejectionHistory.length - 1]?.reason;
   const delSt = po?.deliveryDate ? deliveryStatus(po.deliveryDate) : null;
   const currency = po?.currency || "INR";
   const activeOrderedInvoices = orderedInvoices.filter(
@@ -805,9 +820,9 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
               </div>
             </div>
             <div className="flex items-center gap-1.5">
-              {po?._id && po.approvalStatus !== "Pending" && canCreateInvoice(po.status) && (
+              {po?._id && isApprovedPO && canCreateInvoice(po.status) && (
                 <button
-                  onClick={() => { window.location.href = `/master-data/manual-invoice?poId=${po._id}`; }}
+                  onClick={handleCreateInvoice}
                   className="px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all text-xs font-bold flex items-center gap-1.5"
                   title="Create Invoice"
                 >
@@ -817,17 +832,28 @@ const PurchaseOrderDetailModal = ({ isOpen, onClose, purchaseOrderId }) => {
               <button onClick={handleCopy} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Copy PO Number">
                 <Copy size={14} />
               </button>
-              <button onClick={() => window.print()} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Print">
-                <Printer size={14} />
-              </button>
-              <button onClick={handleDownloadPDF} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Download PDF">
-                <Download size={14} />
-              </button>
+              {isApprovedPO && (
+                <>
+                  <button onClick={() => window.print()} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Print">
+                    <Printer size={14} />
+                  </button>
+                  <button onClick={handleDownloadPDF} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Download PDF">
+                    <Download size={14} />
+                  </button>
+                </>
+              )}
               <button onClick={onClose} className="p-2 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-all" title="Close">
                 <X size={14} />
               </button>
             </div>
           </div>
+
+          {isRejectedPO && (
+            <div className="px-6 py-3 bg-red-50 border-b border-red-100 text-red-700 text-xs">
+              <span className="font-black">Rejected</span>
+              {rejectionReason ? <span className="ml-2">Reason: {rejectionReason}</span> : null}
+            </div>
+          )}
 
           {/* Tabs — only render tabs that are relevant for this PO */}
           <div className="flex bg-white border-b border-slate-200 px-2">
