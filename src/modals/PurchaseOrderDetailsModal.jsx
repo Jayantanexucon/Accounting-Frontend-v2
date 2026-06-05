@@ -60,6 +60,9 @@ const PurchaseOrderDetailsModal = ({
   const delivery = getDeliveryStatus(purchaseOrder.deliveryDate);
   const totalTax = calculateTotalTax(purchaseOrder);
   const currency = purchaseOrder.currency || "INR";
+  const isApprovedPO = purchaseOrder.approvalStatus === "Approved";
+  const isRejectedPO = purchaseOrder.approvalStatus === "Rejected";
+  const rejectionReason = purchaseOrder.rejectionReason || purchaseOrder.approvalComments || purchaseOrder.rejectionHistory?.[purchaseOrder.rejectionHistory.length - 1]?.reason;
   const fmt      = (n) => `${currency} ${(n||0).toFixed(2)}`;
 
   return (
@@ -83,6 +86,13 @@ const PurchaseOrderDetailsModal = ({
                       {purchaseOrder.poNumber || "Purchase Order"}
                     </h2>
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${status.cls}`}>{status.label}</span>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${
+                      isApprovedPO ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                      : isRejectedPO ? "bg-red-100 text-red-700 border-red-200"
+                      : "bg-amber-100 text-amber-700 border-amber-200"
+                    }`}>
+                      {purchaseOrder.approvalStatus || "Pending"}
+                    </span>
                     <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black border ${delivery.cls}`}>{delivery.text}</span>
                   </div>
                   <p className="text-blue-200 text-[11px] mt-0.5">
@@ -94,6 +104,12 @@ const PurchaseOrderDetailsModal = ({
                 <X size={16} />
               </button>
             </div>
+            {isRejectedPO && (
+              <div className="px-6 py-3 bg-red-50 border-b border-red-100 text-red-700 text-xs">
+                <span className="font-black">Rejected</span>
+                {rejectionReason ? <span className="ml-2">Reason: {rejectionReason}</span> : null}
+              </div>
+            )}
           </div>
 
           <div className="p-5 space-y-4">
@@ -240,12 +256,12 @@ const PurchaseOrderDetailsModal = ({
                   <Pencil size={11}/> Edit PO
                 </button>
               )}
-              {onDownloadPDF && (
+              {onDownloadPDF && isApprovedPO && (
                 <button onClick={()=>onDownloadPDF(purchaseOrder)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 transition-all">
                   <Download size={11}/> PDF
                 </button>
               )}
-              {purchaseOrder?._id && canCreateInvoice(purchaseOrder.status) && (
+              {purchaseOrder?._id && isApprovedPO && canCreateInvoice(purchaseOrder.status) && (
                 <button
                   onClick={() => {
                     window.location.href = `/master-data/manual-invoice?poId=${purchaseOrder._id}`;
@@ -255,7 +271,7 @@ const PurchaseOrderDetailsModal = ({
                   <FileText size={11}/> Create Invoice
                 </button>
               )}
-              {onDownloadWord && (
+              {onDownloadWord && isApprovedPO && (
                 <button onClick={()=>onDownloadWord(purchaseOrder)} className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold text-slate-600 bg-slate-100 border border-slate-200 rounded-xl hover:bg-slate-200 transition-all">
                   <Download size={11}/> Word
                 </button>

@@ -357,7 +357,9 @@ const InvoiceData = () => {
 
     let paymentStatus = invoice.paymentStatus;
     if (!paymentStatus) {
-      if (pendingAmount <= 0) {
+      if (invoice.approvalStatus === "Rejected") {
+        paymentStatus = "rejected";
+      } else if (pendingAmount <= 0) {
         paymentStatus = "fully_paid";
       } else if (totalReceived > 0) {
         paymentStatus = "partially_paid";
@@ -449,6 +451,13 @@ const InvoiceData = () => {
           color: "bg-amber-100 text-amber-800 border-amber-200",
           icon: Clock,
           iconColor: "text-amber-600",
+        };
+      case "rejected":
+        return {
+          text: "Rejected",
+          color: "bg-red-100 text-red-800 border-red-300",
+          icon: AlertTriangle,
+          iconColor: "text-red-600",
         };
       case "unpaid":
       default:

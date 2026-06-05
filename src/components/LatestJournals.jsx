@@ -97,7 +97,7 @@ export default function LatestJournals({ onViewAll, onJournalClick }) {
                   </p>
                   <span className={`inline-flex items-center gap-1 text-[10px] font-black ${journal.posted ? "text-emerald-700" : "text-amber-700"}`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${journal.posted ? "bg-emerald-500" : "bg-amber-400"}`} />
-                    {journal.posted ? "Posted" : "Draft"}
+                    {journal.voucherType}
                   </span>
                 </div>
               </motion.div>

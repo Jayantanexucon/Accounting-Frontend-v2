@@ -364,6 +364,7 @@ const PurchaseOrderData = () => {
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState("receivable"); // "receivable" or "payable"
+  const [showRejectedPOs, setShowRejectedPOs] = useState(false);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
 
   const openClientDetails = (clientId) => { setSelectedClientId(clientId); setModalOpen(true); };
@@ -425,11 +426,15 @@ const PurchaseOrderData = () => {
         const res = await advancedSearchPurchaseOrdersApi({
           ...activeFilters,
           companyId: companyId,
+          ...(showRejectedPOs ? { approvalStatus: "Rejected" } : {}),
           limit: 1000,
         });
         poData = res.data || [];
       } else {
-        const res = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+        const res = await getPurchaseOrdersApi(companyId, {
+          limit: 1000,
+          ...(showRejectedPOs ? { approvalStatus: "Rejected" } : {}),
+        });
         poData = res.data || [];
       }
       setPurchaseOrders(poData);
@@ -442,7 +447,7 @@ const PurchaseOrderData = () => {
     }
   };
 
-  useEffect(() => { if (companyId) fetchAllData(); }, [companyId, activeFilters]);
+  useEffect(() => { if (companyId) fetchAllData(); }, [companyId, activeFilters, showRejectedPOs]);
 
   const resolveClientId = (po, clientsList) => {
     if (!po.client) return null;
@@ -456,8 +461,12 @@ const PurchaseOrderData = () => {
   };
 
   // Filter POs by direction with useMemo for performance
-  const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
-  const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable" && po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected"), [purchaseOrders]);
+  const isVisibleApprovalStatus = (po) =>
+    showRejectedPOs
+      ? po.approvalStatus === "Rejected"
+      : po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected";
+  const receivablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "receivable" && isVisibleApprovalStatus(po)), [purchaseOrders, showRejectedPOs]);
+  const payablePOs = useMemo(() => purchaseOrders.filter(po => po.direction === "payable" && isVisibleApprovalStatus(po)), [purchaseOrders, showRejectedPOs]);
   const currentPOs = useMemo(() => viewMode === "receivable" ? receivablePOs : payablePOs, [viewMode, receivablePOs, payablePOs]);
   const pendingApprovalsCount = useMemo(() => purchaseOrders.filter(po => po.approvalStatus === "Pending").length, [purchaseOrders]);
 
@@ -849,14 +858,29 @@ const PurchaseOrderData = () => {
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50/50">
               <p className="text-xs font-bold text-slate-700">
-                {viewMode === "receivable" ? "Clients" : "Vendors"}
+                {showRejectedPOs ? "Rejected " : ""}{viewMode === "receivable" ? "Clients" : "Vendors"}
                 <span className="ml-2 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full text-[10px] font-black">{tableRows.length}</span>
               </p>
+              <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setShowRejectedPOs((prev) => !prev);
+                  setPage(1);
+                }}
+                className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-black rounded-lg border transition-all ${
+                  showRejectedPOs
+                    ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {showRejectedPOs ? "Show Normal" : "Show Rejected"}
+              </button>
               {(searchQuery || activeFilterCount > 0) && (
                 <button onClick={handleClearSearch} className="text-[10px] font-bold text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
                   <X size={10} /> Clear filters
                 </button>
               )}
+              </div>
             </div>
 
             <div className="overflow-x-auto">

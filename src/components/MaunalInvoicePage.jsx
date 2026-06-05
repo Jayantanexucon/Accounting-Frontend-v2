@@ -1466,7 +1466,10 @@ const ManualInvoicePage = () => {
 
       setLoadingPOs(true);
       try {
-        const response = await getPurchaseOrdersApi(companyId, { limit: 1000 });
+        const response = await getPurchaseOrdersApi(companyId, {
+          limit: 1000,
+          approvalStatus: "Approved",
+        });
         const poList = response?.data || [];
 
         const activePOs = poList.filter(
@@ -1505,6 +1508,11 @@ const ManualInvoicePage = () => {
           try {
             const response = await getPurchaseOrderApi(poIdFromUrl);
             if (response?.data) {
+              if (response.data.approvalStatus !== "Approved") {
+                toast.error("Invoice can be created only for approved purchase orders");
+                setAutoSelectedPoId(poIdFromUrl);
+                return;
+              }
               handleSelectPO(response.data);
               setAutoSelectedPoId(poIdFromUrl);
             } else {
@@ -2078,6 +2086,10 @@ const ManualInvoicePage = () => {
   // Handle PO selection - populates typed state based on PO billing model
   const handleSelectPO = async (po) => {
     if (!po) return;
+    if (po.approvalStatus !== "Approved") {
+      toast.error("Invoice can be created only for approved purchase orders");
+      return;
+    }
 
     const paymentModeMap = {
       "net-30": "Bank-Transfer",
@@ -2096,6 +2108,10 @@ const ManualInvoicePage = () => {
       selectedPO = unwrapPurchaseOrderPayload(poResponse) || po;
     } catch (err) {
       console.error("Error fetching fresh PO progress:", err);
+    }
+    if (selectedPO.approvalStatus !== "Approved") {
+      toast.error("Invoice can be created only for approved purchase orders");
+      return;
     }
     selectedPO = await hydratePurchaseOrderInvoices(selectedPO);
 

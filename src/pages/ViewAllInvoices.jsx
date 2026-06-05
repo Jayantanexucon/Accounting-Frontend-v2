@@ -85,6 +85,7 @@ const ViewAllInvoices = () => {
   const [allInvoices, setAllInvoices] = useState([]);
   const [filteredAllInvoices, setFilteredAllInvoices] = useState([]);
   const [approvalModalOpen, setApprovalModalOpen] = useState(false);
+  const [showRejectedInvoices, setShowRejectedInvoices] = useState(false);
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState({});
   const [appliedFilters, setAppliedFilters] = useState({});
@@ -129,7 +130,7 @@ const ViewAllInvoices = () => {
   /* ── useEffect to fetch invoices ───────── */
   useEffect(() => {
     fetchInvoices();
-  }, [pagination.page, pagination.limit, advancedFilters]);
+  }, [pagination.page, pagination.limit, advancedFilters, showRejectedInvoices]);
 
   const fetchInvoices = async () => {
     setLoading(true);
@@ -138,7 +139,7 @@ const ViewAllInvoices = () => {
       const response = await getInvoicesApi(user.company._id, {
         page: pagination.page,
         limit: pagination.limit,
-        approvalStatus: "Approved",
+        approvalStatus: showRejectedInvoices ? "Rejected" : "Approved",
         sort: "-createdAt",
         ...advancedFilters,
       });
@@ -159,7 +160,7 @@ const ViewAllInvoices = () => {
       const allFiltered = await getInvoicesApi(user.company._id, {
         page: 1,
         limit: 10000,
-        approvalStatus: "Approved",
+        approvalStatus: showRejectedInvoices ? "Rejected" : "Approved",
         sort: "-createdAt",
         ...advancedFilters,
       });
@@ -168,7 +169,7 @@ const ViewAllInvoices = () => {
       const allInvoicesRes = await getInvoicesApi(user.company._id, {
         page: 1,
         limit: 10000,
-        approvalStatus: "Approved",
+        approvalStatus: showRejectedInvoices ? "Rejected" : "Approved",
         sort: "-createdAt",
       });
       setAllInvoices(allInvoicesRes?.data || []);
@@ -324,9 +325,16 @@ const ViewAllInvoices = () => {
     const completionPercentage = invoiceAmount > 0 ? (totalReceived / invoiceAmount) * 100 : 0;
     let paymentStatus = invoice.paymentStatus;
     if (!paymentStatus) {
-      if (pendingAmount <= 0) paymentStatus = "fully_paid";
-      else if (totalReceived > 0) paymentStatus = "partially_paid";
-      else paymentStatus = "unpaid";
+      // Check if invoice is rejected first
+      if (invoice.approvalStatus === "Rejected") {
+        paymentStatus = "rejected";
+      } else if (pendingAmount <= 0) {
+        paymentStatus = "fully_paid";
+      } else if (totalReceived > 0) {
+        paymentStatus = "partially_paid";
+      } else {
+        paymentStatus = "unpaid";
+      }
     }
     return { invoiceAmount, totalInvoiceAmount, tdsAmount, netPayable, totalReceived, pendingAmount, totalTDSAdjusted, completionPercentage, paymentStatus, paymentCount: payments.length, lastPaymentDate: payments.length > 0 ? payments[payments.length - 1].paymentDate : null };
   };
@@ -334,6 +342,7 @@ const ViewAllInvoices = () => {
     switch (paymentStatus) {
       case "fully_paid": return { text: "Paid", pill: "bg-emerald-100 text-emerald-700 border-emerald-200", dot: "bg-emerald-500", icon: CheckCircle2 };
       case "partially_paid": return { text: `₹${formatAmount(pendingAmount)} Pending`, pill: "bg-amber-100 text-amber-700 border-amber-200", dot: "bg-amber-400", icon: Clock };
+      case "rejected": return { text: "Rejected", pill: "bg-red-100 text-red-700 border-red-300", dot: "bg-red-600", icon: AlertTriangle };
       default: return { text: "Unpaid", pill: "bg-red-100 text-red-700 border-red-200", dot: "bg-red-500", icon: AlertTriangle };
     }
   };
@@ -545,7 +554,9 @@ const ViewAllInvoices = () => {
             style={{ background: "linear-gradient(90deg,#f8fafc 0%,#eff6ff 100%)" }}>
             <div className="flex items-center gap-3">
               <div className="w-1 h-6 rounded-full" style={{ background: "linear-gradient(180deg,#1e40af,#60a5fa)" }} />
-              <p className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">Invoice List</p>
+              <p className="text-xs font-extrabold text-slate-800 uppercase tracking-wide">
+                {showRejectedInvoices ? "Rejected Invoices" : "Invoice List"}
+              </p>
               {!loading && (
                 <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black text-white"
                   style={{ background: "linear-gradient(135deg,#1e40af,#3b82f6)" }}>
@@ -553,7 +564,22 @@ const ViewAllInvoices = () => {
                 </span>
               )}
             </div>
-            <p className="text-[10px] text-slate-400 hidden sm:block">Click a row to expand details</p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setShowRejectedInvoices((prev) => !prev);
+                  setPagination((prev) => ({ ...prev, page: 1 }));
+                }}
+                className={`px-2.5 py-1.5 text-[10px] font-black rounded-lg border transition-all ${
+                  showRejectedInvoices
+                    ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                    : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
+                }`}
+              >
+                {showRejectedInvoices ? "Show Normal" : "Show Rejected"}
+              </button>
+              <p className="text-[10px] text-slate-400 hidden sm:block">Click a row to expand details</p>
+            </div>
           </div>
 
           {/* Loading */}
@@ -582,7 +608,9 @@ const ViewAllInvoices = () => {
               <div className="p-4 rounded-2xl" style={{ background: "linear-gradient(135deg,#eff6ff,#dbeafe)" }}>
                 <FileText size={28} className="text-blue-300" />
               </div>
-              <p className="text-sm font-bold text-slate-500">No approved invoices found</p>
+              <p className="text-sm font-bold text-slate-500">
+                No {showRejectedInvoices ? "rejected" : "approved"} invoices found
+              </p>
               <p className="text-xs text-slate-400">Try adjusting your search filters</p>
             </div>
           )}
@@ -879,9 +907,13 @@ const ViewAllInvoices = () => {
                                 {checkAuthorization(user, "INVOICE", "EDIT") && !invoice.salesJournalId && (
                                   <ActionBtn to={`/master-data/manual-invoice?edit=${invoice._id}`} onClick={(e) => handleEditClick(invoice._id, e)} icon={Edit} label="Edit Invoice" color="blue" />
                                 )}
-                                <ActionBtn onClick={(e) => handleDownloadPdf(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download PDF" color="slate" />
-                                <ActionBtn onClick={(e) => handleDownloadWord(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download Word" color="slate" />
-                                {checkAuthorization(user, "INVOICE", "EDIT") && !invoice.salesJournalId && (
+                                {invoice.approvalStatus === "Approved" && (
+                                  <>
+                                    <ActionBtn onClick={(e) => handleDownloadPdf(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download PDF" color="slate" />
+                                    <ActionBtn onClick={(e) => handleDownloadWord(invoice._id, invoice.invoiceNo, e)} icon={Download} label="Download Word" color="slate" />
+                                  </>
+                                )}
+                                {checkAuthorization(user, "INVOICE", "EDIT") && invoice.approvalStatus === "Approved" && !invoice.salesJournalId && (
                                   <ActionBtn onClick={(e) => handleCreateLedgerClick(invoice, e)} icon={BookOpen} label="Post Sales Journal" color="purple" />
                                 )}
                                 {invoice.salesJournalId && (
@@ -901,7 +933,9 @@ const ViewAllInvoices = () => {
                                   <ActionBtn onClick={(e) => { e.stopPropagation(); setSelectedInvoice(invoice); setPaymentHistoryModal(true); }}
                                     icon={History} label={`Payment History (${invoice.payments.length})`} color="amber" />
                                 )}
-                                <ActionBtn onClick={() => { }} icon={Mail} label="Email Invoice" color="indigo" />
+                                {invoice.approvalStatus === "Approved" && (
+                                  <ActionBtn onClick={() => { }} icon={Mail} label="Email Invoice" color="indigo" />
+                                )}
                               </div>
 
                             </div>

@@ -78,6 +78,7 @@ const ClientPurchaseOrders = () => {
   const [selectedPOForAudit, setSelectedPOForAudit] = useState(null);
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [showRejectedPOs, setShowRejectedPOs] = useState(false);
 
   const handleViewAuditLog = (po, e) => {
     e.stopPropagation();
@@ -152,6 +153,7 @@ const ClientPurchaseOrders = () => {
         ...filtersWithoutPaymentTerms,
         clientId,           // may or may not be respected by backend
         companyId,
+        ...(showRejectedPOs ? { approvalStatus: "Rejected" } : {}),
         limit: 1000,
       };
       const res = await advancedSearchPurchaseOrdersApi(filters);
@@ -159,9 +161,12 @@ const ClientPurchaseOrders = () => {
 
       // Keep a frontend guard for old backend deployments and legacy PO data.
       const clientPOs = allPOs.filter(po => {
-        return po.vendor?._id === clientId || po.client?._id === clientId ||
+        const matchesApprovalView = showRejectedPOs
+          ? po.approvalStatus === "Rejected"
+          : po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected";
+        return matchesApprovalView && (po.vendor?._id === clientId || po.client?._id === clientId ||
           po.vendor?.name === foundClient?.clientName ||
-          po.client?.name === foundClient?.clientName;
+          po.client?.name === foundClient?.clientName);
       });
 
       // ✅ SORT: newest first (by createdAt)
@@ -180,7 +185,7 @@ const ClientPurchaseOrders = () => {
     if (user?.company?._id && clientId) {
       fetchClientAndPOs();
     }
-  }, [user, clientId, activeFilters]);
+  }, [user, clientId, activeFilters, showRejectedPOs]);
 
   const filteredPurchaseOrders = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -250,6 +255,11 @@ const ClientPurchaseOrders = () => {
 
   const handleDownloadPdf = async (poId, poNumber, e) => {
     e.stopPropagation();
+    const po = purchaseOrders.find((entry) => entry._id === poId);
+    if (po?.approvalStatus !== "Approved") {
+      setError("Only approved purchase orders can be downloaded");
+      return;
+    }
     try {
       const response = await downloadPdfPurchaseOrderApi(poId);
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -265,6 +275,11 @@ const ClientPurchaseOrders = () => {
 
   const handleDownloadWord = async (poId, poNumber, e) => {
     e.stopPropagation();
+    const po = purchaseOrders.find((entry) => entry._id === poId);
+    if (po?.approvalStatus !== "Approved") {
+      setError("Only approved purchase orders can be downloaded");
+      return;
+    }
     try {
       const response = await downloadWordPurchaseOrderApi(poId);
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -446,6 +461,21 @@ const ClientPurchaseOrders = () => {
 
               {/* Refresh */}
               <button
+                onClick={() => {
+                  setShowRejectedPOs((prev) => !prev);
+                  setPage(1);
+                }}
+                className={`inline-flex items-center px-3 py-2 border text-sm rounded-md transition ${
+                  showRejectedPOs
+                    ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                    : "border-gray-300 hover:bg-gray-50"
+                }`}
+              >
+                {showRejectedPOs ? "Show Normal" : "Show Rejected"}
+              </button>
+
+              {/* Refresh */}
+              <button
                 onClick={fetchClientAndPOs}
                 className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm rounded-md hover:bg-gray-50 transition"
               >
@@ -532,7 +562,7 @@ const ClientPurchaseOrders = () => {
           <div className="bg-white rounded-lg shadow-xs border border-gray-200 p-6 text-center">
             <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
             <h3 className="font-semibold text-gray-700 mb-1">
-              No purchase orders for this client
+              No {showRejectedPOs ? "rejected " : ""}purchase orders for this client
             </h3>
             <p className="text-gray-500 mb-4 text-xs">
               {searchQuery || activeFilterEntries.length > 0
@@ -802,6 +832,8 @@ const ClientPurchaseOrders = () => {
                                 Edit
                               </Link>
                             )}
+                            {po.approvalStatus === "Approved" && (
+                              <>
                             <button
                               onClick={(e) =>
                                 handleDownloadPdf(po._id, po.poNumber, e)
@@ -833,6 +865,8 @@ const ClientPurchaseOrders = () => {
                               <Mail className="h-3 w-3 mr-1.5" />
                               Email
                             </button>
+                              </>
+                            )}
                           </>
                         )}
                       </div>

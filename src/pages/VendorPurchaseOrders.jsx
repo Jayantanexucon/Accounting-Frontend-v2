@@ -62,6 +62,7 @@ const VendorPurchaseOrders = () => {
     const [selectedPOForDetail, setSelectedPOForDetail] = useState(null);
     const [auditModalOpen, setAuditModalOpen] = useState(false);
     const [selectedPOForAudit, setSelectedPOForAudit] = useState(null);
+    const [showRejectedPOs, setShowRejectedPOs] = useState(false);
 
     const calculateTotalTax = (po) => {
         return (
@@ -97,12 +98,18 @@ const VendorPurchaseOrders = () => {
                 companyId,
                 direction: "payable",
                 vendorId,
+                ...(showRejectedPOs ? { approvalStatus: "Rejected" } : {}),
                 limit: 1000,
             };
             const res = await advancedSearchPurchaseOrdersApi(filters);
             let pos = res.data || [];
             // Extra safety filter
-            pos = pos.filter(po => po.vendor?._id === vendorId || po.client?._id === vendorId);
+            pos = pos.filter(po => {
+                const matchesApprovalView = showRejectedPOs
+                    ? po.approvalStatus === "Rejected"
+                    : po.approvalStatus !== "Pending" && po.approvalStatus !== "Rejected";
+                return matchesApprovalView && (po.vendor?._id === vendorId || po.client?._id === vendorId);
+            });
             pos.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             setPurchaseOrders(pos);
         } catch (err) {
@@ -117,7 +124,7 @@ const VendorPurchaseOrders = () => {
         if (user?.company?._id && vendorId) {
             fetchVendorAndPOs();
         }
-    }, [user, vendorId]);
+    }, [user, vendorId, showRejectedPOs]);
 
     const totalPOs = purchaseOrders.length;
     const totalValue = purchaseOrders.reduce((sum, po) => sum + (po.totalAmount || 0), 0);
@@ -138,6 +145,11 @@ const VendorPurchaseOrders = () => {
 
     const handleDownloadPdf = async (poId, poNumber, e) => {
         e.stopPropagation();
+        const po = purchaseOrders.find((entry) => entry._id === poId);
+        if (po?.approvalStatus !== "Approved") {
+            setError("Only approved purchase orders can be downloaded");
+            return;
+        }
         try {
             const response = await downloadPdfPurchaseOrderApi(poId);
             const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -153,6 +165,11 @@ const VendorPurchaseOrders = () => {
 
     const handleDownloadWord = async (poId, poNumber, e) => {
         e.stopPropagation();
+        const po = purchaseOrders.find((entry) => entry._id === poId);
+        if (po?.approvalStatus !== "Approved") {
+            setError("Only approved purchase orders can be downloaded");
+            return;
+        }
         try {
             const response = await downloadWordPurchaseOrderApi(poId);
             const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -239,6 +256,16 @@ const VendorPurchaseOrders = () => {
                             </div>
                         </div>
                         <div className="flex gap-2">
+                            <button
+                                onClick={() => setShowRejectedPOs((prev) => !prev)}
+                                className={`inline-flex items-center justify-center px-3 py-2 border text-sm font-medium rounded-md transition ${
+                                    showRejectedPOs
+                                        ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                                        : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+                                }`}
+                            >
+                                {showRejectedPOs ? "Show Normal" : "Show Rejected"}
+                            </button>
                             {canCreatePO && (
                                 <Link
                                     to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
@@ -275,8 +302,12 @@ const VendorPurchaseOrders = () => {
                 {purchaseOrders.length === 0 ? (
                     <div className="bg-white rounded-lg shadow-xs border border-gray-200 p-6 text-center">
                         <ShoppingCart className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                        <h3 className="font-semibold text-gray-700 mb-1">No purchase orders for this vendor</h3>
-                        <p className="text-gray-500 mb-4 text-xs">Create the first purchase order for this vendor.</p>
+                        <h3 className="font-semibold text-gray-700 mb-1">
+                            No {showRejectedPOs ? "rejected " : ""}purchase orders for this vendor
+                        </h3>
+                        <p className="text-gray-500 mb-4 text-xs">
+                            {showRejectedPOs ? "Rejected POs will show here." : "Create the first purchase order for this vendor."}
+                        </p>
                         {canCreatePO && (
                             <Link
                                 to={`/purchase-order?vendorId=${vendorId}&direction=payable`}
@@ -394,12 +425,16 @@ const VendorPurchaseOrders = () => {
                                                         {canEditPO && (
                                                             <Link to={`/purchase-order?edit=${po._id}`} className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-md hover:bg-blue-100 flex items-center text-xs"><Edit className="h-3 w-3 mr-1.5" />Edit</Link>
                                                         )}
+                                                        {po.approvalStatus === "Approved" && (
+                                                            <>
                                                         <button onClick={(e) => handleDownloadPdf(po._id, po.poNumber, e)} className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Download className="h-3 w-3 mr-1.5" />PDF</button>
                                                         <button onClick={(e) => handleDownloadWord(po._id, po.poNumber, e)} className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Download className="h-3 w-3 mr-1.5" />Word</button>
                                                         {canDeletePO && (
                                                             <button onClick={(e) => handleDelete(po._id, e)} className="px-2.5 py-1 bg-red-50 text-red-600 rounded-md hover:bg-red-100 flex items-center text-xs"><Trash2 className="h-3 w-3 mr-1.5" />Delete</button>
                                                         )}
                                                         <button className="px-2.5 py-1 bg-gray-50 text-gray-700 rounded-md hover:bg-gray-100 flex items-center text-xs"><Mail className="h-3 w-3 mr-1.5" />Email</button>
+                                                            </>
+                                                        )}
                                                     </>
                                                 )}
                                             </div>
