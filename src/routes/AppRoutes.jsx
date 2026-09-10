@@ -47,6 +47,7 @@ const BulkPurchaseOrderPage = lazy(
 const BankReconciliationPage = lazy(
   () => import("../pages/BankReconciliationPage"),
 );
+const ExpenseAuditPage = lazy(() => import("../pages/ExpenseAuditPage"));
 const BulkInvoiceUploadPage = lazy(
   () => import("../pages/BulkInvoiceUploadPage"),
 );
@@ -173,6 +174,10 @@ export default function AppRoutes() {
               <Route
                 path="accounting/bank-reconciliation"
                 element={<BankReconciliationPage />}
+              />
+              <Route
+                path="accounting/expense-audit"
+                element={<ExpenseAuditPage />}
               />
               <Route path="accounting/bank-reconciliation/report" element={<MonthlyReconciliationReport />} />
 

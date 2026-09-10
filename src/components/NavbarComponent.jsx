@@ -22,6 +22,7 @@ import {
   BookOpen,
   Calculator,
   Receipt,
+  ClipboardCheck,
   FileCheck,
   Layers,
   PieChart,
@@ -435,6 +436,23 @@ export default function NavbarComponent() {
             </AnimatePresence>
           </div>
         )}
+
+        <NavLink
+          to="/accounting/expense-audit"
+          className={({ isActive }) =>
+            `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
+              isActive
+                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+                : "text-gray-400 hover:bg-white/5 hover:text-white"
+            }`
+          }
+          title={isCollapsed ? "Expense Audit" : ""}
+        >
+          <div className={`p-1.5 rounded-lg transition-colors shrink-0 ${isCollapsed ? "mx-auto" : "group-hover:bg-white/5"}`}>
+            <ClipboardCheck strokeWidth={1.5} size={20} />
+          </div>
+          {!isCollapsed && <span className="text-sm font-medium flex-1">Expense Audit</span>}
+        </NavLink>
 
         
       </nav> 
