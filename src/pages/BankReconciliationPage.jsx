@@ -96,10 +96,18 @@ const readWorkbookRows = async (file) => {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  return readBankStatementRows(sheet);
 };
 
 const excelEpoch = Date.UTC(1899, 11, 30);
+
+const normalize = (value) =>
+  String(value ?? "")
+    .replace(/\uFEFF/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\r\n_\-()/]+/g, " ")
+    .replace(/\s+/g, " ");
 
 const parseUploadedDate = (value) => {
   if (value == null || value === "") return null;
@@ -150,47 +158,98 @@ const BANK_STATEMENT_FIELDS = [
   { key: "referenceNumber", label: "Instrument No" },
   { key: "debitAmount", label: "Withdrawals" },
   { key: "creditAmount", label: "Deposits" },
+  { key: "amount", label: "Amount" },
+  { key: "direction", label: "Cr/Dr" },
   { key: "closingBalance", label: "Balance" },
 ];
 
 const FIELD_ALIASES = {
-  transactionDate: ["date", "transaction date", "txn date", "posting date", "value date"],
-  description: ["particulars", "narration", "description", "remarks", "transaction details", "details"],
-  referenceNumber: ["instrument no", "ref no", "reference", "utr", "utr number", "transaction id", "cheque no", "chq no", "ref number"],
-  debitAmount: ["withdrawal", "withdrawals", "debit", "debit amount", "dr amount", "paid out"],
-  creditAmount: ["deposit", "deposits", "credit", "credit amount", "cr amount", "paid in"],
-  closingBalance: ["balance", "closing balance", "running balance", "available balance"],
+  transactionDate: ["date", "transaction date", "txn date", "posting date", "value date", "value date inr"],
+  description: ["particulars", "narration", "description", "remarks", "transaction details", "details", "particulars details"],
+  referenceNumber: ["instrument no", "ref no", "reference", "utr", "utr number", "transaction id", "cheque no", "chq no", "ref number", "reference number"],
+  debitAmount: ["withdrawal", "withdrawals", "debit", "debit amount", "dr amount", "paid out", "withdrawal amount"],
+  creditAmount: ["deposit", "deposits", "credit", "credit amount", "cr amount", "paid in", "deposit amount"],
+  amount: ["amount", "transaction amount", "amount inr", "amount (inr)", "value", "transaction value", "net amount", "debit credit amount"],
+  direction: ["type", "transaction type", "cr dr", "dr cr", "debit credit", "transaction mode", "credit debit", "direction", "cr/dr"],
+  closingBalance: ["balance", "closing balance", "running balance", "available balance", "balance inr"],
 };
 
-const normalizeHeader = (value = "") =>
-  String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
+const normalizeHeader = (value = "") => normalize(value);
+
+const getDirection = (value) => {
+  const normalized = normalize(value);
+  if (/(credit|deposit|receipt|paid in|\bcr\b)/.test(normalized)) return "CREDIT";
+  if (/(debit|withdrawal|payment|paid out|\bdr\b)/.test(normalized)) return "DEBIT";
+  return "";
+};
+
+const getAmountDirection = (value, columnName = "") => {
+  const valueDirection = getDirection(value);
+  if (valueDirection) return valueDirection;
+  return getDirection(columnName);
+};
 
 const detectColumnMapping = (columns = []) => {
+  const normalizedColumns = columns.map((column) => ({ column, normalized: normalizeHeader(column) }));
   const mapping = {};
-  columns.forEach((column) => {
-    const normalized = normalizeHeader(column);
-    const field = BANK_STATEMENT_FIELDS.find((item) =>
-      FIELD_ALIASES[item.key]?.includes(normalized),
+
+  Object.keys(FIELD_ALIASES).forEach((fieldKey) => {
+    const aliases = FIELD_ALIASES[fieldKey] || [];
+    const exactMatch = normalizedColumns.find(({ normalized }) =>
+      aliases.some((alias) => normalized === normalizeHeader(alias)),
     );
-    if (field && !mapping[field.key]) mapping[field.key] = column;
+    if (exactMatch) {
+      mapping[fieldKey] = exactMatch.column;
+      return;
+    }
+
+    const containsMatches = normalizedColumns.flatMap(({ column, normalized }) =>
+      aliases
+        .map((alias) => normalizeHeader(alias))
+        .filter((normalizedAlias) => normalizedAlias.length > 2 && normalized.includes(normalizedAlias))
+        .map((normalizedAlias) => ({ column, specificity: normalizedAlias.length })),
+    );
+    const bestMatch = containsMatches.sort((left, right) => right.specificity - left.specificity)[0];
+    if (bestMatch) mapping[fieldKey] = bestMatch.column;
   });
+
   return mapping;
 };
 
 const parseAmount = (value) => {
   if (value == null || value === "") return 0;
-  const cleaned = String(value)
-    .replace(/,/g, "")
-    .replace(/[₹\s]/g, "")
+  if (typeof value === "number" && Number.isFinite(value)) return Math.abs(value);
+
+  const text = String(value).trim();
+  if (!text) return 0;
+
+  const cleaned = text
+    .replace(/[₹$€£,\s]/g, "")
     .replace(/[()]/g, "")
+    .replace(/(?:CR|DR|CREDIT|DEBIT)$/i, "")
     .trim();
-  if (!cleaned) return 0;
-  const parsed = Number(cleaned);
-  return Number.isFinite(parsed) ? Math.abs(parsed) : Number.NaN;
+
+  const directValue = Number(cleaned);
+  if (Number.isFinite(directValue)) return Math.abs(directValue);
+
+  const numberMatch = text.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  return numberMatch ? Math.abs(Number(numberMatch[0])) : 0;
+};
+
+const readBankStatementRows = (sheet) => {
+  const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false });
+  const headerIndex = matrix.slice(0, 20).findIndex((row) => {
+    const columns = row.map(normalize).filter(Boolean);
+    const hasDate = columns.some((column) => FIELD_ALIASES.transactionDate.some((alias) => column === normalize(alias) || column.includes(normalize(alias))));
+    const hasDescription = columns.some((column) => FIELD_ALIASES.description.some((alias) => column === normalize(alias) || column.includes(normalize(alias))));
+    return hasDate && hasDescription;
+  });
+
+  if (headerIndex < 0) {
+    return XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false });
+  }
+
+  return XLSX.utils.sheet_to_json(sheet, { range: headerIndex, defval: "", raw: false });
 };
 
 const parseStatementRows = (rows = [], mapping = {}, selectedLedgerId = "", fileName = "") => {
@@ -202,8 +261,19 @@ const parseStatementRows = (rows = [], mapping = {}, selectedLedgerId = "", file
 
   return rows.map((row, index) => {
     const transactionDate = parseUploadedDate(row[mapping.transactionDate]);
-    const debitAmount = parseAmount(row[mapping.debitAmount]);
-    const creditAmount = parseAmount(row[mapping.creditAmount]);
+    let debitAmount = parseAmount(row[mapping.debitAmount]);
+    let creditAmount = parseAmount(row[mapping.creditAmount]);
+    const singleAmount = parseAmount(row[mapping.amount]);
+    const directionFromCell = getDirection(row[mapping.direction]);
+    const inferredDirection = getAmountDirection(row[mapping.amount], mapping.amount) || directionFromCell;
+
+    if (!debitAmount && !creditAmount && singleAmount) {
+      if (inferredDirection === "DEBIT") debitAmount = singleAmount;
+      else if (inferredDirection === "CREDIT") creditAmount = singleAmount;
+      else if (String(row[mapping.amount] ?? "").includes("-")) debitAmount = singleAmount;
+      else creditAmount = singleAmount;
+    }
+
     const closingBalance = parseAmount(row[mapping.closingBalance]);
     const referenceNumber = String(row[mapping.referenceNumber] || "").trim();
     const description = String(row[mapping.description] || "").trim();
@@ -211,16 +281,21 @@ const parseStatementRows = (rows = [], mapping = {}, selectedLedgerId = "", file
     const warnings = [];
 
     if (!transactionDate) errors.push("Invalid or missing date");
-    if (Number.isNaN(debitAmount) || Number.isNaN(creditAmount)) errors.push("Invalid amount");
-    if (!debitAmount && !creditAmount) errors.push("Withdrawal or deposit is required");
+    if (!description) errors.push("Missing description");
+    if (!debitAmount && !creditAmount && !singleAmount) errors.push("Withdrawal or deposit is required");
     if (debitAmount > 0 && creditAmount > 0) errors.push("Both withdrawal and deposit cannot be filled");
     if (!referenceNumber) warnings.push("Missing instrument/reference number");
     if (referenceNumber && referenceCounts.get(referenceNumber.toUpperCase()) > 1) {
       warnings.push("Duplicate reference in uploaded file");
     }
 
-    const direction = creditAmount > 0 ? "CREDIT" : debitAmount > 0 ? "DEBIT" : "";
-    const amount = direction === "CREDIT" ? creditAmount : direction === "DEBIT" ? debitAmount : 0;
+    const direction =
+      creditAmount > 0
+        ? "CREDIT"
+        : debitAmount > 0
+          ? "DEBIT"
+          : inferredDirection || directionFromCell || "";
+    const amount = direction === "CREDIT" ? creditAmount : direction === "DEBIT" ? debitAmount : singleAmount || 0;
 
     return {
       rowNumber: index + 2,
@@ -815,16 +890,16 @@ export default function BankReconciliationPage() {
         Date: "06-05-2026",
         Particulars: "NEFT CR CYIENT LIMITED INV9297",
         "Instrument No": "UTR123456789",
-        Withdrawals: "",
-        Deposits: 5900,
+        "Transaction Amount (INR)": 5900,
+        "Cr/Dr": "CR",
         Balance: 125000.5,
       },
       {
         Date: "07-05-2026",
         Particulars: "BANK CHARGES",
         "Instrument No": "CHG998877",
-        Withdrawals: 2500,
-        Deposits: "",
+        "Transaction Amount (INR)": 2500,
+        "Cr/Dr": "DR",
         Balance: 122500.5,
       },
     ];
@@ -833,8 +908,8 @@ export default function BankReconciliationPage() {
         "Date",
         "Particulars",
         "Instrument No",
-        "Withdrawals",
-        "Deposits",
+        "Transaction Amount (INR)",
+        "Cr/Dr",
         "Balance",
       ],
     });
@@ -842,8 +917,8 @@ export default function BankReconciliationPage() {
       { wch: 14 },
       { wch: 36 },
       { wch: 18 },
-      { wch: 12 },
-      { wch: 12 },
+      { wch: 18 },
+      { wch: 10 },
       { wch: 14 },
     ];
     const workbook = XLSX.utils.book_new();
