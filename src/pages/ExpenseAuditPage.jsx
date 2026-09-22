@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, Edit3, FileSpreadsheet, Plus, Trash2, Upload, X } from "lucide-react";
+import { ClipboardCheck, Download, Edit3, FileSpreadsheet, Plus, Trash2, Upload, X } from "lucide-react";
 import { toast } from "react-toastify";
 import { useAuth } from "../contexts/AuthContext";
 import { useFinancialYear } from "../contexts/FinancialYearContext";
@@ -104,12 +104,13 @@ export default function ExpenseAuditPage() {
   const { selectedFinancialYearEnding, setSelectedFinancialYearEnding, financialYearInfo, financialYearOptions } = useFinancialYear();
   const companyId = JSON.parse(localStorage.getItem("selectedCompany") || "{}")._id || user?.company?._id;
   const queryClient = useQueryClient();
-  const [identifierForm, setIdentifierForm] = useState({ name: "", description: "" });
+  const [identifierForm, setIdentifierForm] = useState({ name: "", description: "", categoryId: "" });
   const [editingId, setEditingId] = useState("");
   const [categoryForm, setCategoryForm] = useState({ name: "", description: "" });
   const [editingCategoryId, setEditingCategoryId] = useState("");
   const [rowView, setRowView] = useState("ALL");
   const [preview, setPreview] = useState(null);
+  const showLegacyMasterData = false;
 
   const identifiersQuery = useQuery({ queryKey: ["audit-identifiers", companyId], queryFn: () => listAuditIdentifiersApi(companyId), enabled: Boolean(companyId) });
   const categoriesQuery = useQuery({ queryKey: ["audit-categories", companyId], queryFn: () => listAuditCategoriesApi(companyId), enabled: Boolean(companyId) });
@@ -119,7 +120,7 @@ export default function ExpenseAuditPage() {
   const overview = overviewQuery.data?.data || { groups: [], unmatched: [], summary: {} };
   const invalidate = () => { queryClient.invalidateQueries({ queryKey: ["audit-identifiers", companyId] }); queryClient.invalidateQueries({ queryKey: ["audit-categories", companyId] }); queryClient.invalidateQueries({ queryKey: ["expense-audit", companyId] }); };
 
-  const saveIdentifier = useMutation({ mutationFn: editingId ? updateAuditIdentifierApi : createAuditIdentifierApi, onSuccess: () => { invalidate(); setIdentifierForm({ name: "", description: "" }); setEditingId(""); toast.success("Identifier saved"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not save identifier") });
+  const saveIdentifier = useMutation({ mutationFn: editingId ? updateAuditIdentifierApi : createAuditIdentifierApi, onSuccess: () => { invalidate(); setIdentifierForm({ name: "", description: "", categoryId: "" }); setEditingId(""); toast.success("Identifier saved"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not save identifier") });
   const deleteIdentifier = useMutation({ mutationFn: deleteAuditIdentifierApi, onSuccess: () => { invalidate(); toast.success("Identifier deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete identifier") });
   const saveCategory = useMutation({ mutationFn: editingCategoryId ? updateAuditCategoryApi : createAuditCategoryApi, onSuccess: () => { invalidate(); setCategoryForm({ name: "", description: "" }); setEditingCategoryId(""); toast.success("Category saved"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not save category") });
   const deleteCategory = useMutation({ mutationFn: deleteAuditCategoryApi, onSuccess: () => { invalidate(); toast.success("Category deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete category") });
@@ -138,6 +139,56 @@ export default function ExpenseAuditPage() {
     if (rowView === "UNIDENTIFIED") return rows.filter((row) => !row.categoryId);
     return rows;
   }, [auditRows, rowView]);
+  const totals = useMemo(() => auditRows.reduce((summary, row) => ({
+    debit: summary.debit + Number(row.debitAmount || 0),
+    credit: summary.credit + Number(row.creditAmount || 0),
+  }), { debit: 0, credit: 0 }), [auditRows]);
+  const getRowsForScope = (scope) => scope === "CATEGORIZED"
+    ? auditRows.filter((row) => row.categoryId)
+    : scope === "UNCATEGORIZED"
+      ? auditRows.filter((row) => !row.categoryId)
+      : auditRows;
+  const downloadTransactions = (scope) => {
+    const rows = getRowsForScope(scope);
+    const exportRows = rows.map((row) => ({
+      Date: row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "",
+      Description: row.description || "",
+      Direction: row.direction || "",
+      Amount: Number(row.amount || 0),
+      Debit: Number(row.debitAmount || 0),
+      Credit: Number(row.creditAmount || 0),
+      Identifier: row.identifierName || "",
+      Category: row.categoryName || "Uncategorized",
+    }));
+    exportRows.push({});
+    exportRows.push({ Description: "TOTAL", Debit: rows.reduce((sum, row) => sum + Number(row.debitAmount || 0), 0), Credit: rows.reduce((sum, row) => sum + Number(row.creditAmount || 0), 0) });
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    worksheet["!cols"] = [
+      { wch: 14 }, { wch: 55 }, { wch: 12 }, { wch: 16 },
+      { wch: 16 }, { wch: 16 }, { wch: 18 }, { wch: 22 },
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Transactions");
+    XLSX.writeFile(workbook, `expense-audit-transactions-${scope.toLowerCase()}.xlsx`);
+    toast.success(`${exportRows.length - 2} transaction rows downloaded`);
+  };
+  const downloadSummary = () => {
+    const exportRows = categoryGroups.map((group) => ({
+      Category: group.categoryName,
+      "Debit rows": group.debit.count,
+      "Debit total": Number(group.debit.total || 0),
+      "Credit rows": group.credit.count,
+      "Credit total": Number(group.credit.total || 0),
+    }));
+    exportRows.push({});
+    exportRows.push({ Category: "TOTAL", "Debit rows": categoryGroups.reduce((sum, group) => sum + group.debit.count, 0), "Debit total": totals.debit, "Credit rows": categoryGroups.reduce((sum, group) => sum + group.credit.count, 0), "Credit total": totals.credit });
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    worksheet["!cols"] = [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 18 }];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Category Summary");
+    XLSX.writeFile(workbook, "expense-audit-category-summary.xlsx");
+    toast.success("Category summary downloaded");
+  };
   const readFile = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -189,6 +240,7 @@ export default function ExpenseAuditPage() {
     event.preventDefault();
     const name = identifierForm.name.trim();
     if (!name) return toast.error("Enter an identifier");
+    if (!identifierForm.categoryId) return toast.error("Select a category for this identifier");
     saveIdentifier.mutate(editingId ? { id: editingId, companyId, ...identifierForm } : { companyId, ...identifierForm });
   };
   const submitCategory = (event) => {
@@ -208,11 +260,34 @@ export default function ExpenseAuditPage() {
 
     <div className="grid gap-4 md:grid-cols-4"><Metric label="Rows" value={overview.summary.totalRows || 0} /><Metric label="Categorized" value={overview.summary.identifiedRows || 0} /><Metric label="Uncategorized" value={overview.summary.unmatchedRows || 0} tone="rose" /><Metric label="Net movement (all rows)" value={formatCurrency(overview.summary.netAmount || 0)} /></div>
 
-    <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
+    <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <div><h2 className="font-bold text-slate-800">Category to identifier master data</h2><p className="mt-1 text-xs text-slate-600">Map several identifiers to one category. Matching imported descriptions are categorized automatically.</p></div>
+        <ClipboardCheck size={18} className="text-blue-600" />
+      </div>
+      <form onSubmit={submitCategory} className="mt-4 grid gap-2 md:grid-cols-[1fr_1.5fr_auto]">
+        <input value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} placeholder="Category e.g. Salary" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
+        <input value={categoryForm.description} onChange={(event) => setCategoryForm({ ...categoryForm, description: event.target.value })} placeholder="Category description" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
+        <div className="flex gap-2"><button className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus size={15} /> {editingCategoryId ? "Update category" : "Add category"}</button>{editingCategoryId && <button type="button" onClick={() => { setEditingCategoryId(""); setCategoryForm({ name: "", description: "" }); }} className="rounded-xl border border-slate-200 bg-white px-3"><X size={15} /></button>}</div>
+      </form>
+      <div className="mt-3 flex flex-wrap gap-2">{categories.map((category) => <div key={`category-${category._id}`} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs"><span className="font-bold text-slate-800">{category.name}</span><button type="button" onClick={() => { setEditingCategoryId(category._id); setCategoryForm({ name: category.name, description: category.description || "" }); }} className="text-slate-500 hover:text-slate-900"><Edit3 size={13} /></button><button type="button" onClick={() => deleteCategory.mutate({ id: category._id, companyId })} className="text-rose-600 hover:text-rose-800"><Trash2 size={13} /></button></div>)}</div>
+      <form onSubmit={submitIdentifier} className="mt-4 grid gap-2 md:grid-cols-[1fr_1fr_1.5fr_auto]">
+        <select value={identifierForm.categoryId} onChange={(event) => setIdentifierForm({ ...identifierForm, categoryId: event.target.value })} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="">Select category</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.name}</option>)}</select>
+        <input value={identifierForm.name} onChange={(event) => setIdentifierForm({ ...identifierForm, name: event.target.value })} placeholder="Identifier: SAL, salary, pay" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
+        <input value={identifierForm.description} onChange={(event) => setIdentifierForm({ ...identifierForm, description: event.target.value })} placeholder="Optional description" className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm" />
+        <div className="flex gap-2"><button className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white"><Plus size={15} /> {editingId ? "Update" : "Add"}</button>{editingId && <button type="button" onClick={() => { setEditingId(""); setIdentifierForm({ name: "", description: "", categoryId: "" }); }} className="rounded-xl border border-slate-200 bg-white px-3"><X size={15} /></button>}</div>
+      </form>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="min-w-[620px] w-full text-sm"><thead className="bg-slate-100 text-left text-xs text-slate-500"><tr><th className="px-4 py-3">Category</th><th className="px-4 py-3">Identifier</th><th className="px-4 py-3">Description</th><th className="px-4 py-3 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{identifiers.map((item) => <tr key={`master-${item._id}`}><td className="px-4 py-3 font-semibold text-slate-800">{categories.find((category) => category._id === item.categoryId)?.name || item.categoryName || "Unmapped"}</td><td className="px-4 py-3 font-bold text-blue-700">{item.name}</td><td className="px-4 py-3 text-slate-500">{item.description || "-"}</td><td className="px-4 py-3 text-right"><button type="button" onClick={() => { setEditingId(item._id); setIdentifierForm({ name: item.name, description: item.description || "", categoryId: item.categoryId || "" }); }} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><Edit3 size={14} /></button><button type="button" onClick={() => deleteIdentifier.mutate({ id: item._id, companyId })} className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"><Trash2 size={14} /></button></td></tr>)}{!identifiers.length && <tr><td colSpan="4" className="px-4 py-8 text-center text-slate-400">Create a category, then add its identifiers.</td></tr>}</tbody></table></div>
+      <div className="mt-6 border-t border-blue-100 pt-5"><div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"><div><h3 className="font-bold text-slate-800">{financialYearInfo.label} Category Summary</h3><p className="mt-1 text-xs text-slate-600">Transactions grouped by their automatically or manually assigned category.</p></div><div className="flex flex-wrap items-center gap-2"><div className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">Debit: {formatCurrency(totals.debit)}</div><div className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Credit: {formatCurrency(totals.credit)}</div><button type="button" onClick={downloadSummary} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white"><Download size={14} /> Download summary</button></div></div><div className="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white"><table className="min-w-[720px] w-full text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-3">Category</th><th className="px-4 py-3">Debit rows</th><th className="px-4 py-3">Debit total</th><th className="px-4 py-3">Credit rows</th><th className="px-4 py-3">Credit total</th></tr></thead><tbody className="divide-y divide-slate-100">{categoryGroups.map((group) => <tr key={group.categoryId || group.categoryName}><td className="px-4 py-3 font-bold text-slate-800">{group.categoryName}</td><td className="px-4 py-3">{group.debit.count}</td><td className="px-4 py-3 font-semibold text-rose-700">{formatCurrency(group.debit.total)}</td><td className="px-4 py-3">{group.credit.count}</td><td className="px-4 py-3 font-semibold text-emerald-700">{formatCurrency(group.credit.total)}</td></tr>)}{!categoryGroups.length && <tr><td colSpan="5" className="px-4 py-8 text-center text-slate-400">Categorized transactions will appear here.</td></tr>}</tbody></table></div></div>
+    </section>
+
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-bold text-slate-800">Download Transactions</h3><p className="text-xs text-slate-500">Export the transaction rows with totals.</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">Debit: {formatCurrency(totals.debit)}</span><span className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Credit: {formatCurrency(totals.credit)}</span><button type="button" onClick={() => downloadTransactions("ALL")} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white"><Download size={14} /> All</button><button type="button" onClick={() => downloadTransactions("CATEGORIZED")} className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700"><Download size={14} /> Categorized</button><button type="button" onClick={() => downloadTransactions("UNCATEGORIZED")} className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700"><Download size={14} /> Uncategorized</button></div></div></section>
+
+    {showLegacyMasterData && <div className="grid gap-6 xl:grid-cols-[360px_1fr]">
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-bold text-slate-800">Identifiers</h2><ClipboardCheck size={17} className="text-blue-600" /></div><p className="mt-1 text-xs text-slate-500">Identifiers help suggest a category when rows are imported.</p><form onSubmit={submitIdentifier} className="mt-4 space-y-2"><input value={identifierForm.name} onChange={(event) => setIdentifierForm({ ...identifierForm, name: event.target.value })} placeholder="Identifier e.g. SAL" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><input value={identifierForm.description} onChange={(event) => setIdentifierForm({ ...identifierForm, description: event.target.value })} placeholder="Optional description" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><div className="flex gap-2"><button className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-semibold text-white"><Plus size={15} /> {editingId ? "Update" : "Add"}</button>{editingId && <button type="button" onClick={() => { setEditingId(""); setIdentifierForm({ name: "", description: "" }); }} className="rounded-xl border px-3"><X size={15} /></button>}</div></form><div className="mt-5 space-y-2">{identifiers.map((item) => <div key={item._id} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><div><p className="font-bold text-slate-800">{item.name}</p><p className="text-[11px] text-slate-500">{item.description || "No description"}</p></div><div className="flex gap-1"><button onClick={() => { setEditingId(item._id); setIdentifierForm({ name: item.name, description: item.description || "" }); }} className="rounded-lg p-2 text-slate-500 hover:bg-white"><Edit3 size={14} /></button><button onClick={() => deleteIdentifier.mutate({ id: item._id, companyId })} className="rounded-lg p-2 text-rose-600 hover:bg-white"><Trash2 size={14} /></button></div></div>)}{!identifiers.length && <p className="py-4 text-center text-xs text-slate-400">Add your first identifier.</p>}</div><div className="mt-6 border-t border-slate-100 pt-5"><h3 className="font-bold text-slate-800">Categories</h3><p className="mt-1 text-xs text-slate-500">Categories are the final classification shown in the audit.</p><form onSubmit={submitCategory} className="mt-3 space-y-2"><input value={categoryForm.name} onChange={(event) => setCategoryForm({ ...categoryForm, name: event.target.value })} placeholder="Category e.g. Salary" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><input value={categoryForm.description} onChange={(event) => setCategoryForm({ ...categoryForm, description: event.target.value })} placeholder="Optional description" className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm" /><div className="flex gap-2"><button className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white"><Plus size={15} /> {editingCategoryId ? "Update" : "Add"}</button>{editingCategoryId && <button type="button" onClick={() => { setEditingCategoryId(""); setCategoryForm({ name: "", description: "" }); }} className="rounded-xl border px-3"><X size={15} /></button>}</div></form><div className="mt-4 space-y-2">{categories.map((item) => <div key={item._id} className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5"><div><p className="font-bold text-slate-800">{item.name}</p><p className="text-[11px] text-slate-500">{item.description || "No description"}</p></div><div className="flex gap-1"><button onClick={() => { setEditingCategoryId(item._id); setCategoryForm({ name: item.name, description: item.description || "" }); }} className="rounded-lg p-2 text-slate-500 hover:bg-white"><Edit3 size={14} /></button><button onClick={() => deleteCategory.mutate({ id: item._id, companyId })} className="rounded-lg p-2 text-rose-600 hover:bg-white"><Trash2 size={14} /></button></div></div>)}{!categories.length && <p className="py-4 text-center text-xs text-slate-400">Add your first category.</p>}</div></div></section>
 
       <section className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-5 py-4"><h2 className="font-bold text-slate-800">{financialYearInfo.label} Category Summary</h2><p className="text-xs text-slate-500">Only categorized rows are included in these totals.</p></div><div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Category</th><th className="px-5 py-3">Debit rows</th><th className="px-5 py-3">Debit total</th><th className="px-5 py-3">Credit rows</th><th className="px-5 py-3">Credit total</th></tr></thead><tbody className="divide-y divide-slate-100">{categoryGroups.map((group) => <tr key={group.categoryId || group.categoryName}><td className="px-5 py-3 font-bold text-slate-800">{group.categoryName}</td><td className="px-5 py-3">{group.debit.count}</td><td className="px-5 py-3 font-semibold text-rose-700">{formatCurrency(group.debit.total)}</td><td className="px-5 py-3">{group.credit.count}</td><td className="px-5 py-3 font-semibold text-emerald-700">{formatCurrency(group.credit.total)}</td></tr>)}{!categoryGroups.length && <tr><td colSpan="5" className="px-5 py-10 text-center text-slate-400">Categorize transactions to build the summary.</td></tr>}</tbody></table></div></section>
-    </div>
+    </div>}
 
     <section className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-slate-800">Transaction Review</h2><p className="text-xs text-slate-500">Assign or change a category on every imported row.</p></div><div className="flex flex-wrap gap-2">{[["ALL", `All (${(overview.rows || []).length})`], ["IDENTIFIED", `Categorized (${(overview.rows || []).filter((row) => row.categoryId).length})`], ["UNIDENTIFIED", `Uncategorized (${(overview.rows || []).filter((row) => !row.categoryId).length})`]].map(([value, label]) => <button key={value} onClick={() => setRowView(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${rowView === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>)}</div></div><div className="max-h-[620px] overflow-auto"><table className="min-w-[1050px] w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-4 py-3">Date</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Direction</th><th className="px-4 py-3 text-right">Amount</th><th className="px-4 py-3">Identifier</th><th className="px-4 py-3">Category</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleRows.map((row) => <tr key={row._id} className={!row.categoryId ? "bg-amber-50/50" : "hover:bg-slate-50"}><td className="whitespace-nowrap px-4 py-3">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="max-w-[390px] px-4 py-3 font-medium text-slate-800">{row.description}</td><td className={`px-4 py-3 text-xs font-bold ${row.direction === "DEBIT" ? "text-rose-700" : "text-emerald-700"}`}>{row.direction}</td><td className="px-4 py-3 text-right font-bold">{formatCurrency(row.amount)}</td><td className="px-4 py-3 text-xs text-slate-500">{row.identifierName || "-"}</td><td className="px-4 py-3"><select value={row.categoryId || ""} onChange={(event) => updateTransactionCategory.mutate({ id: row._id, companyId, categoryId: event.target.value })} disabled={updateTransactionCategory.isPending} className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold"><option value="">Uncategorized</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.name}</option>)}</select></td></tr>)}{!visibleRows.length && <tr><td colSpan="6" className="px-5 py-10 text-center text-slate-400">No imported transactions for this financial year.</td></tr>}</tbody></table></div></section>
 
