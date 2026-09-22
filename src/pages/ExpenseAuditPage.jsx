@@ -30,6 +30,11 @@ const aliases = {
   direction: ["type", "transaction type", "cr dr", "dr cr", "debit credit", "transaction mode", "credit debit"],
 };
 const normalize = (value) => String(value || "").replace(/\uFEFF/g, "").trim().toLowerCase().replace(/[\r\n_\-()/]+/g, " ").replace(/\s+/g, " ");
+const duplicateNormalize = (value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+const getDuplicateKey = (row) => {
+  const date = row.transactionDate ? new Date(row.transactionDate).toISOString().slice(0, 10) : "";
+  return [date, duplicateNormalize(row.description), Number(row.debitAmount || 0).toFixed(2), Number(row.creditAmount || 0).toFixed(2)].join("|");
+};
 const parseAmount = (value) => {
   if (value == null || value === "") return 0;
   if (typeof value === "number" && Number.isFinite(value)) return Math.abs(value);
@@ -225,7 +230,14 @@ export default function ExpenseAuditPage() {
           originalRowData: row,
         };
       });
-      setPreview({ fileName: file.name, transactions });
+      const existingKeys = new Set(auditRows.map(getDuplicateKey));
+      const batchKeys = new Set();
+      const previewTransactions = transactions.map((transaction) => {
+        const duplicate = existingKeys.has(getDuplicateKey(transaction)) || batchKeys.has(getDuplicateKey(transaction));
+        batchKeys.add(getDuplicateKey(transaction));
+        return { ...transaction, duplicate, duplicateReason: duplicate ? "Matching transaction already imported or repeated in this file" : "" };
+      });
+      setPreview({ fileName: file.name, transactions: previewTransactions });
     } catch (error) { toast.error(error.message || "Could not read workbook"); }
   };
   const confirmUpload = () => {
@@ -234,7 +246,12 @@ export default function ExpenseAuditPage() {
       toast.error("Every row needs a valid date, description, and debit or credit amount");
       return;
     }
-    uploadMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, fileName: preview.fileName, replaceExistingFile: true, transactions: preview.transactions });
+    const transactions = preview.transactions.filter((row) => !row.duplicate);
+    if (!transactions.length) {
+      toast.info("All rows in this file are duplicates; nothing was imported");
+      return;
+    }
+    uploadMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, fileName: preview.fileName, replaceExistingFile: false, transactions });
   };
   const submitIdentifier = (event) => {
     event.preventDefault();
@@ -293,7 +310,7 @@ export default function ExpenseAuditPage() {
 
     <section className="rounded-2xl border border-rose-200 bg-white shadow-sm"><div className="border-b border-rose-100 bg-rose-50 px-5 py-4"><h2 className="font-bold text-rose-900">Uncategorized Transactions</h2><p className="text-xs text-rose-700">Rows remain here until a category is selected. Categorizing a row moves it into the categorized view and summary.</p></div><div className="max-h-[360px] overflow-auto"><table className="min-w-[720px] w-full text-sm"><thead className="sticky top-0 bg-white text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Debit</th><th className="px-5 py-3">Credit</th></tr></thead><tbody className="divide-y divide-slate-100">{(overview.unmatched || []).map((row) => <tr key={row._id}><td className="px-5 py-3 whitespace-nowrap">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="px-5 py-3 font-medium">{row.description}</td><td className="px-5 py-3 text-rose-700">{formatCurrency(row.debitAmount)}</td><td className="px-5 py-3 text-emerald-700">{formatCurrency(row.creditAmount)}</td></tr>)}{!overview.unmatched?.length && <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">All rows are categorized.</td></tr>}</tbody></table></div></section>
 
-    {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[700px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className="border-t"><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Cancel</button><button onClick={confirmUpload} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FileSpreadsheet size={15} /> Confirm import</button></div></div></div>}
+    {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="mt-1 text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows · {preview.transactions.filter((row) => row.duplicate).length} duplicates will be skipped</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[820px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-left">Import status</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className={`border-t ${row.duplicate ? "bg-amber-50" : ""}`}><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td><td className={`px-4 py-2 font-semibold ${row.duplicate ? "text-amber-700" : "text-emerald-700"}`}>{row.duplicate ? row.duplicateReason : "Will import"}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Cancel</button><button onClick={confirmUpload} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FileSpreadsheet size={15} /> Import non-duplicates</button></div></div></div>}
   </div>;
 }
 
