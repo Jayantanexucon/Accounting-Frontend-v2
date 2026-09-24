@@ -61,3 +61,13 @@ export const uploadExpenseAuditApi = async (payload) => {
   const { data } = await API.post("/accounting/expense-audit/upload", payload);
   return data;
 };
+
+export const listAuditVersionsApi = async (companyId, financialYearEnding) => {
+  const { data } = await API.get(`/accounting/expense-audit/versions/${companyId}/${financialYearEnding}`);
+  return data;
+};
+
+export const checkoutAuditVersionApi = async ({ companyId, financialYearEnding, versionId }) => {
+  const { data } = await API.post(`/accounting/expense-audit/versions/${companyId}/${financialYearEnding}/checkout/${versionId}`);
+  return data;
+};

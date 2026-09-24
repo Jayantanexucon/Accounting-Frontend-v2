@@ -7,6 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useFinancialYear } from "../contexts/FinancialYearContext";
 import { getFinancialYearInfo } from "../utils/scheduleReportUtil";
 import {
+  checkoutAuditVersionApi,
   createAuditIdentifierApi,
   createAuditCategoryApi,
   deleteAuditIdentifierApi,
@@ -14,6 +15,7 @@ import {
   getExpenseAuditOverviewApi,
   listAuditCategoriesApi,
   listAuditIdentifiersApi,
+  listAuditVersionsApi,
   updateAuditCategoryApi,
   updateAuditIdentifierApi,
   updateAuditTransactionApi,
@@ -117,7 +119,15 @@ export default function ExpenseAuditPage() {
   const [selectedSummaryRows, setSelectedSummaryRows] = useState([]);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState([]);
   const [preview, setPreview] = useState(null);
+  const [compareVersionId, setCompareVersionId] = useState("");
   const showLegacyMasterData = import.meta.env.VITE_SHOW_LEGACY_AUDIT_MASTER_DATA === "true";
+
+  const versionsQuery = useQuery({
+    queryKey: ["audit-versions", companyId, selectedFinancialYearEnding],
+    queryFn: () => listAuditVersionsApi(companyId, selectedFinancialYearEnding),
+    enabled: Boolean(companyId),
+  });
+  const versions = versionsQuery.data?.data || [];
 
   const identifiersQuery = useQuery({ queryKey: ["audit-identifiers", companyId], queryFn: () => listAuditIdentifiersApi(companyId), enabled: Boolean(companyId) });
   const categoriesQuery = useQuery({ queryKey: ["audit-categories", companyId], queryFn: () => listAuditCategoriesApi(companyId), enabled: Boolean(companyId) });
@@ -125,7 +135,14 @@ export default function ExpenseAuditPage() {
   const identifiers = identifiersQuery.data?.data || [];
   const categories = useMemo(() => categoriesQuery.data?.data || [], [categoriesQuery.data?.data]);
   const overview = overviewQuery.data?.data || { groups: [], unmatched: [], summary: {} };
-  const invalidate = () => { queryClient.invalidateQueries({ queryKey: ["audit-identifiers", companyId] }); queryClient.invalidateQueries({ queryKey: ["audit-categories", companyId] }); queryClient.invalidateQueries({ queryKey: ["expense-audit", companyId] }); };
+  const activeVersion = versionsQuery.data?.data?.find((version) => version.active) || null;
+  const compareVersion = versionsQuery.data?.data?.find((version) => String(version._id) === String(compareVersionId)) || null;
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["audit-identifiers", companyId] });
+    queryClient.invalidateQueries({ queryKey: ["audit-categories", companyId] });
+    queryClient.invalidateQueries({ queryKey: ["expense-audit", companyId, selectedFinancialYearEnding] });
+    queryClient.invalidateQueries({ queryKey: ["audit-versions", companyId, selectedFinancialYearEnding] });
+  };
 
   const saveIdentifier = useMutation({ mutationFn: editingId ? updateAuditIdentifierApi : createAuditIdentifierApi, onSuccess: () => { invalidate(); setIdentifierForm({ name: "", description: "", categoryId: "" }); setEditingId(""); toast.success("Identifier saved"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not save identifier") });
   const deleteIdentifier = useMutation({ mutationFn: deleteAuditIdentifierApi, onSuccess: () => { invalidate(); toast.success("Identifier deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete identifier") });
@@ -133,7 +150,23 @@ export default function ExpenseAuditPage() {
   const deleteCategory = useMutation({ mutationFn: deleteAuditCategoryApi, onSuccess: () => { invalidate(); toast.success("Category deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete category") });
   const updateTransactionCategory = useMutation({ mutationFn: updateAuditTransactionCategoryApi, onSuccess: () => { invalidate(); toast.success("Transaction category updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
   const updateTransaction = useMutation({ mutationFn: updateAuditTransactionApi, onSuccess: () => { invalidate(); toast.success("Transaction updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
-  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
+  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); setCompareVersionId(""); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
+  const checkoutVersionMutation = useMutation({
+    mutationFn: checkoutAuditVersionApi,
+    onSuccess: () => {
+      invalidate();
+      setCompareVersionId("");
+      toast.success("Previous upload state restored");
+    },
+    onError: (error) => toast.error(error?.response?.data?.message || "Could not restore this version"),
+  });
+
+  const formatVersionTimestamp = (value) => {
+    if (!value) return "No timestamp";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "No timestamp";
+    return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
+  };
 
   const categoryGroups = useMemo(() => overview.categoryGroups || [], [overview.categoryGroups]);
   const auditRows = useMemo(
@@ -322,6 +355,76 @@ export default function ExpenseAuditPage() {
     </div>
 
     <div className="grid gap-4 md:grid-cols-4"><Metric label="Rows" value={overview.summary.totalRows || 0} /><Metric label="Categorized" value={overview.summary.identifiedRows || 0} /><Metric label="Uncategorized" value={overview.summary.unmatchedRows || 0} tone="rose" /><Metric label="Net movement (all rows)" value={formatCurrency(overview.summary.netAmount || 0)} /></div>
+
+    <section className="rounded-2xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h2 className="font-bold text-slate-800">Upload checkpoints</h2>
+          <p className="mt-1 text-xs text-slate-600">Each successful Excel upload creates a save point. You can restore any previous version for this financial year.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {activeVersion && (
+            <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">
+              Current: {activeVersion.fileName || activeVersion.label || "Snapshot"}
+            </span>
+          )}
+          <div className="rounded-full border border-violet-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-violet-700">{versions.length} save points</div>
+        </div>
+      </div>
+
+      {compareVersion && (
+        <div className="mt-4 rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm text-slate-700">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-600">Compare</span>
+              <p className="mt-1 font-semibold text-slate-800">{compareVersion.fileName || "Upload snapshot"}</p>
+            </div>
+            <button type="button" onClick={() => setCompareVersionId("")} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Clear compare</button>
+          </div>
+          <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Imported</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.importedCount || 0}</span></div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Duplicates</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.duplicateCount || 0}</span></div>
+            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Rows</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.totalRows || 0}</span></div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {versions.map((version) => { const isCurrent = Boolean(version.active); const isCompared = String(compareVersionId) === String(version._id); return (
+          <div key={version._id} className={`rounded-2xl border p-4 transition ${isCurrent ? "border-violet-500 bg-violet-600/5" : "border-slate-200 bg-white"}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">{version.label || `Upload ${version.versionNumber || ""}`}</p>
+                <p className="mt-2 text-sm font-bold text-slate-800">{version.fileName || "Upload snapshot"}</p>
+              </div>
+              <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
+                {isCurrent ? "Current" : "Saved"}
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2 text-xs text-slate-600">
+              <p><span className="font-medium text-slate-500">Uploaded:</span> {formatVersionTimestamp(version.createdAt)}</p>
+              <p><span className="font-medium text-slate-500">By:</span> {version.createdBy || "System"}</p>
+              <p><span className="font-medium text-slate-500">Imported:</span> {version.summary?.importedCount || 0}</p>
+              <p><span className="font-medium text-slate-500">Duplicates skipped:</span> {version.summary?.duplicateCount || 0}</p>
+              <p><span className="font-medium text-slate-500">Rows in snapshot:</span> {version.summary?.totalRows || 0}</p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              {isCurrent ? (
+                <span className="inline-flex items-center rounded-xl bg-violet-100 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Current</span>
+              ) : (
+                <button type="button" onClick={() => checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })} disabled={checkoutVersionMutation.isPending} className="inline-flex items-center rounded-xl border border-violet-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60">Restore</button>
+              )}
+              <button type="button" onClick={() => setCompareVersionId((current) => current === version._id ? "" : version._id)} className={`inline-flex items-center rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] ${isCompared ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+                {isCompared ? "Comparing" : "Compare"}
+              </button>
+            </div>
+          </div>
+        ); })}
+        {!versions.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-400 md:col-span-2 xl:col-span-3">No upload checkpoints yet for this financial year.</div>}
+      </div>
+    </section>
 
     <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5 shadow-sm">
       <div className="flex items-center justify-between">
