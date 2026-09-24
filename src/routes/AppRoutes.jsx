@@ -48,6 +48,7 @@ const BankReconciliationPage = lazy(
   () => import("../pages/BankReconciliationPage"),
 );
 const ExpenseAuditPage = lazy(() => import("../pages/ExpenseAuditPage"));
+const AccountingMasterDataPage = lazy(() => import("../pages/AccountingMasterDataPage"));
 const BulkInvoiceUploadPage = lazy(
   () => import("../pages/BulkInvoiceUploadPage"),
 );
@@ -134,6 +135,7 @@ export default function AppRoutes() {
                   element={withPermission("PROFIT AND LOSS", "VIEW", <ProfitLossStatement />)}
                 />
                 <Route path="day-books" element={<DayBooks />} />
+                <Route path="master-data" element={<AccountingMasterDataPage />} />
               </Route>
 
               <Route path="master-data">

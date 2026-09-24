@@ -294,7 +294,10 @@ export default function NavbarComponent() {
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden ml-9 mt-1 border-l border-white/10"
                     >
-                      {link.options.map((child, idx) => (
+                      {(link.name === "Accounting"
+                        ? [...link.options, { _id: "accounting-master-data", name: "Accounting Master Data", navLink: "/accounting/master-data", key: "master-control", alwaysShow: true }]
+                        : link.options
+                      ).map((child, idx) => (
                         <NavLink
                           key={child._id || idx}
                           to={child.navLink}
