@@ -130,7 +130,8 @@ export default function ExpenseAuditPage() {
   const [expandedCategoryKeys, setExpandedCategoryKeys] = useState([]);
   const [preview, setPreview] = useState(null);
   const [draftUpload, setDraftUpload] = useState(null);
-  const [compareVersionId, setCompareVersionId] = useState("");
+  const [saveNameModalOpen, setSaveNameModalOpen] = useState(false);
+  const [saveNameDraft, setSaveNameDraft] = useState("");
   const showLegacyMasterData = import.meta.env.VITE_SHOW_LEGACY_AUDIT_MASTER_DATA === "true";
 
   const draftStorageKey = useMemo(() => `expense-audit-draft-${companyId || "unknown"}-${selectedFinancialYearEnding || "fy"}`, [companyId, selectedFinancialYearEnding]);
@@ -189,15 +190,18 @@ export default function ExpenseAuditPage() {
     enabled: Boolean(companyId),
   });
   const versions = versionsQuery.data?.data || [];
+  const activeVersion = versionsQuery.data?.data?.find((version) => version.active) || null;
 
   const identifiersQuery = useQuery({ queryKey: ["audit-identifiers", companyId], queryFn: () => listAuditIdentifiersApi(companyId), enabled: Boolean(companyId) });
   const categoriesQuery = useQuery({ queryKey: ["audit-categories", companyId], queryFn: () => listAuditCategoriesApi(companyId), enabled: Boolean(companyId) });
-  const overviewQuery = useQuery({ queryKey: ["expense-audit", companyId, selectedFinancialYearEnding], queryFn: () => getExpenseAuditOverviewApi(companyId, selectedFinancialYearEnding), enabled: Boolean(companyId) });
+  const overviewQuery = useQuery({
+    queryKey: ["expense-audit", companyId, selectedFinancialYearEnding, activeVersion?._id],
+    queryFn: () => getExpenseAuditOverviewApi(companyId, selectedFinancialYearEnding, activeVersion?._id),
+    enabled: Boolean(companyId),
+  });
   const identifiers = identifiersQuery.data?.data || [];
   const categories = useMemo(() => categoriesQuery.data?.data || [], [categoriesQuery.data?.data]);
   const overview = overviewQuery.data?.data || { groups: [], unmatched: [], summary: {} };
-  const activeVersion = versionsQuery.data?.data?.find((version) => version.active) || null;
-  const compareVersion = versionsQuery.data?.data?.find((version) => String(version._id) === String(compareVersionId)) || null;
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["audit-identifiers", companyId] });
     queryClient.invalidateQueries({ queryKey: ["audit-categories", companyId] });
@@ -211,16 +215,17 @@ export default function ExpenseAuditPage() {
   const deleteCategory = useMutation({ mutationFn: deleteAuditCategoryApi, onSuccess: () => { invalidate(); toast.success("Category deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete category") });
   const updateTransactionCategory = useMutation({ mutationFn: updateAuditTransactionCategoryApi, onSuccess: () => { invalidate(); toast.success("Transaction category updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
   const updateTransaction = useMutation({ mutationFn: updateAuditTransactionApi, onSuccess: () => { invalidate(); toast.success("Transaction updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
-  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); setDraftUpload(null); persistDraft(null); setCompareVersionId(""); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
+  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); setDraftUpload(null); persistDraft(null); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
   const checkoutVersionMutation = useMutation({
     mutationFn: checkoutAuditVersionApi,
     onSuccess: () => {
       invalidate();
-      setCompareVersionId("");
-      toast.success("Previous upload state restored");
+      toast.success("Upload instance opened");
     },
     onError: (error) => toast.error(error?.response?.data?.message || "Could not restore this version"),
   });
+
+  const getVersionDisplayName = (version) => version?.label || version?.fileName || `Upload ${version?.versionNumber || "new"}`;
 
   const formatVersionTimestamp = (value) => {
     if (!value) return "No timestamp";
@@ -389,7 +394,7 @@ export default function ExpenseAuditPage() {
       updateDraftRowCategory(row._id, nextCategoryId);
       return;
     }
-    updateTransactionCategory.mutate({ id: row._id, companyId, categoryId: nextCategoryId });
+    updateTransactionCategory.mutate({ id: row._id, companyId, categoryId: nextCategoryId, versionId: activeVersion?._id });
   };
   const downloadTransactions = (scope, selectedRows = []) => {
     const rows = selectedRows.length ? selectedRows : getRowsForScope(scope);
@@ -500,6 +505,21 @@ export default function ExpenseAuditPage() {
       setPreview(draft);
     } catch (error) { toast.error(error.message || "Could not read workbook"); }
   };
+  const openSaveNameModal = () => {
+    const uploadData = preview || draftUpload;
+    if (!uploadData?.transactions?.length) {
+      toast.error("No valid transaction rows were detected in this draft. Please review the uploaded file.");
+      return;
+    }
+    const filteredTransactions = uploadData.transactions.filter(isValidDraftTransaction);
+    if (!filteredTransactions.length) {
+      toast.error("No valid transaction rows were detected in this draft. Please review the uploaded file.");
+      return;
+    }
+    const suggestedLabel = (uploadData.fileName || "Upload").replace(/\.[^.]+$/, "") || "Upload";
+    setSaveNameDraft(suggestedLabel);
+    setSaveNameModalOpen(true);
+  };
   const confirmUpload = () => {
     const uploadData = preview || draftUpload;
     if (!uploadData?.transactions?.length) {
@@ -511,16 +531,34 @@ export default function ExpenseAuditPage() {
       toast.error("No valid transaction rows were detected in this draft. Please review the uploaded file.");
       return;
     }
+    const trimmedLabel = saveNameDraft.trim();
+    if (!trimmedLabel) {
+      toast.info("Instance name is required before saving.");
+      setSaveNameModalOpen(true);
+      return;
+    }
+
     const skippedCount = uploadData.transactions.length - filteredTransactions.length;
     if (skippedCount > 0) {
       toast.info(`${skippedCount} rows were skipped before saving to keep only valid transactions.`);
     }
+
     const transactions = filteredTransactions.map((row) => ({
       ...row,
       duplicate: false,
       duplicateReason: "",
     }));
-    uploadMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, fileName: uploadData.fileName, replaceExistingFile: true, transactions });
+
+    uploadMutation.mutate({
+      companyId,
+      financialYearEnding: selectedFinancialYearEnding,
+      fileName: uploadData.fileName,
+      label: trimmedLabel,
+      replaceExistingFile: true,
+      transactions,
+    });
+    setSaveNameModalOpen(false);
+    setSaveNameDraft("");
   };
   const submitIdentifier = (event) => {
     event.preventDefault();
@@ -537,6 +575,32 @@ export default function ExpenseAuditPage() {
   };
 
   return <div className="mx-auto w-full max-w-[1900px] space-y-6 px-4 pb-8 xl:px-6">
+    {saveNameModalOpen && (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/60 p-4">
+        <div className="w-full max-w-md rounded-3xl border border-violet-200 bg-white p-6 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-violet-600">Save checkpoint</p>
+              <h3 className="mt-2 text-2xl font-bold text-slate-900">Name this instance</h3>
+            </div>
+            <button type="button" onClick={() => { setSaveNameModalOpen(false); setSaveNameDraft(""); }} className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700"><X size={16} /></button>
+          </div>
+          <p className="mt-3 text-sm text-slate-500">This label will be shown in all saved checkpoints for this upload.</p>
+          <label className="mt-5 block text-xs font-bold uppercase tracking-[0.2em] text-slate-500">Instance name</label>
+          <input
+            autoFocus
+            value={saveNameDraft}
+            onChange={(event) => setSaveNameDraft(event.target.value)}
+            placeholder="eg. Salary - May 2026"
+            className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800 shadow-inner outline-none transition focus:border-violet-400 focus:bg-white focus:ring-4 focus:ring-violet-100"
+          />
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" onClick={() => { setSaveNameModalOpen(false); setSaveNameDraft(""); }} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
+            <button type="button" onClick={confirmUpload} disabled={!saveNameDraft.trim() || uploadMutation.isPending} className="rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300">Save instance</button>
+          </div>
+        </div>
+      </div>
+    )}
     <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div><p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Accounting control</p><h1 className="mt-1 text-3xl font-bold text-slate-900">Expense Audit</h1><p className="mt-2 max-w-3xl text-sm text-slate-500">Import statement rows, match descriptions to your identifiers, and review debit and credit totals by financial year.</p></div>
@@ -556,7 +620,7 @@ export default function ExpenseAuditPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => setPreview(draftUpload)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50">Review draft</button>
-            <button type="button" onClick={confirmUpload} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Save instance</button>
+            <button type="button" onClick={openSaveNameModal} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Save instance</button>
             <button type="button" onClick={discardDraft} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Discard</button>
           </div>
         </div>
@@ -567,7 +631,7 @@ export default function ExpenseAuditPage() {
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="font-bold text-slate-800">Upload checkpoints</h2>
-          <p className="mt-1 text-xs text-slate-600">Each successful Excel upload creates a save point. You can restore any previous version for this financial year.</p>
+          <p className="mt-1 text-xs text-slate-600">Each saved upload becomes a separate instance. Open any saved checkpoint to restore that version.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {draftUpload && (
@@ -577,66 +641,39 @@ export default function ExpenseAuditPage() {
           )}
           {activeVersion && (
             <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">
-              Latest saved checkpoint: {activeVersion.fileName || activeVersion.label || "Snapshot"}
+              Current instance: {getVersionDisplayName(activeVersion)}
             </span>
           )}
-          <div className="rounded-full border border-violet-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-violet-700">{versions.length} save points</div>
         </div>
       </div>
 
-      {compareVersion && (
-        <div className="mt-4 rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm text-slate-700">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-600">Compare</span>
-              <p className="mt-1 font-semibold text-slate-800">{compareVersion.fileName || "Upload snapshot"}</p>
-            </div>
-            <button type="button" onClick={() => setCompareVersionId("")} className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Clear compare</button>
-          </div>
-          <div className="mt-3 grid gap-2 text-xs text-slate-600 sm:grid-cols-3">
-            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Imported</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.importedCount || 0}</span></div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Duplicates</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.duplicateCount || 0}</span></div>
-            <div className="rounded-xl bg-slate-50 px-3 py-2"><span className="block text-[10px] uppercase tracking-[0.18em] text-slate-400">Rows</span><span className="mt-1 block font-semibold text-slate-800">{compareVersion.summary?.totalRows || 0}</span></div>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <div className="mt-4 space-y-2">
         {versions.map((version) => {
-          const isCurrent = Boolean(version.active); const isCompared = String(compareVersionId) === String(version._id); return (
-            <div key={version._id} className={`rounded-2xl border p-4 transition ${isCurrent ? "border-violet-500 bg-violet-600/5" : "border-slate-200 bg-white"}`}>
+          const isCurrent = Boolean(version.active);
+          const versionName = getVersionDisplayName(version);
+          return (
+            <button
+              key={version._id}
+              type="button"
+              onClick={() => !isCurrent && checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })}
+              disabled={isCurrent || checkoutVersionMutation.isPending}
+              className={`w-full rounded-2xl border p-3 text-left transition ${isCurrent ? "border-violet-400 bg-violet-100/80" : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/60"} ${isCurrent ? "cursor-default" : "cursor-pointer"}`}
+            >
               <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">{version.label || `Upload ${version.versionNumber || ""}`}</p>
-                  <p className="mt-2 text-sm font-bold text-slate-800">{version.fileName || "Upload snapshot"}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{version.label ? "Saved instance" : `Upload ${version.versionNumber || ""}`}</span>
+                    {isCurrent && <span className="rounded-full bg-violet-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">Current</span>}
+                  </div>
+                  <p className="mt-1 truncate text-sm font-bold text-slate-800">{versionName}</p>
+                  <p className="mt-1 text-[11px] text-slate-500">{formatVersionTimestamp(version.createdAt)} · {version.summary?.totalRows || 0} rows</p>
                 </div>
-                <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
-                  {isCurrent ? "Saved current" : "Saved checkpoint"}
-                </span>
+                {!isCurrent && <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Open</span>}
               </div>
-
-              <div className="mt-3 space-y-2 text-xs text-slate-600">
-                <p><span className="font-medium text-slate-500">Uploaded:</span> {formatVersionTimestamp(version.createdAt)}</p>
-                <p><span className="font-medium text-slate-500">By:</span> {version.createdBy || "System"}</p>
-                <p><span className="font-medium text-slate-500">Imported:</span> {version.summary?.importedCount || 0}</p>
-                <p><span className="font-medium text-slate-500">Duplicates skipped:</span> {version.summary?.duplicateCount || 0}</p>
-                <p><span className="font-medium text-slate-500">Rows in snapshot:</span> {version.summary?.totalRows || 0}</p>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {isCurrent ? (
-                  <span className="inline-flex items-center rounded-xl bg-violet-100 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Current</span>
-                ) : (
-                  <button type="button" onClick={() => checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })} disabled={checkoutVersionMutation.isPending} className="inline-flex items-center rounded-xl border border-violet-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60">Restore</button>
-                )}
-                <button type="button" onClick={() => setCompareVersionId((current) => current === version._id ? "" : version._id)} className={`inline-flex items-center rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] ${isCompared ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
-                  {isCompared ? "Comparing" : "Compare"}
-                </button>
-              </div>
-            </div>
+            </button>
           );
         })}
-        {!versions.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-400 md:col-span-2 xl:col-span-3">No upload checkpoints yet for this financial year.</div>}
+        {!versions.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-400">No upload checkpoints yet for this financial year.</div>}
       </div>
     </section>
 
@@ -719,7 +756,7 @@ export default function ExpenseAuditPage() {
 
     {/* <section className="rounded-2xl border border-rose-200 bg-white shadow-sm"><div className="border-b border-rose-100 bg-rose-50 px-5 py-4"><h2 className="font-bold text-rose-900">Uncategorized Transactions</h2><p className="text-xs text-rose-700">Rows remain here until a category is selected. Categorizing a row moves it into the categorized view and summary.</p></div><div className="max-h-[360px] overflow-auto"><table className="min-w-[720px] w-full text-sm"><thead className="sticky top-0 bg-white text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Debit</th><th className="px-5 py-3">Credit</th></tr></thead><tbody className="divide-y divide-slate-100">{(overview.unmatched || []).map((row) => <tr key={row._id}><td className="px-5 py-3 whitespace-nowrap">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="px-5 py-3 font-medium">{row.description}</td><td className="px-5 py-3 text-rose-700">{formatCurrency(row.debitAmount)}</td><td className="px-5 py-3 text-emerald-700">{formatCurrency(row.creditAmount)}</td></tr>)}{!overview.unmatched?.length && <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">All rows are categorized.</td></tr>}</tbody></table></div></section> */}
 
-    {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="mt-1 text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows · {preview.transactions.filter((row) => row.duplicate).length} duplicates will be skipped</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[820px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-left">Import status</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className={`border-t ${row.duplicate ? "bg-amber-50" : ""}`}><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td><td className={`px-4 py-2 font-semibold ${row.duplicate ? "text-amber-700" : "text-emerald-700"}`}>{row.duplicate ? row.duplicateReason : "Will import"}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Continue editing</button><button type="button" onClick={confirmUpload} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save instance</button></div></div></div>}
+    {preview && <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="mt-1 text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows · {preview.transactions.filter((row) => row.duplicate).length} duplicates will be skipped</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[820px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-left">Import status</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className={`border-t ${row.duplicate ? "bg-amber-50" : ""}`}><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td><td className={`px-4 py-2 font-semibold ${row.duplicate ? "text-amber-700" : "text-emerald-700"}`}>{row.duplicate ? row.duplicateReason : "Will import"}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Continue editing</button><button type="button" onClick={openSaveNameModal} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save instance</button></div></div></div>}
   </div>;
 }
 

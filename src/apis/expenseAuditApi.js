@@ -1,8 +1,8 @@
 import { API } from "./api";
 
-export const getExpenseAuditOverviewApi = async (companyId, financialYearEnding) => {
+export const getExpenseAuditOverviewApi = async (companyId, financialYearEnding, versionId) => {
   const { data } = await API.get(`/accounting/expense-audit/overview/${companyId}`, {
-    params: { financialYearEnding },
+    params: { financialYearEnding, versionId },
   });
   return data;
 };
