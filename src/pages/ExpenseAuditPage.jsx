@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Download, Edit3, FileSpreadsheet, Plus, Trash2, Upload, X } from "lucide-react";
@@ -105,6 +105,15 @@ const readTransactionRows = (sheet) => {
   return XLSX.utils.sheet_to_json(sheet, { range: headerIndex, defval: "", raw: false });
 };
 const formatCurrency = (value) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(Number(value || 0));
+const isValidDraftTransaction = (row) => {
+  const description = String(row?.description || "").trim();
+  const debitAmount = Number(row?.debitAmount || 0);
+  const creditAmount = Number(row?.creditAmount || 0);
+  const rawDate = row?.transactionDate;
+  const transactionDate = rawDate instanceof Date ? rawDate : new Date(rawDate);
+  const hasValidDate = rawDate && !Number.isNaN(transactionDate.getTime());
+  return hasValidDate && description.length > 0 && (debitAmount > 0 || creditAmount > 0);
+};
 
 export default function ExpenseAuditPage() {
   const { user } = useAuth();
@@ -118,9 +127,61 @@ export default function ExpenseAuditPage() {
   const [rowView, setRowView] = useState("ALL");
   const [selectedSummaryRows, setSelectedSummaryRows] = useState([]);
   const [selectedTransactionIds, setSelectedTransactionIds] = useState([]);
+  const [expandedCategoryKeys, setExpandedCategoryKeys] = useState([]);
   const [preview, setPreview] = useState(null);
+  const [draftUpload, setDraftUpload] = useState(null);
   const [compareVersionId, setCompareVersionId] = useState("");
   const showLegacyMasterData = import.meta.env.VITE_SHOW_LEGACY_AUDIT_MASTER_DATA === "true";
+
+  const draftStorageKey = useMemo(() => `expense-audit-draft-${companyId || "unknown"}-${selectedFinancialYearEnding || "fy"}`, [companyId, selectedFinancialYearEnding]);
+  const persistDraft = useCallback((nextDraft) => {
+    if (!companyId || !selectedFinancialYearEnding) return;
+    if (!nextDraft) {
+      localStorage.removeItem(draftStorageKey);
+      return;
+    }
+    localStorage.setItem(draftStorageKey, JSON.stringify(nextDraft));
+  }, [companyId, draftStorageKey, selectedFinancialYearEnding]);
+  const discardDraft = useCallback(() => {
+    if (!draftUpload) return;
+    const shouldDiscard = window.confirm("This upload is not saved yet. Discard the draft instance?");
+    if (shouldDiscard) {
+      setDraftUpload(null);
+      setPreview(null);
+      persistDraft(null);
+    }
+  }, [draftUpload, persistDraft]);
+
+  useEffect(() => {
+    if (!companyId || !selectedFinancialYearEnding) return;
+    const savedDraft = localStorage.getItem(draftStorageKey);
+    if (!savedDraft) return;
+    try {
+      const parsed = JSON.parse(savedDraft);
+      if (parsed?.transactions?.length) {
+        setDraftUpload(parsed);
+        setPreview(parsed);
+        toast.info("Unsaved upload draft restored. Save it before leaving this page.");
+      }
+    } catch (error) {
+      localStorage.removeItem(draftStorageKey);
+    }
+  }, [companyId, selectedFinancialYearEnding, draftStorageKey]);
+
+  useEffect(() => {
+    persistDraft(draftUpload);
+  }, [draftUpload, persistDraft]);
+
+  useEffect(() => {
+    if (!draftUpload) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "You have an unsaved Excel upload. Save it before leaving this page.";
+      return event.returnValue;
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [draftUpload]);
 
   const versionsQuery = useQuery({
     queryKey: ["audit-versions", companyId, selectedFinancialYearEnding],
@@ -150,7 +211,7 @@ export default function ExpenseAuditPage() {
   const deleteCategory = useMutation({ mutationFn: deleteAuditCategoryApi, onSuccess: () => { invalidate(); toast.success("Category deleted"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not delete category") });
   const updateTransactionCategory = useMutation({ mutationFn: updateAuditTransactionCategoryApi, onSuccess: () => { invalidate(); toast.success("Transaction category updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
   const updateTransaction = useMutation({ mutationFn: updateAuditTransactionApi, onSuccess: () => { invalidate(); toast.success("Transaction updated"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not update transaction") });
-  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); setCompareVersionId(""); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
+  const uploadMutation = useMutation({ mutationFn: uploadExpenseAuditApi, onSuccess: (response) => { invalidate(); setPreview(null); setDraftUpload(null); persistDraft(null); setCompareVersionId(""); toast.success(response?.message || "Audit statement imported"); }, onError: (error) => toast.error(error?.response?.data?.message || "Could not import statement") });
   const checkoutVersionMutation = useMutation({
     mutationFn: checkoutAuditVersionApi,
     onSuccess: () => {
@@ -169,10 +230,36 @@ export default function ExpenseAuditPage() {
   };
 
   const categoryGroups = useMemo(() => overview.categoryGroups || [], [overview.categoryGroups]);
-  const auditRows = useMemo(
-    () => (overview.rows?.length ? overview.rows : overview.unmatched || []),
-    [overview.rows, overview.unmatched],
-  );
+  const draftRows = useMemo(() => {
+    if (!draftUpload?.transactions?.length) return [];
+    const categoryMap = new Map(categories.map((category) => [String(category._id), category.name]));
+    return draftUpload.transactions
+      .filter((row) => !row.duplicate)
+      .map((row, index) => {
+        const categoryId = row.categoryId || "";
+        return {
+          _id: `draft-${row.rowNumber || index}`,
+          transactionDate: row.transactionDate,
+          description: row.description || "",
+          debitAmount: Number(row.debitAmount || 0),
+          creditAmount: Number(row.creditAmount || 0),
+          amount: Number(row.debitAmount || row.creditAmount || 0),
+          direction: row.debitAmount ? "DEBIT" : row.creditAmount ? "CREDIT" : "",
+          categoryId,
+          categoryName: row.categoryName || (categoryId ? categoryMap.get(String(categoryId)) || "Uncategorized" : "Uncategorized"),
+          identifierName: row.identifierName || "",
+        };
+      });
+  }, [categories, draftUpload]);
+  const auditRows = useMemo(() => {
+    if (draftRows.length) return draftRows;
+    return (overview.rows?.length ? overview.rows : overview.unmatched || []);
+  }, [draftRows, overview.rows, overview.unmatched]);
+  const rowCounts = useMemo(() => ({
+    all: auditRows.length,
+    categorized: auditRows.filter((row) => row.categoryId).length,
+    uncategorized: auditRows.filter((row) => !row.categoryId).length,
+  }), [auditRows]);
   const visibleRows = useMemo(() => {
     const rows = auditRows;
     if (rowView === "IDENTIFIED") return rows.filter((row) => row.categoryId);
@@ -184,21 +271,83 @@ export default function ExpenseAuditPage() {
     credit: summary.credit + Number(row.creditAmount || 0),
   }), { debit: 0, credit: 0 }), [auditRows]);
   const financialYearLabel = `FY ${Number(selectedFinancialYearEnding) - 1}-${selectedFinancialYearEnding}`;
-  const categorySummary = useMemo(() => categories.map((category) => {
-    const group = categoryGroups.find((item) => String(item.categoryId) === String(category._id));
-    return group || {
-      categoryId: category._id,
-      categoryName: category.name,
-      debit: { count: 0, total: 0 },
-      credit: { count: 0, total: 0 },
-    };
-  }), [categories, categoryGroups]);
+  const categorySummary = useMemo(() => {
+    if (draftRows.length) {
+      const groupedDraftRows = new Map();
+
+      draftRows.forEach((row) => {
+        const categoryId = row.categoryId || "__UNCATEGORIZED__";
+        const key = String(categoryId);
+        if (!groupedDraftRows.has(key)) {
+          groupedDraftRows.set(key, {
+            categoryId: row.categoryId || null,
+            categoryName: row.categoryId ? (categories.find((category) => String(category._id) === String(row.categoryId))?.name || row.categoryName || "Uncategorized") : "Uncategorized",
+            debit: { count: 0, total: 0 },
+            credit: { count: 0, total: 0 },
+          });
+        }
+
+        const group = groupedDraftRows.get(key);
+        if (Number(row.debitAmount || 0) > 0) {
+          group.debit.count += 1;
+          group.debit.total += Number(row.debitAmount || 0);
+        }
+        if (Number(row.creditAmount || 0) > 0) {
+          group.credit.count += 1;
+          group.credit.total += Number(row.creditAmount || 0);
+        }
+      });
+
+      const baseGroups = categories.map((category) => {
+        const key = String(category._id);
+        return groupedDraftRows.get(key) || {
+          categoryId: category._id,
+          categoryName: category.name,
+          debit: { count: 0, total: 0 },
+          credit: { count: 0, total: 0 },
+        };
+      });
+
+      const uncategorizedGroup = groupedDraftRows.get("__UNCATEGORIZED__") || {
+        categoryId: null,
+        categoryName: "Uncategorized",
+        debit: { count: 0, total: 0 },
+        credit: { count: 0, total: 0 },
+      };
+
+      return [...baseGroups, uncategorizedGroup];
+    }
+    return categories.map((category) => {
+      const group = categoryGroups.find((item) => String(item.categoryId) === String(category._id));
+      return group || {
+        categoryId: category._id,
+        categoryName: category.name,
+        debit: { count: 0, total: 0 },
+        credit: { count: 0, total: 0 },
+      };
+    });
+  }, [categories, categoryGroups, draftRows]);
   const getRowsForScope = (scope) => scope === "CATEGORIZED"
     ? auditRows.filter((row) => row.categoryId)
     : scope === "UNCATEGORIZED"
       ? auditRows.filter((row) => !row.categoryId)
       : auditRows;
   const getSummaryKey = (group) => String(group.categoryId || group.categoryName || "");
+  const getCategoryRows = (group) => {
+    const key = getSummaryKey(group);
+    const rows = auditRows.filter((row) => {
+      if (group.categoryName === "Uncategorized") return !row.categoryId;
+      if (row.categoryId) return String(row.categoryId) === String(group.categoryId);
+      return row.categoryName === group.categoryName;
+    });
+    return { key, rows };
+  };
+  const toggleCategoryExpansion = (group) => {
+    const key = getSummaryKey(group);
+    setExpandedCategoryKeys((current) => current.includes(key)
+      ? current.filter((item) => item !== key)
+      : [...current, key]);
+  };
   const totalForRows = (rows) => rows.reduce((summary, row) => ({
     debit: summary.debit + Number(row.debitAmount || 0),
     credit: summary.credit + Number(row.creditAmount || 0),
@@ -215,6 +364,32 @@ export default function ExpenseAuditPage() {
       return;
     }
     setSelectedSummaryRows(categorySummary.map((group) => getSummaryKey(group)));
+  };
+  const updateDraftRowCategory = useCallback((rowId, categoryId) => {
+    if (!draftUpload?.transactions?.length) return;
+    const selectedCategory = categories.find((category) => String(category._id) === String(categoryId));
+    const nextTransactions = draftUpload.transactions.map((transaction) => {
+      const draftId = `draft-${transaction.rowNumber || 0}`;
+      if (draftId !== String(rowId)) return transaction;
+      return {
+        ...transaction,
+        categoryId: categoryId || "",
+        categoryName: categoryId ? (selectedCategory?.name || "Uncategorized") : "Uncategorized",
+      };
+    });
+    const nextDraft = { ...draftUpload, transactions: nextTransactions };
+    setDraftUpload(nextDraft);
+    setPreview((current) => (current ? { ...current, transactions: nextTransactions } : null));
+    persistDraft(nextDraft);
+  }, [categories, draftUpload, persistDraft]);
+  const handleTransactionCategoryChange = (row, event) => {
+    const nextCategoryId = event.target.value;
+    const isDraftRow = String(row?._id || "").startsWith("draft-") || row?.source === "draft";
+    if (isDraftRow) {
+      updateDraftRowCategory(row._id, nextCategoryId);
+      return;
+    }
+    updateTransactionCategory.mutate({ id: row._id, companyId, categoryId: nextCategoryId });
   };
   const downloadTransactions = (scope, selectedRows = []) => {
     const rows = selectedRows.length ? selectedRows : getRowsForScope(scope);
@@ -309,28 +484,43 @@ export default function ExpenseAuditPage() {
           originalRowData: row,
         };
       });
-      const existingKeys = new Set(auditRows.map(getDuplicateKey));
-      const batchKeys = new Set();
-      const previewTransactions = transactions.map((transaction) => {
-        const duplicate = existingKeys.has(getDuplicateKey(transaction)) || batchKeys.has(getDuplicateKey(transaction));
-        batchKeys.add(getDuplicateKey(transaction));
-        return { ...transaction, duplicate, duplicateReason: duplicate ? "Matching transaction already imported or repeated in this file" : "" };
-      });
-      setPreview({ fileName: file.name, transactions: previewTransactions });
+      const previewTransactions = transactions
+        .filter(isValidDraftTransaction)
+        .map((transaction) => ({
+          ...transaction,
+          duplicate: false,
+          duplicateReason: "",
+        }));
+      const skippedCount = transactions.length - previewTransactions.length;
+      const draft = { fileName: file.name, transactions: previewTransactions, createdAt: new Date().toISOString(), skippedRowsCount: skippedCount };
+      if (skippedCount > 0) {
+        toast.info(`${skippedCount} non-transaction rows were skipped from this draft (for example totals or blank entries).`);
+      }
+      setDraftUpload(draft);
+      setPreview(draft);
     } catch (error) { toast.error(error.message || "Could not read workbook"); }
   };
   const confirmUpload = () => {
-    if (!preview?.transactions?.length) return;
-    if (preview.transactions.some((row) => !row.transactionDate || !row.description || (!row.debitAmount && !row.creditAmount))) {
-      toast.error("Every row needs a valid date, description, and debit or credit amount");
+    const uploadData = preview || draftUpload;
+    if (!uploadData?.transactions?.length) {
+      toast.error("No valid transaction rows were detected in this draft. Please review the uploaded file.");
       return;
     }
-    const transactions = preview.transactions.filter((row) => !row.duplicate);
-    if (!transactions.length) {
-      toast.info("All rows in this file are duplicates; nothing was imported");
+    const filteredTransactions = uploadData.transactions.filter(isValidDraftTransaction);
+    if (!filteredTransactions.length) {
+      toast.error("No valid transaction rows were detected in this draft. Please review the uploaded file.");
       return;
     }
-    uploadMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, fileName: preview.fileName, replaceExistingFile: false, transactions });
+    const skippedCount = uploadData.transactions.length - filteredTransactions.length;
+    if (skippedCount > 0) {
+      toast.info(`${skippedCount} rows were skipped before saving to keep only valid transactions.`);
+    }
+    const transactions = filteredTransactions.map((row) => ({
+      ...row,
+      duplicate: false,
+      duplicateReason: "",
+    }));
+    uploadMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, fileName: uploadData.fileName, replaceExistingFile: true, transactions });
   };
   const submitIdentifier = (event) => {
     event.preventDefault();
@@ -354,7 +544,24 @@ export default function ExpenseAuditPage() {
       </div>
     </div>
 
-    <div className="grid gap-4 md:grid-cols-4"><Metric label="Rows" value={overview.summary.totalRows || 0} /><Metric label="Categorized" value={overview.summary.identifiedRows || 0} /><Metric label="Uncategorized" value={overview.summary.unmatchedRows || 0} tone="rose" /><Metric label="Net movement (all rows)" value={formatCurrency(overview.summary.netAmount || 0)} /></div>
+    <div className="grid gap-4 md:grid-cols-4"><Metric label="Rows" value={rowCounts.all} /><Metric label="Categorized" value={rowCounts.categorized} /><Metric label="Uncategorized" value={rowCounts.uncategorized} tone="rose" /><Metric label="Net movement (all rows)" value={formatCurrency(totals.credit - totals.debit)} /></div>
+
+    {draftUpload && (
+      <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">Unsaved draft</p>
+            <h3 className="mt-1 text-lg font-bold text-slate-800">{draftUpload.fileName || "Excel upload draft"}</h3>
+            <p className="mt-1 text-xs text-slate-600">This upload has not been saved to the database yet.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setPreview(draftUpload)} className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-50">Review draft</button>
+            <button type="button" onClick={confirmUpload} className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700">Save instance</button>
+            <button type="button" onClick={discardDraft} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50">Discard</button>
+          </div>
+        </div>
+      </section>
+    )}
 
     <section className="rounded-2xl border border-violet-200 bg-violet-50/40 p-5 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -363,9 +570,14 @@ export default function ExpenseAuditPage() {
           <p className="mt-1 text-xs text-slate-600">Each successful Excel upload creates a save point. You can restore any previous version for this financial year.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {draftUpload && (
+            <span className="rounded-full border border-amber-200 bg-amber-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-amber-700">
+              Draft in progress: {draftUpload.fileName || "New upload"}
+            </span>
+          )}
           {activeVersion && (
             <span className="rounded-full border border-violet-200 bg-violet-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">
-              Current: {activeVersion.fileName || activeVersion.label || "Snapshot"}
+              Latest saved checkpoint: {activeVersion.fileName || activeVersion.label || "Snapshot"}
             </span>
           )}
           <div className="rounded-full border border-violet-200 bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.25em] text-violet-700">{versions.length} save points</div>
@@ -390,38 +602,40 @@ export default function ExpenseAuditPage() {
       )}
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {versions.map((version) => { const isCurrent = Boolean(version.active); const isCompared = String(compareVersionId) === String(version._id); return (
-          <div key={version._id} className={`rounded-2xl border p-4 transition ${isCurrent ? "border-violet-500 bg-violet-600/5" : "border-slate-200 bg-white"}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">{version.label || `Upload ${version.versionNumber || ""}`}</p>
-                <p className="mt-2 text-sm font-bold text-slate-800">{version.fileName || "Upload snapshot"}</p>
+        {versions.map((version) => {
+          const isCurrent = Boolean(version.active); const isCompared = String(compareVersionId) === String(version._id); return (
+            <div key={version._id} className={`rounded-2xl border p-4 transition ${isCurrent ? "border-violet-500 bg-violet-600/5" : "border-slate-200 bg-white"}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">{version.label || `Upload ${version.versionNumber || ""}`}</p>
+                  <p className="mt-2 text-sm font-bold text-slate-800">{version.fileName || "Upload snapshot"}</p>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
+                  {isCurrent ? "Saved current" : "Saved checkpoint"}
+                </span>
               </div>
-              <span className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ${isCurrent ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"}`}>
-                {isCurrent ? "Current" : "Saved"}
-              </span>
-            </div>
 
-            <div className="mt-3 space-y-2 text-xs text-slate-600">
-              <p><span className="font-medium text-slate-500">Uploaded:</span> {formatVersionTimestamp(version.createdAt)}</p>
-              <p><span className="font-medium text-slate-500">By:</span> {version.createdBy || "System"}</p>
-              <p><span className="font-medium text-slate-500">Imported:</span> {version.summary?.importedCount || 0}</p>
-              <p><span className="font-medium text-slate-500">Duplicates skipped:</span> {version.summary?.duplicateCount || 0}</p>
-              <p><span className="font-medium text-slate-500">Rows in snapshot:</span> {version.summary?.totalRows || 0}</p>
-            </div>
+              <div className="mt-3 space-y-2 text-xs text-slate-600">
+                <p><span className="font-medium text-slate-500">Uploaded:</span> {formatVersionTimestamp(version.createdAt)}</p>
+                <p><span className="font-medium text-slate-500">By:</span> {version.createdBy || "System"}</p>
+                <p><span className="font-medium text-slate-500">Imported:</span> {version.summary?.importedCount || 0}</p>
+                <p><span className="font-medium text-slate-500">Duplicates skipped:</span> {version.summary?.duplicateCount || 0}</p>
+                <p><span className="font-medium text-slate-500">Rows in snapshot:</span> {version.summary?.totalRows || 0}</p>
+              </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              {isCurrent ? (
-                <span className="inline-flex items-center rounded-xl bg-violet-100 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Current</span>
-              ) : (
-                <button type="button" onClick={() => checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })} disabled={checkoutVersionMutation.isPending} className="inline-flex items-center rounded-xl border border-violet-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60">Restore</button>
-              )}
-              <button type="button" onClick={() => setCompareVersionId((current) => current === version._id ? "" : version._id)} className={`inline-flex items-center rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] ${isCompared ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
-                {isCompared ? "Comparing" : "Compare"}
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {isCurrent ? (
+                  <span className="inline-flex items-center rounded-xl bg-violet-100 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Current</span>
+                ) : (
+                  <button type="button" onClick={() => checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })} disabled={checkoutVersionMutation.isPending} className="inline-flex items-center rounded-xl border border-violet-200 bg-white px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-60">Restore</button>
+                )}
+                <button type="button" onClick={() => setCompareVersionId((current) => current === version._id ? "" : version._id)} className={`inline-flex items-center rounded-xl px-3 py-2 text-[10px] font-bold uppercase tracking-[0.18em] ${isCompared ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+                  {isCompared ? "Comparing" : "Compare"}
+                </button>
+              </div>
             </div>
-          </div>
-        ); })}
+          );
+        })}
         {!versions.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-400 md:col-span-2 xl:col-span-3">No upload checkpoints yet for this financial year.</div>}
       </div>
     </section>
@@ -438,7 +652,43 @@ export default function ExpenseAuditPage() {
         <div><h2 className="font-bold text-slate-800">{financialYearLabel} Category Summary</h2><p className="mt-1 text-xs text-slate-500">Transactions grouped by their automatically or manually assigned category.</p></div>
         <div className="flex flex-wrap items-center gap-2"><span className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">Debit: {formatCurrency(totals.debit)}</span><span className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">Credit: {formatCurrency(totals.credit)}</span><button type="button" onClick={() => downloadSummary(categorySummary.filter((group) => selectedSummaryRows.includes(getSummaryKey(group))))} disabled={!selectedSummaryRows.length} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"><Download size={14} /> Download selected</button><button type="button" onClick={downloadSummary} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"><Download size={14} /> Download all</button></div>
       </div>
-      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200"><table className="min-w-[720px] w-full text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-3"><input type="checkbox" checked={categorySummary.length > 0 && selectedSummaryRows.length === categorySummary.length} onChange={toggleAllSummaryRows} className="h-4 w-4 rounded border-slate-300" /></th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Debit rows</th><th className="px-4 py-3">Debit total</th><th className="px-4 py-3">Credit rows</th><th className="px-4 py-3">Credit total</th></tr></thead><tbody className="divide-y divide-slate-100">{categorySummary.map((group) => { const key = getSummaryKey(group); const isSelected = selectedSummaryRows.includes(key); return <tr key={key} className={isSelected ? "bg-blue-50/60" : ""}><td className="px-3 py-3"><input type="checkbox" checked={isSelected} onChange={() => toggleSummaryRow(group)} className="h-4 w-4 rounded border-slate-300" /></td><td className="px-4 py-3 font-bold text-slate-800">{group.categoryName}</td><td className="px-4 py-3">{group.debit.count}</td><td className="px-4 py-3 font-semibold text-rose-700">{formatCurrency(group.debit.total)}</td><td className="px-4 py-3">{group.credit.count}</td><td className="px-4 py-3 font-semibold text-emerald-700">{formatCurrency(group.credit.total)}</td></tr>; })}{!categorySummary.length && <tr><td colSpan="6" className="px-4 py-8 text-center text-slate-400">Create audit categories in Master Data to build this summary.</td></tr>}</tbody></table></div>
+      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200"><table className="min-w-[720px] w-full text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-3"><input type="checkbox" checked={categorySummary.length > 0 && selectedSummaryRows.length === categorySummary.length} onChange={toggleAllSummaryRows} className="h-4 w-4 rounded border-slate-300" /></th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Debit rows</th><th className="px-4 py-3">Debit total</th><th className="px-4 py-3">Credit rows</th><th className="px-4 py-3">Credit total</th><th className="px-4 py-3 text-center">Details</th></tr></thead><tbody className="divide-y divide-slate-100">{categorySummary.map((group) => { const key = getSummaryKey(group); const isSelected = selectedSummaryRows.includes(key); const expanded = expandedCategoryKeys.includes(key); const { rows } = getCategoryRows(group); return <>
+            <tr key={key} className={isSelected ? "bg-blue-50/60" : ""}>
+              <td className="px-3 py-3"><input type="checkbox" checked={isSelected} onChange={() => toggleSummaryRow(group)} className="h-4 w-4 rounded border-slate-300" /></td>
+              <td className="px-4 py-3 font-bold text-slate-800"><button type="button" onClick={() => toggleCategoryExpansion(group)} className="inline-flex items-center gap-2 text-left"> <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-slate-200 text-[10px] font-bold text-slate-600">{expanded ? "−" : "+"}</span> {group.categoryName}</button></td>
+              <td className="px-4 py-3">{group.debit.count}</td>
+              <td className="px-4 py-3 font-semibold text-rose-700">{formatCurrency(group.debit.total)}</td>
+              <td className="px-4 py-3">{group.credit.count}</td>
+              <td className="px-4 py-3 font-semibold text-emerald-700">{formatCurrency(group.credit.total)}</td>
+              <td className="px-4 py-3 text-center text-xs font-semibold text-slate-500">{rows.length} rows</td>
+            </tr>
+            {expanded && (
+              <tr key={`${key}-detail`}>
+                <td colSpan="7" className="bg-slate-50 px-4 py-3">
+                  <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <table className="min-w-full text-xs">
+                      <thead className="bg-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Date</th>
+                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2 text-right">Debit</th>
+                          <th className="px-3 py-2 text-right">Credit</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {rows.length ? rows.map((row) => <tr key={row._id || `${row.transactionDate}-${row.description}`}>
+                          <td className="px-3 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "-"}</td>
+                          <td className="px-3 py-2">{row.description || "-"}</td>
+                          <td className="px-3 py-2 text-right text-rose-700">{formatCurrency(row.debitAmount || 0)}</td>
+                          <td className="px-3 py-2 text-right text-emerald-700">{formatCurrency(row.creditAmount || 0)}</td>
+                        </tr>) : <tr><td colSpan="4" className="px-3 py-3 text-center text-slate-400">No rows available for this category in the current draft.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                </td>
+              </tr>
+            )}
+          </>; })}{!categorySummary.length && <tr><td colSpan="7" className="px-4 py-8 text-center text-slate-400">Create audit categories in Master Data to build this summary.</td></tr>}</tbody></table></div>
     </section>
     {showLegacyMasterData && <section className="rounded-2xl border border-blue-200 bg-blue-50/40 p-5 shadow-sm">
       <form onSubmit={submitCategory} className="mt-4 grid gap-2 md:grid-cols-[1fr_1.5fr_auto]">
@@ -465,11 +715,11 @@ export default function ExpenseAuditPage() {
       <section className="min-w-0 rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="border-b border-slate-100 px-5 py-4"><h2 className="font-bold text-slate-800">{financialYearInfo.label} Category Summary</h2><p className="text-xs text-slate-500">Only categorized rows are included in these totals.</p></div><div className="overflow-x-auto"><table className="min-w-[720px] w-full text-sm"><thead className="bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Category</th><th className="px-5 py-3">Debit rows</th><th className="px-5 py-3">Debit total</th><th className="px-5 py-3">Credit rows</th><th className="px-5 py-3">Credit total</th></tr></thead><tbody className="divide-y divide-slate-100">{categoryGroups.map((group) => <tr key={group.categoryId || group.categoryName}><td className="px-5 py-3 font-bold text-slate-800">{group.categoryName}</td><td className="px-5 py-3">{group.debit.count}</td><td className="px-5 py-3 font-semibold text-rose-700">{formatCurrency(group.debit.total)}</td><td className="px-5 py-3">{group.credit.count}</td><td className="px-5 py-3 font-semibold text-emerald-700">{formatCurrency(group.credit.total)}</td></tr>)}{!categoryGroups.length && <tr><td colSpan="5" className="px-5 py-10 text-center text-slate-400">Categorize transactions to build the summary.</td></tr>}</tbody></table></div></section>
     </div>}
 
-    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-slate-800">Transaction Review</h2><p className="text-xs text-slate-500">Assign or change a category on every imported row.</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => downloadTransactions("ALL", auditRows.filter((row) => selectedTransactionIds.includes(row._id)))} disabled={!selectedTransactionIds.length} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"><Download size={14} /> Download selected</button><button type="button" onClick={() => { const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)); if (allVisibleSelected) { setSelectedTransactionIds((current) => current.filter((id) => !visibleRows.some((row) => row._id === id))); return; } setSelectedTransactionIds((current) => Array.from(new Set([...current, ...visibleRows.map((row) => row._id)]))); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">{visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)) ? "Clear visible" : "Select all visible"}</button>{[["ALL", `All (${(overview.rows || []).length})`], ["IDENTIFIED", `Categorized (${(overview.rows || []).filter((row) => row.categoryId).length})`], ["UNIDENTIFIED", `Uncategorized (${(overview.rows || []).filter((row) => !row.categoryId).length})`]].map(([value, label]) => <button key={value} onClick={() => setRowView(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${rowView === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>)}</div></div><div className="max-h-[620px] overflow-auto"><table className="min-w-[1050px] w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-3"><input type="checkbox" checked={visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id))} onChange={() => { const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)); if (allVisibleSelected) { setSelectedTransactionIds((current) => current.filter((id) => !visibleRows.some((row) => row._id === id))); return; } setSelectedTransactionIds((current) => Array.from(new Set([...current, ...visibleRows.map((row) => row._id)]))); }} className="h-4 w-4 rounded border-slate-300" /></th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Direction</th><th className="px-4 py-3 text-right">Amount</th><th className="px-4 py-3">Identifier</th><th className="px-4 py-3">Category</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleRows.map((row) => { const isSelected = selectedTransactionIds.includes(row._id); return <tr key={row._id} className={`${!row.categoryId ? "bg-amber-50/50" : "hover:bg-slate-50"} ${isSelected ? "ring-1 ring-blue-200" : ""}`}><td className="px-3 py-3"><input type="checkbox" checked={isSelected} onChange={() => setSelectedTransactionIds((current) => current.includes(row._id) ? current.filter((id) => id !== row._id) : [...current, row._id])} className="h-4 w-4 rounded border-slate-300" /></td><td className="whitespace-nowrap px-4 py-3">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="max-w-[390px] px-4 py-3 font-medium text-slate-800">{row.description}</td><td className={`px-4 py-3 text-xs font-bold ${row.direction === "DEBIT" ? "text-rose-700" : "text-emerald-700"}`}>{row.direction}</td><td className="px-4 py-3 text-right font-bold">{formatCurrency(row.amount)}</td><td className="px-4 py-3 text-xs text-slate-500">{row.identifierName || "-"}</td><td className="px-4 py-3"><select value={row.categoryId || ""} onChange={(event) => updateTransactionCategory.mutate({ id: row._id, companyId, categoryId: event.target.value })} disabled={updateTransactionCategory.isPending} className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold"><option value="">Uncategorized</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.name}</option>)}</select></td></tr>; })}{!visibleRows.length && <tr><td colSpan="7" className="px-5 py-10 text-center text-slate-400">No imported transactions for this financial year.</td></tr>}</tbody></table></div></section>
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm"><div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="font-bold text-slate-800">Transaction Review</h2><p className="text-xs text-slate-500">Assign or change a category on every imported row.</p></div><div className="flex flex-wrap items-center gap-2"><button type="button" onClick={() => downloadTransactions("ALL", auditRows.filter((row) => selectedTransactionIds.includes(row._id)))} disabled={!selectedTransactionIds.length} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"><Download size={14} /> Download selected</button><button type="button" onClick={() => { const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)); if (allVisibleSelected) { setSelectedTransactionIds((current) => current.filter((id) => !visibleRows.some((row) => row._id === id))); return; } setSelectedTransactionIds((current) => Array.from(new Set([...current, ...visibleRows.map((row) => row._id)]))); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">{visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)) ? "Clear visible" : "Select all visible"}</button>{[["ALL", `All (${rowCounts.all})`], ["IDENTIFIED", `Categorized (${rowCounts.categorized})`], ["UNIDENTIFIED", `Uncategorized (${rowCounts.uncategorized})`]].map(([value, label]) => <button key={value} onClick={() => setRowView(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${rowView === value ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>)}</div></div><div className="max-h-[620px] overflow-auto"><table className="min-w-[1050px] w-full text-sm"><thead className="sticky top-0 bg-slate-50 text-left text-xs text-slate-500"><tr><th className="px-3 py-3"><input type="checkbox" checked={visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id))} onChange={() => { const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedTransactionIds.includes(row._id)); if (allVisibleSelected) { setSelectedTransactionIds((current) => current.filter((id) => !visibleRows.some((row) => row._id === id))); return; } setSelectedTransactionIds((current) => Array.from(new Set([...current, ...visibleRows.map((row) => row._id)]))); }} className="h-4 w-4 rounded border-slate-300" /></th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Description</th><th className="px-4 py-3">Direction</th><th className="px-4 py-3 text-right">Amount</th><th className="px-4 py-3">Identifier</th><th className="px-4 py-3">Category</th></tr></thead><tbody className="divide-y divide-slate-100">{visibleRows.map((row) => { const isSelected = selectedTransactionIds.includes(row._id); return <tr key={row._id} className={`${!row.categoryId ? "bg-amber-50/50" : "hover:bg-slate-50"} ${isSelected ? "ring-1 ring-blue-200" : ""}`}><td className="px-3 py-3"><input type="checkbox" checked={isSelected} onChange={() => setSelectedTransactionIds((current) => current.includes(row._id) ? current.filter((id) => id !== row._id) : [...current, row._id])} className="h-4 w-4 rounded border-slate-300" /></td><td className="whitespace-nowrap px-4 py-3">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="max-w-[390px] px-4 py-3 font-medium text-slate-800">{row.description}</td><td className={`px-4 py-3 text-xs font-bold ${row.direction === "DEBIT" ? "text-rose-700" : "text-emerald-700"}`}>{row.direction}</td><td className="px-4 py-3 text-right font-bold">{formatCurrency(row.amount)}</td><td className="px-4 py-3 text-xs text-slate-500">{row.identifierName || "-"}</td><td className="px-4 py-3"><select value={row.categoryId || ""} onChange={(event) => handleTransactionCategoryChange(row, event)} disabled={updateTransactionCategory.isPending} className="min-w-[180px] rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-semibold"><option value="">Uncategorized</option>{categories.map((category) => <option key={category._id} value={category._id}>{category.name}</option>)}</select></td></tr>; })}{!visibleRows.length && <tr><td colSpan="7" className="px-5 py-10 text-center text-slate-400">No imported transactions for this financial year.</td></tr>}</tbody></table></div></section>
 
-    <section className="rounded-2xl border border-rose-200 bg-white shadow-sm"><div className="border-b border-rose-100 bg-rose-50 px-5 py-4"><h2 className="font-bold text-rose-900">Uncategorized Transactions</h2><p className="text-xs text-rose-700">Rows remain here until a category is selected. Categorizing a row moves it into the categorized view and summary.</p></div><div className="max-h-[360px] overflow-auto"><table className="min-w-[720px] w-full text-sm"><thead className="sticky top-0 bg-white text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Debit</th><th className="px-5 py-3">Credit</th></tr></thead><tbody className="divide-y divide-slate-100">{(overview.unmatched || []).map((row) => <tr key={row._id}><td className="px-5 py-3 whitespace-nowrap">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="px-5 py-3 font-medium">{row.description}</td><td className="px-5 py-3 text-rose-700">{formatCurrency(row.debitAmount)}</td><td className="px-5 py-3 text-emerald-700">{formatCurrency(row.creditAmount)}</td></tr>)}{!overview.unmatched?.length && <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">All rows are categorized.</td></tr>}</tbody></table></div></section>
+    {/* <section className="rounded-2xl border border-rose-200 bg-white shadow-sm"><div className="border-b border-rose-100 bg-rose-50 px-5 py-4"><h2 className="font-bold text-rose-900">Uncategorized Transactions</h2><p className="text-xs text-rose-700">Rows remain here until a category is selected. Categorizing a row moves it into the categorized view and summary.</p></div><div className="max-h-[360px] overflow-auto"><table className="min-w-[720px] w-full text-sm"><thead className="sticky top-0 bg-white text-left text-xs text-slate-500"><tr><th className="px-5 py-3">Date</th><th className="px-5 py-3">Description</th><th className="px-5 py-3">Debit</th><th className="px-5 py-3">Credit</th></tr></thead><tbody className="divide-y divide-slate-100">{(overview.unmatched || []).map((row) => <tr key={row._id}><td className="px-5 py-3 whitespace-nowrap">{new Date(row.transactionDate).toLocaleDateString("en-IN")}</td><td className="px-5 py-3 font-medium">{row.description}</td><td className="px-5 py-3 text-rose-700">{formatCurrency(row.debitAmount)}</td><td className="px-5 py-3 text-emerald-700">{formatCurrency(row.creditAmount)}</td></tr>)}{!overview.unmatched?.length && <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">All rows are categorized.</td></tr>}</tbody></table></div></section> */}
 
-    {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="mt-1 text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows · {preview.transactions.filter((row) => row.duplicate).length} duplicates will be skipped</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[820px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-left">Import status</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className={`border-t ${row.duplicate ? "bg-amber-50" : ""}`}><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td><td className={`px-4 py-2 font-semibold ${row.duplicate ? "text-amber-700" : "text-emerald-700"}`}>{row.duplicate ? row.duplicateReason : "Will import"}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Cancel</button><button onClick={confirmUpload} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"><FileSpreadsheet size={15} /> Import non-duplicates</button></div></div></div>}
+    {preview && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-4xl rounded-2xl bg-white shadow-2xl"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="font-bold text-slate-900">Preview import</h2><p className="mt-1 text-xs text-slate-500">{preview.fileName} · {preview.transactions.length} rows · {preview.transactions.filter((row) => row.duplicate).length} duplicates will be skipped</p></div><button onClick={() => setPreview(null)}><X /></button></div><div className="max-h-[60vh] overflow-auto"><table className="min-w-[820px] w-full text-xs"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-4 py-3 text-left">Row</th><th className="px-4 py-3 text-left">Date</th><th className="px-4 py-3 text-left">Description</th><th className="px-4 py-3 text-right">Debit</th><th className="px-4 py-3 text-right">Credit</th><th className="px-4 py-3 text-left">Import status</th></tr></thead><tbody>{preview.transactions.map((row) => <tr key={row.rowNumber} className={`border-t ${row.duplicate ? "bg-amber-50" : ""}`}><td className="px-4 py-2">{row.rowNumber}</td><td className="px-4 py-2">{row.transactionDate ? new Date(row.transactionDate).toLocaleDateString("en-IN") : "Invalid"}</td><td className="max-w-[360px] truncate px-4 py-2">{row.description || "Missing"}</td><td className="px-4 py-2 text-right">{formatCurrency(row.debitAmount)}</td><td className="px-4 py-2 text-right">{formatCurrency(row.creditAmount)}</td><td className={`px-4 py-2 font-semibold ${row.duplicate ? "text-amber-700" : "text-emerald-700"}`}>{row.duplicate ? row.duplicateReason : "Will import"}</td></tr>)}</tbody></table></div><div className="flex justify-end gap-2 border-t px-5 py-4"><button onClick={() => setPreview(null)} className="rounded-xl border px-4 py-2 text-sm">Continue editing</button><button type="button" onClick={confirmUpload} disabled={uploadMutation.isPending} className="inline-flex items-center gap-2 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save instance</button></div></div></div>}
   </div>;
 }
 

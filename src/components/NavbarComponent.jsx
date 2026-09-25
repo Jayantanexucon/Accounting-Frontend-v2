@@ -133,10 +133,6 @@ export default function NavbarComponent() {
   };
 
   useEffect(() => {
-    setChoose(user?.company?._id);
-  }, [user?.company?._id]);
-
-  useEffect(() => {
     const mainContent = document.getElementById("main-content");
     if (mainContent) {
       mainContent.style.marginLeft = isCollapsed ? "5rem" : "16rem";
@@ -185,7 +181,7 @@ export default function NavbarComponent() {
     return finalNavItems;
   };
 
-  const links = useMemo(() => buildNavigation(), [entities, user?.permissions, user?.role, user?.company?.owner]);
+  const links = buildNavigation();
 
   if (!user || !Array.isArray(entities)) {
     return (
@@ -295,7 +291,11 @@ export default function NavbarComponent() {
                       className="overflow-hidden ml-9 mt-1 border-l border-white/10"
                     >
                       {(link.name === "Accounting"
-                        ? [...link.options, { _id: "accounting-master-data", name: "Accounting Master Data", navLink: "/accounting/master-data", key: "master-control", alwaysShow: true }]
+                        ? [
+                            ...link.options.filter((option) => !(option.navLink === "/accounting/expense-audit" || option.key === "expense-audit")),
+                            { _id: "accounting-expense-audit", name: "Expense Audit", navLink: "/accounting/expense-audit", key: "expense-audit", alwaysShow: true },
+                            { _id: "accounting-master-data", name: "Accounting Master Data", navLink: "/accounting/master-data", key: "master-control", alwaysShow: true },
+                          ]
                         : link.options
                       ).map((child, idx) => (
                         <NavLink
@@ -440,24 +440,6 @@ export default function NavbarComponent() {
           </div>
         )}
 
-        <NavLink
-          to="/accounting/expense-audit"
-          className={({ isActive }) =>
-            `group flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 mb-1 ${
-              isActive
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
-                : "text-gray-400 hover:bg-white/5 hover:text-white"
-            }`
-          }
-          title={isCollapsed ? "Expense Audit" : ""}
-        >
-          <div className={`p-1.5 rounded-lg transition-colors shrink-0 ${isCollapsed ? "mx-auto" : "group-hover:bg-white/5"}`}>
-            <ClipboardCheck strokeWidth={1.5} size={20} />
-          </div>
-          {!isCollapsed && <span className="text-sm font-medium flex-1">Expense Audit</span>}
-        </NavLink>
-
-        
       </nav> 
       
 
