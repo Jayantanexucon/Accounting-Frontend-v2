@@ -71,3 +71,8 @@ export const checkoutAuditVersionApi = async ({ companyId, financialYearEnding, 
   const { data } = await API.post(`/accounting/expense-audit/versions/${companyId}/${financialYearEnding}/checkout/${versionId}`);
   return data;
 };
+
+export const deleteAuditVersionApi = async ({ companyId, financialYearEnding, versionId }) => {
+  const { data } = await API.delete(`/accounting/expense-audit/versions/${companyId}/${financialYearEnding}/${versionId}`);
+  return data;
+};

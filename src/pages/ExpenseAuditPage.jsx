@@ -12,6 +12,7 @@ import {
   createAuditCategoryApi,
   deleteAuditIdentifierApi,
   deleteAuditCategoryApi,
+  deleteAuditVersionApi,
   getExpenseAuditOverviewApi,
   listAuditCategoriesApi,
   listAuditIdentifiersApi,
@@ -223,6 +224,14 @@ export default function ExpenseAuditPage() {
       toast.success("Upload instance opened");
     },
     onError: (error) => toast.error(error?.response?.data?.message || "Could not restore this version"),
+  });
+  const deleteVersionMutation = useMutation({
+    mutationFn: deleteAuditVersionApi,
+    onSuccess: () => {
+      invalidate();
+      toast.success("Upload instance deleted");
+    },
+    onError: (error) => toast.error(error?.response?.data?.message || "Could not delete this version"),
   });
 
   const getVersionDisplayName = (version) => version?.label || version?.fileName || `Upload ${version?.versionNumber || "new"}`;
@@ -652,25 +661,42 @@ export default function ExpenseAuditPage() {
           const isCurrent = Boolean(version.active);
           const versionName = getVersionDisplayName(version);
           return (
-            <button
+            <div
               key={version._id}
-              type="button"
-              onClick={() => !isCurrent && checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })}
-              disabled={isCurrent || checkoutVersionMutation.isPending}
-              className={`w-full rounded-2xl border p-3 text-left transition ${isCurrent ? "border-violet-400 bg-violet-100/80" : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/60"} ${isCurrent ? "cursor-default" : "cursor-pointer"}`}
+              className={`w-full rounded-2xl border p-3 text-left transition ${isCurrent ? "border-violet-400 bg-violet-100/80" : "border-slate-200 bg-white hover:border-violet-300 hover:bg-violet-50/60"}`}
             >
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => !isCurrent && checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id })}
+                  disabled={isCurrent || checkoutVersionMutation.isPending}
+                  className={`min-w-0 flex-1 text-left ${isCurrent ? "cursor-default" : "cursor-pointer"}`}
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{version.label ? "Saved instance" : `Upload ${version.versionNumber || ""}`}</span>
                     {isCurrent && <span className="rounded-full bg-violet-500 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">Current</span>}
                   </div>
                   <p className="mt-1 truncate text-sm font-bold text-slate-800">{versionName}</p>
                   <p className="mt-1 text-[11px] text-slate-500">{formatVersionTimestamp(version.createdAt)} · {version.summary?.totalRows || 0} rows</p>
+                </button>
+                <div className="flex items-center gap-2">
+                  {!isCurrent && <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Open</span>}
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (!window.confirm(`Delete this upload instance, "${versionName}"? This will remove only this saved checkpoint.`)) return;
+                      deleteVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: version._id });
+                    }}
+                    className="rounded-lg border border-rose-200 bg-white p-2 text-rose-600 transition hover:bg-rose-50"
+                    title="Delete this instance"
+                    aria-label={`Delete ${versionName}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-                {!isCurrent && <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet-700">Open</span>}
               </div>
-            </button>
+            </div>
           );
         })}
         {!versions.length && <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-400">No upload checkpoints yet for this financial year.</div>}
