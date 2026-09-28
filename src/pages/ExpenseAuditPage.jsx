@@ -133,6 +133,8 @@ export default function ExpenseAuditPage() {
   const [draftUpload, setDraftUpload] = useState(null);
   const [saveNameModalOpen, setSaveNameModalOpen] = useState(false);
   const [saveNameDraft, setSaveNameDraft] = useState("");
+  const [entryView, setEntryView] = useState("landing");
+  const [selectedArchiveVersionId, setSelectedArchiveVersionId] = useState("");
   const showLegacyMasterData = import.meta.env.VITE_SHOW_LEGACY_AUDIT_MASTER_DATA === "true";
 
   const draftStorageKey = useMemo(() => `expense-audit-draft-${companyId || "unknown"}-${selectedFinancialYearEnding || "fy"}`, [companyId, selectedFinancialYearEnding]);
@@ -190,8 +192,18 @@ export default function ExpenseAuditPage() {
     queryFn: () => listAuditVersionsApi(companyId, selectedFinancialYearEnding),
     enabled: Boolean(companyId),
   });
-  const versions = versionsQuery.data?.data || [];
-  const activeVersion = versionsQuery.data?.data?.find((version) => version.active) || null;
+  const versions = useMemo(() => versionsQuery.data?.data || [], [versionsQuery.data?.data]);
+  const activeVersion = useMemo(() => versions.find((version) => version.active) || null, [versions]);
+  useEffect(() => {
+    if (!versions.length) {
+      setSelectedArchiveVersionId("");
+      return;
+    }
+    if (!selectedArchiveVersionId) {
+      setSelectedArchiveVersionId(activeVersion?._id || versions[versions.length - 1]._id);
+    }
+  }, [activeVersion, selectedArchiveVersionId, versions]);
+  const selectedArchiveVersion = versions.find((version) => version._id === selectedArchiveVersionId) || activeVersion || null;
 
   const identifiersQuery = useQuery({ queryKey: ["audit-identifiers", companyId], queryFn: () => listAuditIdentifiersApi(companyId), enabled: Boolean(companyId) });
   const categoriesQuery = useQuery({ queryKey: ["audit-categories", companyId], queryFn: () => listAuditCategoriesApi(companyId), enabled: Boolean(companyId) });
@@ -610,12 +622,108 @@ export default function ExpenseAuditPage() {
         </div>
       </div>
     )}
-    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div><p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400">Accounting control</p><h1 className="mt-1 text-3xl font-bold text-slate-900">Expense Audit</h1><p className="mt-2 max-w-3xl text-sm text-slate-500">Import statement rows, match descriptions to your identifiers, and review debit and credit totals by financial year.</p></div>
-        <div className="flex flex-wrap gap-2"><select value={selectedFinancialYearEnding} onChange={(event) => setSelectedFinancialYearEnding(event.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold">{financialYearOptions.map((endingYear) => <option key={endingYear} value={endingYear}>{getFinancialYearInfo(endingYear).label}</option>)}</select><label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Upload size={15} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readFile} /></label></div>
+    <div className="rounded-3xl border border-violet-200 bg-gradient-to-br from-violet-50 via-white to-slate-50 p-6 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.32em] text-violet-600">Accounting control</p>
+          <h1 className="mt-2 text-3xl font-bold text-slate-900">Expense Audit</h1>
+          <p className="mt-2 max-w-3xl text-sm text-slate-500">Choose the upload flow or open an archived instance to review prior statement data.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <select value={selectedFinancialYearEnding} onChange={(event) => setSelectedFinancialYearEnding(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm">{financialYearOptions.map((endingYear) => <option key={endingYear} value={endingYear}>{getFinancialYearInfo(endingYear).label}</option>)}</select>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"><Upload size={15} /> Import Excel<input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={readFile} /></label>
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <button type="button" onClick={() => setEntryView("upload")} className={`rounded-2xl border p-5 text-left transition ${entryView === "upload" ? "border-violet-500 bg-violet-600 text-white shadow-lg shadow-violet-200" : "border-violet-200 bg-white text-slate-800 hover:border-violet-300 hover:bg-violet-50"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-700">
+              <Upload size={22} />
+            </div>
+            <span className="rounded-full border border-current/30 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Primary</span>
+          </div>
+          <h2 className="mt-4 text-2xl font-bold">Data Upload</h2>
+          <p className={`mt-2 text-sm ${entryView === "upload" ? "text-violet-100" : "text-slate-500"}`}>Import a fresh bank statement, review each row, and save it as a new version.</p>
+        </button>
+
+        <button type="button" onClick={() => setEntryView("archive")} className={`rounded-2xl border p-5 text-left transition ${entryView === "archive" ? "border-sky-500 bg-sky-600 text-white shadow-lg shadow-sky-200" : "border-sky-200 bg-white text-slate-800 hover:border-sky-300 hover:bg-sky-50"}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+              <FileSpreadsheet size={22} />
+            </div>
+            <span className="rounded-full border border-current/30 px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Archive</span>
+          </div>
+          <h2 className="mt-4 text-2xl font-bold">Archive Data</h2>
+          <p className={`mt-2 text-sm ${entryView === "archive" ? "text-sky-100" : "text-slate-500"}`}>Open a saved upload from the archive list and continue from the right checkpoint.</p>
+        </button>
       </div>
     </div>
+
+    <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex flex-wrap gap-2">
+        {[
+          { value: "landing", label: "Landing" },
+          { value: "upload", label: "Data Upload" },
+          { value: "archive", label: "Archive Data" },
+        ].map((view) => (
+          <button
+            key={view.value}
+            type="button"
+            onClick={() => setEntryView(view.value)}
+            className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${entryView === view.value ? "bg-slate-900 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}
+          >
+            {view.label}
+          </button>
+        ))}
+      </div>
+    </div>
+
+    {entryView === "archive" && (
+      <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">Archive data</h2>
+            <p className="mt-1 text-sm text-slate-600">Choose a saved checkpoint from the dropdown to open the archived version.</p>
+          </div>
+          <div className="flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-center">
+            <select
+              value={selectedArchiveVersionId}
+              onChange={(event) => setSelectedArchiveVersionId(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-700 shadow-sm focus:border-sky-400 focus:outline-none focus:ring-4 focus:ring-sky-100"
+            >
+              {!versions.length && <option value="">No saved archive yet</option>}
+              {versions.map((version) => <option key={version._id} value={version._id}>{getVersionDisplayName(version)}</option>)}
+            </select>
+            <button
+              type="button"
+              onClick={() => selectedArchiveVersionId && checkoutVersionMutation.mutate({ companyId, financialYearEnding: selectedFinancialYearEnding, versionId: selectedArchiveVersionId })}
+              disabled={!selectedArchiveVersionId || checkoutVersionMutation.isPending}
+              className="rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-sky-300"
+            >
+              Open archive
+            </button>
+          </div>
+        </div>
+
+        {selectedArchiveVersion && (
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Instance</p>
+              <p className="mt-2 text-base font-bold text-slate-800">{getVersionDisplayName(selectedArchiveVersion)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Saved</p>
+              <p className="mt-2 text-base font-bold text-slate-800">{formatVersionTimestamp(selectedArchiveVersion.createdAt)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Rows</p>
+              <p className="mt-2 text-base font-bold text-slate-800">{selectedArchiveVersion.summary?.totalRows || 0}</p>
+            </div>
+          </div>
+        )}
+      </section>
+    )}
 
     <div className="grid gap-4 md:grid-cols-4"><Metric label="Rows" value={rowCounts.all} /><Metric label="Categorized" value={rowCounts.categorized} /><Metric label="Uncategorized" value={rowCounts.uncategorized} tone="rose" /><Metric label="Net movement (all rows)" value={formatCurrency(totals.credit - totals.debit)} /></div>
 
